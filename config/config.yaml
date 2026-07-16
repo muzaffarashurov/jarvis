@@ -1,0 +1,20 @@
+app:
+  name: "JARVIS"
+  tagline: "Modular AI Operating System"
+  version: "0.1.0-alpha"
+
+logging:
+  level: "INFO"
+  retention_days: 30
+
+paths:
+  logs: "logs"
+  data_input: "data/input"
+  data_output: "data/output"
+  data_cache: "data/cache"
+  data_database: "data/database"
+  knowledge: "knowledge"
+  prompts: "prompts"
+
+orchestrator:
+  skills_enabled: []

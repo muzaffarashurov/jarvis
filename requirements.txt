@@ -1,8 +1,9 @@
 python-dotenv
-PyYAML
+PyYAML>=6.0.1
 rich
-loguru
-
+loguru>=0.7.2
+pyfiglet>=1.0.2
+colorama>=0.4.6
 openai
 
 python-telegram-bot

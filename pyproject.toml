@@ -1,0 +1,39 @@
+[project]
+
+name = "jarvis"
+
+version = "0.1.0-alpha"
+
+description = "Modular AI Operating System"
+
+authors = [
+    {name = "Muzaffar Ashurov"}
+]
+
+requires-python = ">=3.12"
+
+readme = "README.md"
+
+license = {text = "MIT"}
+
+dependencies = []
+
+[tool.pytest.ini_options]
+
+pythonpath = ["src"]
+
+testpaths = ["tests"]
+
+[tool.black]
+
+line-length = 88
+
+target-version = ["py312"]
+
+[tool.isort]
+
+profile = "black"
+
+[tool.ruff]
+
+line-length = 88

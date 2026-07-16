@@ -9,10 +9,13 @@ from colorama import Style
 from colorama import init as colorama_init
 from loguru import logger
 
+from src.core.command_router import CommandRouter
 from src.core.config import Config, ConfigError
 from src.core.events import EventBus
 from src.core.logger import Logger
 from src.core.orchestrator import Orchestrator
+from src.core.shell import InteractiveShell
+from src.skills.system.skill import SystemModule
 from src.utils.constants import (
     APP_NAME,
     APP_TAGLINE,
@@ -57,6 +60,8 @@ class Bootstrap:
         self._config: Config | None = None
         self._event_bus = EventBus()
         self._orchestrator: Orchestrator | None = None
+        self._command_router: CommandRouter | None = None
+        self._shell: InteractiveShell | None = None
         colorama_init(autoreset=True)
 
     def run(self) -> Orchestrator:
@@ -82,12 +87,31 @@ class Bootstrap:
         self._orchestrator = Orchestrator(config=self._config, event_bus=self._event_bus)
         self._orchestrator.start()
 
+        self._command_router = self._build_command_router(self._orchestrator)
+        self._shell = InteractiveShell(router=self._command_router)
+
         print("Ready.")
         print()
         print("Jarvis is running.")
         logger.info("Jarvis is running.")
+        print()
 
         return self._orchestrator
+
+    @staticmethod
+    def _build_command_router(orchestrator: Orchestrator) -> CommandRouter:
+        """Build and populate the CommandRouter with built-in modules.
+
+        Args:
+            orchestrator: The running Orchestrator, passed to modules
+                that need to report on application state.
+
+        Returns:
+            A CommandRouter with all built-in command modules registered.
+        """
+        router = CommandRouter()
+        router.register(SystemModule(orchestrator=orchestrator))
+        return router
 
     def _create_required_directories(self) -> None:
         """Create all directories required by the application at runtime.
@@ -211,3 +235,22 @@ class Bootstrap:
             The Orchestrator instance, or None if `run()` has not completed.
         """
         return self._orchestrator
+
+    @property
+    def command_router(self) -> CommandRouter | None:
+        """Return the populated command router, if available.
+
+        Returns:
+            The CommandRouter instance, or None if `run()` has not completed.
+        """
+        return self._command_router
+
+    @property
+    def shell(self) -> InteractiveShell | None:
+        """Return the interactive shell, ready to run.
+
+        Returns:
+            The InteractiveShell instance, or None if `run()` has not
+            completed.
+        """
+        return self._shell

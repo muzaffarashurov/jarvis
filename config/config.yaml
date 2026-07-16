@@ -6,6 +6,7 @@ app:
 logging:
   level: "INFO"
   retention_days: 30
+  console_enabled: false
 
 paths:
   logs: "logs"

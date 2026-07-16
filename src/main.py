@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-import time
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -15,23 +14,22 @@ from loguru import logger  # noqa: E402
 from src.bootstrap import Bootstrap  # noqa: E402
 from src.core.config import ConfigError  # noqa: E402
 
-IDLE_POLL_SECONDS = 1.0
-
 
 def main() -> int:
-    """Bootstrap and run the Jarvis application.
+    """Bootstrap Jarvis and hand control to the interactive shell.
 
-    Performs the full bootstrap sequence, then keeps the process alive
-    while the orchestrator reports itself as running. The loop exits
-    cleanly on Ctrl+C or when the orchestrator stops itself.
+    Runs the full startup sequence (configuration, logger, orchestrator,
+    command router), then starts the InteractiveShell, which owns the
+    application's main loop until the user exits, presses Ctrl+C, or
+    sends EOF.
 
     Returns:
-        Process exit code. 0 on success, non-zero on failure.
+        Process exit code. 0 on success, non-zero on startup failure.
     """
     bootstrap = Bootstrap()
 
     try:
-        orchestrator = bootstrap.run()
+        bootstrap.run()
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 1
@@ -43,14 +41,13 @@ def main() -> int:
         print(f"Unexpected error during startup: {exc}", file=sys.stderr)
         return 1
 
-    try:
-        while orchestrator.is_running:
-            time.sleep(IDLE_POLL_SECONDS)
-    except KeyboardInterrupt:
-        logger.info("Shutdown requested via keyboard interrupt.")
-        print("\nShutting down Jarvis...")
-        orchestrator.stop()
+    shell = bootstrap.shell
+    if shell is None:
+        logger.error("Bootstrap completed without producing an interactive shell.")
+        print("Internal error: interactive shell was not initialized.", file=sys.stderr)
+        return 1
 
+    shell.run()
     return 0
 
 

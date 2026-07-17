@@ -1,7 +1,7 @@
 """Command routing infrastructure for the Jarvis interactive shell."""
 
 from __future__ import annotations
-
+import shlex
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -92,6 +92,17 @@ class CommandRouter:
         self._modules[key] = module
         logger.debug(f"Registered command module: '{module.name}'")
 
+
+    def register_modules(self, modules: list[CommandModule]) -> None:
+        """
+        Register multiple command modules.
+
+        Args:
+            modules: List of CommandModule instances.
+        """
+        for module in modules:
+            self.register(module)
+
     def dispatch(self, raw_input: str) -> CommandResult:
         """Parse and execute a raw command line entered by the user.
 
@@ -106,7 +117,7 @@ class CommandRouter:
             A CommandResult describing the outcome of execution. Returns
             an empty, unsuccessful result for blank input.
         """
-        tokens = raw_input.strip().split()
+        tokens = shlex.split(raw_input.strip())
         if not tokens:
             return CommandResult(success=False, message="")
 

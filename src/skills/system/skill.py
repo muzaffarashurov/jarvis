@@ -15,6 +15,7 @@ from typing import Callable
 from loguru import logger
 
 from src.core.command_router import CommandResult
+from src.core.execution.engine import ExecutionEngine
 from src.core.orchestrator import Orchestrator
 from src.utils.constants import APP_NAME, APP_VERSION
 
@@ -24,7 +25,10 @@ HELP_TEXT: str = (
     "system version\n"
     "system status\n"
     "system clear\n"
-    "system exit"
+    "system exit\n"
+    "system run <target>\n"
+    "system processes\n"
+    "system stop <id>"
 )
 
 ActionHandler = Callable[[list[str]], CommandResult]
@@ -41,20 +45,26 @@ class SystemModule:
         - Request graceful shell termination (exit).
     """
 
-    def __init__(self, orchestrator: Orchestrator) -> None:
+    def __init__(self, orchestrator: Orchestrator, execution_engine: ExecutionEngine) -> None:
         """Initialize the SystemModule.
 
         Args:
             orchestrator: The running Orchestrator, used to report status
                 information such as the number of loaded skills.
+            execution_engine: The engine used to run, list, and stop
+                external targets (programs, scripts, files, and URLs).
         """
         self._orchestrator = orchestrator
+        self._execution_engine = execution_engine
         self._actions: dict[str, ActionHandler] = {
             "help": self._help,
             "version": self._version,
             "status": self._status,
             "clear": self._clear,
             "exit": self._exit,
+            "run": self._run,
+            "processes": self._processes,
+            "stop": self._stop,
         }
 
     @property
@@ -157,3 +167,58 @@ class SystemModule:
             a farewell message.
         """
         return CommandResult(success=True, message="Goodbye.", should_exit=True)
+
+    def _run(self, arguments: list[str]) -> CommandResult:
+        """Execute a target through the ExecutionEngine.
+
+        Args:
+            arguments: The target to run, e.g. ["notepad"] or
+                ['"D:\\Scripts\\hello.py"']. Multiple tokens (in the rare
+                case a quoted target was split) are rejoined with spaces.
+
+        Returns:
+            A CommandResult reflecting the ExecutionEngine's outcome.
+        """
+        if not arguments:
+            return CommandResult(success=False, message="Target not found.")
+
+        target = " ".join(arguments).strip().strip('"').strip("'")
+        result = self._execution_engine.run(target)
+        return CommandResult(success=result.success, message=result.message)
+
+    def _processes(self, arguments: list[str]) -> CommandResult:
+        """List processes started by Jarvis that are still running.
+
+        Args:
+            arguments: Unused.
+
+        Returns:
+            A CommandResult listing each tracked process's ID and name.
+        """
+        processes = self._execution_engine.list_processes()
+        if not processes:
+            return CommandResult(success=True, message="Running Processes\n\n(none)")
+
+        rows = "\n".join(f"{process_id}    {name}" for process_id, name in processes)
+        message = f"Running Processes\n\n{rows}"
+        return CommandResult(success=True, message=message)
+
+    def _stop(self, arguments: list[str]) -> CommandResult:
+        """Terminate a Jarvis-tracked process by ID.
+
+        Args:
+            arguments: A single-element list containing the process ID.
+
+        Returns:
+            A CommandResult reflecting the ExecutionEngine's outcome.
+        """
+        if not arguments:
+            return CommandResult(success=False, message="Invalid process id.")
+
+        try:
+            process_id = int(arguments[0])
+        except ValueError:
+            return CommandResult(success=False, message="Invalid process id.")
+
+        result = self._execution_engine.stop_process(process_id)
+        return CommandResult(success=result.success, message=result.message)

@@ -12,6 +12,12 @@ from loguru import logger
 from src.core.command_router import CommandRouter
 from src.core.config import Config, ConfigError
 from src.core.events import EventBus
+from src.core.execution.engine import ExecutionEngine
+from src.core.execution.executors.file_executor import FileExecutor
+from src.core.execution.executors.process_executor import ProcessExecutor
+from src.core.execution.executors.python_executor import PythonExecutor
+from src.core.execution.executors.url_executor import UrlExecutor
+from src.core.execution.process_registry import ProcessRegistry
 from src.core.logger import Logger
 from src.core.orchestrator import Orchestrator
 from src.core.shell import InteractiveShell
@@ -110,7 +116,21 @@ class Bootstrap:
             A CommandRouter with all built-in command modules registered.
         """
         router = CommandRouter()
-        router.register(SystemModule(orchestrator=orchestrator))
+
+        registry = ProcessRegistry()
+        execution_engine = ExecutionEngine(
+            executors=[
+                UrlExecutor(),
+                ProcessExecutor(registry),
+                PythonExecutor(registry),
+                FileExecutor(),
+            ],
+            registry=registry,
+        )
+
+        router.register(SystemModule(orchestrator=orchestrator, execution_engine=execution_engine))
+        from src.modules.test_module import TestModule
+        router.register(TestModule())
         return router
 
     def _create_required_directories(self) -> None:

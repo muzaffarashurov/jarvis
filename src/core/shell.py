@@ -1,68 +1,67 @@
-"""Interactive command-line shell for Jarvis."""
+"""
+Jarvis Interactive Shell
+
+Core API v1.0
+
+This class is intentionally lightweight.
+
+Responsibilities:
+- Read user input
+- Delegate commands to CommandRouter
+- Display CommandResult
+- Handle graceful shutdown
+
+Business logic MUST NOT be implemented here.
+"""
 
 from __future__ import annotations
 
+from typing import Optional
+
 from loguru import logger
 
-from src.core.command_router import CommandRouter
-
-PROMPT: str = "jarvis> "
+from src.core.command_router import CommandRouter, CommandResult
 
 
 class InteractiveShell:
-    """Reads user commands and dispatches them through the CommandRouter.
+    """Interactive command-line shell."""
 
-    Responsibilities:
-        - Display the "jarvis>" prompt and read user input.
-        - Validate input before dispatching (ignore blank lines).
-        - Send commands to the CommandRouter and print the response.
-        - Loop until an exit command, EOF, or keyboard interrupt occurs.
-        - Perform a graceful shutdown in every termination scenario.
-    """
+    PROMPT = "jarvis> "
 
     def __init__(self, router: CommandRouter) -> None:
-        """Initialize the InteractiveShell.
-
-        Args:
-            router: The CommandRouter used to dispatch user commands.
-        """
         self._router = router
-        self._running = False
 
     def run(self) -> None:
-        """Run the read-execute-print loop until the shell terminates.
+        """Main shell loop."""
 
-        Handles KeyboardInterrupt (Ctrl+C) and EOF (Ctrl+D) as graceful
-        shutdown triggers rather than crashes. Application termination
-        is logged exactly once, regardless of how the loop exits.
-        """
-        self._running = True
         logger.info("Interactive shell started.")
 
-        try:
-            while self._running:
-                self._step()
-        except KeyboardInterrupt:
-            print("\n\nGoodbye.")
-        except EOFError:
-            print("\n\nGoodbye.")
-        finally:
-            self._running = False
-            logger.info("Application terminated")
+        while True:
+            try:
+                raw = input(self.PROMPT)
 
-    def _step(self) -> None:
-        """Read, validate, execute, and print the result of one command."""
-        raw_input = input(PROMPT)
+                result = self._router.dispatch(raw)
 
-        if not raw_input.strip():
+                self._display_result(result)
+
+                if result.should_exit:
+                    logger.info("Interactive shell stopped.")
+                    break
+
+            except KeyboardInterrupt:
+                print("\nUse 'system exit' to quit.")
+                continue
+
+            except EOFError:
+                print("\nGoodbye.")
+                break
+
+    @staticmethod
+    def _display_result(result: Optional[CommandResult]) -> None:
+        """Display command execution result."""
+
+        if result is None:
             return
 
-        result = self._router.dispatch(raw_input)
-
         if result.message:
-            print()
             print(result.message)
-            print()
-
-        if result.should_exit:
-            self._running = False

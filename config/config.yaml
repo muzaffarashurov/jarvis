@@ -19,3 +19,8 @@ paths:
 
 orchestrator:
   skills_enabled: []
+
+invoice:
+  # Path to the existing external Invoice Automation script.
+  # Jarvis only launches/monitors/stops this script; it never replaces it.
+  script: "D:/Automation/InvoiceAutomation_Console_Mode_v4.2.2.py"

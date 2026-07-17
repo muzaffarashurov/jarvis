@@ -21,6 +21,8 @@ from src.core.execution.process_registry import ProcessRegistry
 from src.core.logger import Logger
 from src.core.orchestrator import Orchestrator
 from src.core.shell import InteractiveShell
+from src.modules.invoice_module import InvoiceModule
+from src.services.invoice_service import InvoiceService
 from src.skills.system.skill import SystemModule
 from src.utils.constants import (
     APP_NAME,
@@ -93,7 +95,7 @@ class Bootstrap:
         self._orchestrator = Orchestrator(config=self._config, event_bus=self._event_bus)
         self._orchestrator.start()
 
-        self._command_router = self._build_command_router(self._orchestrator)
+        self._command_router = self._build_command_router(self._orchestrator, self._config)
         self._shell = InteractiveShell(router=self._command_router)
 
         print("Ready.")
@@ -105,12 +107,15 @@ class Bootstrap:
         return self._orchestrator
 
     @staticmethod
-    def _build_command_router(orchestrator: Orchestrator) -> CommandRouter:
+    def _build_command_router(orchestrator: Orchestrator, config: Config) -> CommandRouter:
         """Build and populate the CommandRouter with built-in modules.
 
         Args:
             orchestrator: The running Orchestrator, passed to modules
                 that need to report on application state.
+            config: The loaded application configuration, passed to
+                modules that need to resolve their own settings (e.g.
+                InvoiceModule's 'invoice.script').
 
         Returns:
             A CommandRouter with all built-in command modules registered.
@@ -129,6 +134,9 @@ class Bootstrap:
         )
 
         router.register(SystemModule(orchestrator=orchestrator, execution_engine=execution_engine))
+        router.register(
+            InvoiceModule(InvoiceService(config=config, execution_engine=execution_engine))
+        )
         from src.modules.test_module import TestModule
         router.register(TestModule())
         return router

@@ -21,7 +21,9 @@ from src.core.execution.process_registry import ProcessRegistry
 from src.core.logger import Logger
 from src.core.orchestrator import Orchestrator
 from src.core.shell import InteractiveShell
+from src.modules.fast_response_module import FastResponseModule
 from src.modules.invoice_module import InvoiceModule
+from src.services.fast_response_service import FastResponseService
 from src.services.invoice_service import InvoiceService
 from src.skills.system.skill import SystemModule
 from src.utils.constants import (
@@ -136,6 +138,11 @@ class Bootstrap:
         router.register(SystemModule(orchestrator=orchestrator, execution_engine=execution_engine))
         router.register(
             InvoiceModule(InvoiceService(config=config, execution_engine=execution_engine))
+        )
+        router.register(
+            FastResponseModule(
+                FastResponseService(config=config, execution_engine=execution_engine)
+            )
         )
         from src.modules.test_module import TestModule
         router.register(TestModule())

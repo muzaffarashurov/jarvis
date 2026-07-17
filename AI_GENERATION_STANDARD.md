@@ -561,6 +561,32 @@ Before generating code verify:
 
 ---
 
+## Startup Safety
+
+Never modify bootstrap sequence.
+
+Only register new modules.
+
+Never change startup order.
+
+Never replace initialization logic.
+
+---
+
+## Existing Dependencies Policy
+
+Never introduce a new third-party dependency unless explicitly requested.
+
+Always reuse existing libraries already used by the project.
+
+If a new dependency is required
+
+explain why.
+
+Never silently add new packages.
+
+---
+
 # Final Rule
 
 When in doubt

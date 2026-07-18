@@ -86,6 +86,11 @@ class Plugin:
             one is loaded.
         capabilities: Free-form capability tags describing what this
             plugin provides (e.g. "invoice.automation").
+        aliases: Short, alternate identifiers a `plugin` CLI command
+            may use in place of `id` (e.g. "invoice", "inv" for
+            "invoice_automation"). Resolved by PluginRegistry; never
+            used as the dependency key -- `dependencies` always refers
+            to canonical `id` values (EP-009.1).
         status: Current lifecycle state, owned by PluginRegistry.
     """
 
@@ -98,4 +103,5 @@ class Plugin:
     entry_point: Callable[[], PluginInterface] | None = None
     dependencies: tuple[str, ...] = field(default_factory=tuple)
     capabilities: tuple[str, ...] = field(default_factory=tuple)
+    aliases: tuple[str, ...] = field(default_factory=tuple)
     status: PluginStatus = PluginStatus.REGISTERED

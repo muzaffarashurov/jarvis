@@ -5,6 +5,11 @@ implements no plugin lifecycle logic of its own: loading, unloading,
 and reloading are always delegated to PluginLoader, and catalog data
 is always read from PluginRegistry, matching this project's Single
 Source of Truth rule.
+
+EP-009.1 adds id/alias resolution ahead of every lookup and lifecycle
+call, so `plugin info/load/unload/reload` accept either a plugin's
+canonical id or one of its declared aliases, plus a "Did you mean"
+suggestion when neither matches.
 """
 
 from __future__ import annotations
@@ -46,6 +51,9 @@ class PluginDoctorReport:
         dependencies_ok: Whether every plugin resolves a valid
             (cycle-free, fully-registered) load order.
         configuration_ok: Whether 'plugins.*' configuration loaded.
+        aliases_ok: Whether no id/alias is claimed by more than one
+            registered plugin (EP-009.1 "Duplicate aliases" /
+            "Duplicate plugins" / "Registry consistency").
         context_ok: Whether the PluginLoader's PluginContext exposes a
             configuration and execution engine reference.
     """
@@ -54,6 +62,7 @@ class PluginDoctorReport:
     loader_ok: bool
     dependencies_ok: bool
     configuration_ok: bool
+    aliases_ok: bool
     context_ok: bool
 
     @property
@@ -64,6 +73,7 @@ class PluginDoctorReport:
             and self.loader_ok
             and self.dependencies_ok
             and self.configuration_ok
+            and self.aliases_ok
             and self.context_ok
         )
 
@@ -72,6 +82,7 @@ class PluginService:
     """Coordinates plugin discovery, lifecycle, and diagnostics.
 
     Responsibilities:
+        - Resolve a plugin id or alias to a canonical plugin id.
         - Load / unload / reload a registered plugin.
         - List all registered plugins.
         - Return a single plugin's metadata for `plugin info`.
@@ -101,70 +112,76 @@ class PluginService:
         """Return a single registered plugin's metadata.
 
         Args:
-            plugin_id: The id of the plugin to look up.
+            plugin_id: The plugin's canonical id or one of its aliases.
 
         Returns:
             The matching Plugin.
 
         Raises:
-            PluginNotFoundError: If `plugin_id` is not registered.
+            PluginNotFoundError: If `plugin_id` matches no known
+                plugin, with a "Did you mean" suggestion when a close
+                match exists.
         """
-        return self._registry.get(plugin_id)
+        canonical_id = self._resolve_id(plugin_id)
+        return self._registry.get(canonical_id)
 
     def running_plugins(self) -> list[Plugin]:
         """Return every plugin currently reporting RUNNING status."""
         return [plugin for plugin in self._registry.list() if plugin.status == PluginStatus.RUNNING]
 
     def load_plugin(self, plugin_id: str) -> CommandResult:
-        """Load a plugin by id, resolving dependencies first.
+        """Load a plugin by id or alias, resolving dependencies first.
 
         Args:
-            plugin_id: The plugin to load.
+            plugin_id: The plugin's canonical id or one of its aliases.
 
         Returns:
             A CommandResult describing the outcome.
         """
         try:
-            self._loader.load(plugin_id)
+            canonical_id = self._resolve_id(plugin_id)
+            self._loader.load(canonical_id)
         except _LOAD_ERRORS as exc:
             logger.error(f"Failed to load plugin '{plugin_id}': {exc}")
             return CommandResult(success=False, message=str(exc))
 
-        return CommandResult(success=True, message=f"Plugin '{plugin_id}' loaded.")
+        return CommandResult(success=True, message=f"Plugin '{canonical_id}' loaded.")
 
     def unload_plugin(self, plugin_id: str) -> CommandResult:
-        """Unload a plugin by id.
+        """Unload a plugin by id or alias.
 
         Args:
-            plugin_id: The plugin to unload.
+            plugin_id: The plugin's canonical id or one of its aliases.
 
         Returns:
             A CommandResult describing the outcome.
         """
         try:
-            self._loader.unload(plugin_id)
+            canonical_id = self._resolve_id(plugin_id)
+            self._loader.unload(canonical_id)
         except (PluginNotFoundError, PluginInitializationError) as exc:
             logger.error(f"Failed to unload plugin '{plugin_id}': {exc}")
             return CommandResult(success=False, message=str(exc))
 
-        return CommandResult(success=True, message=f"Plugin '{plugin_id}' unloaded.")
+        return CommandResult(success=True, message=f"Plugin '{canonical_id}' unloaded.")
 
     def reload_plugin(self, plugin_id: str) -> CommandResult:
-        """Reload a plugin by id (unload, then load).
+        """Reload a plugin by id or alias (unload, then load).
 
         Args:
-            plugin_id: The plugin to reload.
+            plugin_id: The plugin's canonical id or one of its aliases.
 
         Returns:
             A CommandResult describing the outcome.
         """
         try:
-            self._loader.reload(plugin_id)
+            canonical_id = self._resolve_id(plugin_id)
+            self._loader.reload(canonical_id)
         except _LOAD_ERRORS as exc:
             logger.error(f"Failed to reload plugin '{plugin_id}': {exc}")
             return CommandResult(success=False, message=str(exc))
 
-        return CommandResult(success=True, message=f"Plugin '{plugin_id}' reloaded.")
+        return CommandResult(success=True, message=f"Plugin '{canonical_id}' reloaded.")
 
     def run_doctor(self) -> PluginDoctorReport:
         """Run the `plugin doctor` readiness checks."""
@@ -173,6 +190,7 @@ class PluginService:
             loader_ok=self._loader is not None,
             dependencies_ok=self._validate_dependencies(),
             configuration_ok=self._config.get("plugins.enabled") is not None,
+            aliases_ok=not self._registry.duplicate_aliases(),
             context_ok=self._loader.context_is_ready(),
         )
 
@@ -187,7 +205,9 @@ class PluginService:
         "Default Plugins" ("Do NOT rewrite their implementation.").
         Each has `entry_point=None`: PluginLoader treats that as a
         metadata-only plugin and performs lifecycle status bookkeeping
-        without invoking any implementation.
+        without invoking any implementation. EP-009.1 adds short
+        aliases so `plugin` commands can address each one without
+        typing its full id.
 
         Returns:
             The default Plugin catalog entries.
@@ -200,6 +220,7 @@ class PluginService:
                 description="External Invoice Automation script (EP-005).",
                 author="Jarvis",
                 capabilities=("invoice.automation",),
+                aliases=("invoice", "inv"),
             ),
             Plugin(
                 id="fast_response_board",
@@ -208,6 +229,7 @@ class PluginService:
                 description="Fast Response Board Excel workbook (EP-006).",
                 author="Jarvis",
                 capabilities=("fast_response.board",),
+                aliases=("frb", "board"),
             ),
             Plugin(
                 id="workflow_engine",
@@ -217,10 +239,37 @@ class PluginService:
                 author="Jarvis",
                 dependencies=("invoice_automation", "fast_response_board"),
                 capabilities=("workflow.orchestration",),
+                aliases=("workflow", "wf"),
             ),
         ]
 
     # ---------- Internal helpers ----------
+
+    def _resolve_id(self, identifier: str) -> str:
+        """Resolve a plugin id or alias to a canonical plugin id.
+
+        Args:
+            identifier: A plugin id or one of its declared aliases.
+
+        Returns:
+            The canonical plugin id.
+
+        Raises:
+            PluginNotFoundError: If `identifier` matches no known
+                plugin. The message includes a "Did you mean"
+                suggestion when a close match exists (EP-009.1
+                "Improve CLI error messages").
+        """
+        try:
+            return self._registry.resolve_id(identifier)
+        except PluginNotFoundError:
+            suggestions = self._registry.suggest(identifier)
+            if suggestions:
+                raise PluginNotFoundError(
+                    f"Unknown plugin: {identifier}\nDid you mean\n"
+                    f"{', '.join(suggestions)}"
+                ) from None
+            raise
 
     def _validate_dependencies(self) -> bool:
         """Return True if every registered plugin resolves a valid load order."""

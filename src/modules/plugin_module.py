@@ -2,9 +2,9 @@
 
 Exposes the "plugin" command namespace (list, info, load, unload,
 reload, status, doctor, help) as thin CommandModule handlers,
-following the same pattern as ProcessModule. All coordination logic
-lives in PluginService; this module only formats CommandResult
-objects for the shell.
+following the same pattern as ProcessModule. All coordination logic,
+including id/alias resolution (EP-009.1), lives in PluginService; this
+module only formats CommandResult objects for the shell.
 """
 
 from __future__ import annotations
@@ -24,7 +24,8 @@ HELP_TEXT: str = (
     "plugin reload <plugin>\n"
     "plugin status\n"
     "plugin doctor\n"
-    "plugin help"
+    "plugin help\n\n"
+    "<plugin> accepts either a plugin's id or one of its aliases."
 )
 
 ActionHandler = Callable[[list[str]], CommandResult]
@@ -88,14 +89,20 @@ class PluginModule:
         return CommandResult(success=True, message=HELP_TEXT)
 
     def _list(self, arguments: list[str]) -> CommandResult:
-        """List every registered plugin with its id, name, and status."""
+        """List every registered plugin with its id, aliases, status, and version."""
         plugins = self._service.list_plugins()
         if not plugins:
             return CommandResult(success=True, message="No plugins registered.")
 
         lines = ["Registered Plugins"]
         for plugin in plugins:
-            lines.append(f"{plugin.id} ({plugin.name}) - {plugin.status.value}")
+            aliases = ", ".join(plugin.aliases) if plugin.aliases else "(none)"
+            lines.append(
+                f"{plugin.id} ({plugin.name})\n"
+                f"  Aliases : {aliases}\n"
+                f"  Status  : {plugin.status.value}\n"
+                f"  Version : {plugin.version}"
+            )
         return CommandResult(success=True, message="\n\n".join(lines))
 
     def _info(self, arguments: list[str]) -> CommandResult:
@@ -109,10 +116,12 @@ class PluginModule:
         except PluginNotFoundError as exc:
             return CommandResult(success=False, message=str(exc))
 
+        aliases = ", ".join(plugin.aliases) if plugin.aliases else "(none)"
         dependencies = ", ".join(plugin.dependencies) if plugin.dependencies else "(none)"
         capabilities = ", ".join(plugin.capabilities) if plugin.capabilities else "(none)"
         pairs = (
             ("Name", plugin.name),
+            ("Aliases", aliases),
             ("Version", plugin.version),
             ("Status", plugin.status.value),
             ("Description", plugin.description),
@@ -155,7 +164,7 @@ class PluginModule:
         return CommandResult(success=True, message="\n\n".join(lines))
 
     def _doctor(self, arguments: list[str]) -> CommandResult:
-        """Run registry, loader, dependency, configuration, and context checks."""
+        """Run registry, loader, dependency, configuration, alias, and context checks."""
         report: PluginDoctorReport = self._service.run_doctor()
         lines = [
             "Plugin Manager Doctor",
@@ -163,6 +172,7 @@ class PluginModule:
             f"Loader : {self._mark(report.loader_ok)}",
             f"Dependencies : {self._mark(report.dependencies_ok)}",
             f"Configuration : {self._mark(report.configuration_ok)}",
+            f"Aliases : {self._mark(report.aliases_ok)}",
             f"Plugin Context : {self._mark(report.context_ok)}",
             f"Result : {'READY' if report.is_ready else 'FAILED'}",
         ]

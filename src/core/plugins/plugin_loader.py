@@ -210,6 +210,16 @@ class PluginLoader:
             # Metadata-only plugin (see EP-009 "Default Plugins"): status
             # bookkeeping only. Its existing implementation is never
             # rewritten or re-invoked here.
+            #
+            # TODO:
+            # This RUNNING/STOPPED bookkeeping is not cross-checked
+            # against the real state ProcessService/InvoiceService/
+            # FastResponseService already track for these same
+            # modules (EP-009.1 "Synchronize plugin status"). Doing so
+            # would require injecting one of those services into
+            # PluginLoader or PluginService, which is a constructor
+            # signature change not authorized by this task. Left as a
+            # TODO rather than adding that dependency unasked.
             self._registry.update_status(plugin_id, PluginStatus.INITIALIZED)
             logger.info(f"Plugin initialized: '{plugin_id}'.")
             self._registry.update_status(plugin_id, PluginStatus.RUNNING)

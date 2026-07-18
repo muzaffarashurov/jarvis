@@ -20,14 +20,19 @@ from src.core.execution.executors.url_executor import UrlExecutor
 from src.core.execution.process_registry import ProcessRegistry
 from src.core.logger import Logger
 from src.core.orchestrator import Orchestrator
+from src.core.plugins.plugin_context import PluginContext
+from src.core.plugins.plugin_loader import PluginLoader
+from src.core.plugins.plugin_registry import PluginRegistry
 from src.core.processes.process import Process, RestartPolicy
 from src.core.processes.process_registry import ProcessRegistry as ProcessCatalogRegistry
 from src.core.shell import InteractiveShell
 from src.modules.fast_response_module import FastResponseModule
 from src.modules.invoice_module import InvoiceModule
+from src.modules.plugin_module import PluginModule
 from src.modules.process_module import ProcessModule
 from src.services.fast_response_service import FastResponseService
 from src.services.invoice_service import InvoiceService
+from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.skills.system.skill import SystemModule
 from src.utils.constants import (
@@ -160,6 +165,38 @@ class Bootstrap:
             fast_response_service=fast_response_service,
         )
         router.register(ProcessModule(process_service))
+
+        plugin_registry = PluginRegistry()
+        plugin_context = PluginContext(
+            config=config,
+            logger=logger,
+            execution_engine=execution_engine,
+            # TODO:
+            # No component currently instantiates WorkflowService in
+            # this file (see src/services/workflow_service.py's module
+            # docstring for the documented architecture gap). Left as
+            # None rather than fabricating a WorkflowService here.
+            workflow_service=None,
+            process_service=process_service,
+        )
+        plugin_loader = PluginLoader(registry=plugin_registry, context=plugin_context)
+        for default_plugin in PluginService.default_plugins():
+            plugin_registry.register(default_plugin)
+        plugin_service = PluginService(
+            registry=plugin_registry, loader=plugin_loader, config=config
+        )
+        router.register(PluginModule(plugin_service))
+
+        if bool(config.get("plugins.enabled", True)) and bool(
+            config.get("plugins.auto_load", True)
+        ):
+            for default_plugin in PluginService.default_plugins():
+                load_result = plugin_service.load_plugin(default_plugin.id)
+                if not load_result.success:
+                    logger.error(
+                        f"Failed to auto-load plugin '{default_plugin.id}': "
+                        f"{load_result.message}"
+                    )
 
         from src.modules.test_module import TestModule
         router.register(TestModule())

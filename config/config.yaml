@@ -40,3 +40,11 @@ processes:
   auto_start: false
   dependency_check: true
   health_check_interval: 60
+
+plugins:
+  enabled: true
+  auto_load: true
+  # Reserved for a future external plugin directory / manifest loader.
+  # EP-009 stores plugin metadata in Python objects only (see
+  # "Plugin Manifest": "Do NOT implement external manifest files yet.").
+  plugin_directory: "plugins"

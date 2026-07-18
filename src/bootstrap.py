@@ -20,11 +20,15 @@ from src.core.execution.executors.url_executor import UrlExecutor
 from src.core.execution.process_registry import ProcessRegistry
 from src.core.logger import Logger
 from src.core.orchestrator import Orchestrator
+from src.core.processes.process import Process, RestartPolicy
+from src.core.processes.process_registry import ProcessRegistry as ProcessCatalogRegistry
 from src.core.shell import InteractiveShell
 from src.modules.fast_response_module import FastResponseModule
 from src.modules.invoice_module import InvoiceModule
+from src.modules.process_module import ProcessModule
 from src.services.fast_response_service import FastResponseService
 from src.services.invoice_service import InvoiceService
+from src.services.process_service import ProcessService
 from src.skills.system.skill import SystemModule
 from src.utils.constants import (
     APP_NAME,
@@ -136,17 +140,66 @@ class Bootstrap:
         )
 
         router.register(SystemModule(orchestrator=orchestrator, execution_engine=execution_engine))
-        router.register(
-            InvoiceModule(InvoiceService(config=config, execution_engine=execution_engine))
+
+        invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
+        router.register(InvoiceModule(invoice_service))
+
+        fast_response_service = FastResponseService(
+            config=config, execution_engine=execution_engine
         )
-        router.register(
-            FastResponseModule(
-                FastResponseService(config=config, execution_engine=execution_engine)
-            )
+        router.register(FastResponseModule(fast_response_service))
+
+        process_catalog = ProcessCatalogRegistry()
+        for process in Bootstrap._default_processes():
+            process_catalog.register(process)
+        process_service = ProcessService(
+            registry=process_catalog,
+            execution_engine=execution_engine,
+            config=config,
+            invoice_service=invoice_service,
+            fast_response_service=fast_response_service,
         )
+        router.register(ProcessModule(process_service))
+
         from src.modules.test_module import TestModule
         router.register(TestModule())
         return router
+
+    @staticmethod
+    def _default_processes() -> list[Process]:
+        """Return the default Process Catalog entries registered at startup.
+
+        Returns:
+            Invoice Automation, Fast Response Board, and Workflow
+            Engine, with Workflow Engine depending on the other two
+            (see 'Dependency Resolution' in the EP-008 task).
+
+            NOTE: "workflow_engine" is registered for catalog
+            visibility only; no WorkflowService backs it yet (see the
+            TODO in src/services/process_service.py), so its
+            start/stop/restart operations currently report failure.
+        """
+        return [
+            Process(
+                id="invoice_automation",
+                name="Invoice Automation",
+                description="External Invoice Automation script (EP-005).",
+                restart_policy=RestartPolicy.MANUAL,
+            ),
+            Process(
+                id="fast_response_board",
+                name="Fast Response Board",
+                description="Fast Response Board Excel workbook (EP-006).",
+                restart_policy=RestartPolicy.MANUAL,
+            ),
+            Process(
+                id="workflow_engine",
+                name="Workflow Engine",
+                description="Workflow Engine (EP-007).",
+                dependencies=("invoice_automation", "fast_response_board"),
+                restart_policy=RestartPolicy.NEVER,
+            ),
+        ]
 
     def _create_required_directories(self) -> None:
         """Create all directories required by the application at runtime.

@@ -31,3 +31,12 @@ fast_response:
   workbook: "D:/Reports/Fast Response Board.xls"
   worksheet: "July"
   backup_folder: "D:/Reports/Backup"
+
+workflows:
+  enabled: true
+  auto_register: true
+
+processes:
+  auto_start: false
+  dependency_check: true
+  health_check_interval: 60

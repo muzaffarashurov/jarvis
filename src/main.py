@@ -48,7 +48,29 @@ def main() -> int:
         return 1
 
     shell.run()
+    _save_memory_on_shutdown(bootstrap)
     return 0
+
+
+def _save_memory_on_shutdown(bootstrap: Bootstrap) -> None:
+    """Persist Memory to 'memory.storage_file' before the process exits.
+
+    A no-op when the MemoryService was never built or when
+    'memory.persistent' is False (RAM-only mode).
+
+    Args:
+        bootstrap: The completed Bootstrap instance, used to reach the
+            MemoryService built during `bootstrap.run()`.
+    """
+    memory_service = bootstrap.memory_service
+    if memory_service is None:
+        return
+
+    result = memory_service.save()
+    if result.success:
+        logger.info(f"Memory saved on shutdown: {result.message}")
+    else:
+        logger.debug(f"Memory not saved on shutdown: {result.message}")
 
 
 if __name__ == "__main__":

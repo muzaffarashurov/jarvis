@@ -19,6 +19,7 @@ from src.core.execution.executors.python_executor import PythonExecutor
 from src.core.execution.executors.url_executor import UrlExecutor
 from src.core.execution.process_registry import ProcessRegistry
 from src.core.logger import Logger
+from src.core.memory.memory_store import MemoryStore
 from src.core.orchestrator import Orchestrator
 from src.core.plugins.plugin_context import PluginContext
 from src.core.plugins.plugin_discovery import PluginDiscovery
@@ -34,12 +35,14 @@ from src.core.telegram.telegram_client import TelegramClient
 from src.core.telegram.telegram_router import TelegramRouter
 from src.modules.fast_response_module import FastResponseModule
 from src.modules.invoice_module import InvoiceModule
+from src.modules.memory_module import MemoryModule
 from src.modules.plugin_module import PluginModule
 from src.modules.process_module import ProcessModule
 from src.modules.scheduler_module import SchedulerModule
 from src.modules.telegram_module import TelegramModule
 from src.services.fast_response_service import FastResponseService
 from src.services.invoice_service import InvoiceService
+from src.services.memory_service import MemoryService
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.scheduler_service import SchedulerService
@@ -91,6 +94,7 @@ class Bootstrap:
         self._orchestrator: Orchestrator | None = None
         self._command_router: CommandRouter | None = None
         self._shell: InteractiveShell | None = None
+        self._memory_service: MemoryService | None = None
         colorama_init(autoreset=True)
 
     def run(self) -> Orchestrator:
@@ -127,8 +131,7 @@ class Bootstrap:
 
         return self._orchestrator
 
-    @staticmethod
-    def _build_command_router(orchestrator: Orchestrator, config: Config) -> CommandRouter:
+    def _build_command_router(self, orchestrator: Orchestrator, config: Config) -> CommandRouter:
         """Build and populate the CommandRouter with built-in modules.
 
         Args:
@@ -155,6 +158,15 @@ class Bootstrap:
         )
 
         router.register(SystemModule(orchestrator=orchestrator, execution_engine=execution_engine))
+
+        # EP-013: Memory & Context Manager. Depends only on Config; has
+        # no dependency on any LLM or other business-logic module, so it
+        # is wired before everything else and is available for Invoice,
+        # FastResponse, Process, Plugin, Scheduler and Telegram to reuse.
+        memory_store = MemoryStore()
+        memory_service = MemoryService(config=config, store=memory_store)
+        self._memory_service = memory_service
+        router.register(MemoryModule(memory_service))
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
@@ -505,3 +517,13 @@ class Bootstrap:
             completed.
         """
         return self._shell
+
+    @property
+    def memory_service(self) -> MemoryService | None:
+        """Return the MemoryService built for EP-013, if available.
+
+        Returns:
+            The MemoryService instance, or None if `run()` has not
+            completed.
+        """
+        return self._memory_service

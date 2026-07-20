@@ -17,6 +17,18 @@ paths:
   knowledge: "knowledge"
   prompts: "prompts"
 
+memory:
+  # EP-013.2 Memory Configuration & Persistence. Read by MemoryService
+  # ('memory.*'); the Memory subsystem is disabled entirely when
+  # 'enabled' is false, and stays RAM-only when 'persistent' is false.
+  enabled: true
+  persistent: true
+  storage_file: "data/database/memory.json"
+  auto_save: true
+  auto_save_interval: 60
+  max_entries: 10000
+  default_ttl: null
+
 orchestrator:
   skills_enabled: []
 

@@ -1,0 +1,62 @@
+[
+  {
+    "key": "autosave.test",
+    "value": "hello",
+    "namespace": "default",
+    "persistent": true,
+    "metadata": {},
+    "created_at": "2026-07-20T11:54:17.256302+00:00",
+    "updated_at": "2026-07-20T11:54:17.256308+00:00",
+    "expires_at": null
+  },
+  {
+    "key": "project.name",
+    "value": "Jarvis",
+    "namespace": "default",
+    "persistent": true,
+    "metadata": {},
+    "created_at": "2026-07-20T11:50:17.333428+00:00",
+    "updated_at": "2026-07-20T11:50:17.333433+00:00",
+    "expires_at": null
+  },
+  {
+    "key": "shutdown.test",
+    "value": "saved",
+    "namespace": "default",
+    "persistent": true,
+    "metadata": {},
+    "created_at": "2026-07-20T11:57:06.774623+00:00",
+    "updated_at": "2026-07-20T11:57:06.774629+00:00",
+    "expires_at": null
+  },
+  {
+    "key": "test.persistence",
+    "value": "survives_restart",
+    "namespace": "default",
+    "persistent": true,
+    "metadata": {},
+    "created_at": "2026-07-20T11:53:12.552947+00:00",
+    "updated_at": "2026-07-20T11:53:12.552952+00:00",
+    "expires_at": null
+  },
+  {
+    "key": "user.city",
+    "value": "Fergana",
+    "namespace": "default",
+    "persistent": true,
+    "metadata": {},
+    "created_at": "2026-07-20T11:50:10.043449+00:00",
+    "updated_at": "2026-07-20T11:50:10.043453+00:00",
+    "expires_at": null
+  },
+  {
+    "key": "user.name",
+    "value": "Muzaffar",
+    "namespace": "default",
+    "persistent": true,
+    "metadata": {},
+    "created_at": "2026-07-20T11:49:59.529937+00:00",
+    "updated_at": "2026-07-20T11:49:59.529942+00:00",
+    "expires_at": null
+  }
+]

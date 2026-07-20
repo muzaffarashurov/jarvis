@@ -41,6 +41,11 @@ processes:
   dependency_check: true
   health_check_interval: 60
 
+scheduler:
+  enabled: true
+  auto_start: true
+  tick_interval: 1
+
 plugins:
   enabled: true
   auto_load: true

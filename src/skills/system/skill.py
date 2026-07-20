@@ -28,7 +28,14 @@ HELP_TEXT: str = (
     "system exit\n"
     "system run <target>\n"
     "system processes\n"
-    "system stop <id>"
+    "system stop <id>\n"
+    "scheduler list\n"
+    "scheduler status\n"
+    "scheduler doctor\n"
+    "scheduler info <job>\n"
+    "scheduler run <job>\n"
+    "scheduler start <job>\n"
+    "scheduler stop <job>"
 )
 
 ActionHandler = Callable[[list[str]], CommandResult]

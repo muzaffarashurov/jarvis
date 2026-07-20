@@ -26,15 +26,20 @@ from src.core.plugins.plugin_loader import PluginLoader
 from src.core.plugins.plugin_registry import PluginRegistry
 from src.core.processes.process import Process, RestartPolicy
 from src.core.processes.process_registry import ProcessRegistry as ProcessCatalogRegistry
+from src.core.scheduler.job import Job, Schedule, ScheduleType
+from src.core.scheduler.job_registry import JobRegistry
+from src.core.scheduler.scheduler import Scheduler
 from src.core.shell import InteractiveShell
 from src.modules.fast_response_module import FastResponseModule
 from src.modules.invoice_module import InvoiceModule
 from src.modules.plugin_module import PluginModule
 from src.modules.process_module import ProcessModule
+from src.modules.scheduler_module import SchedulerModule
 from src.services.fast_response_service import FastResponseService
 from src.services.invoice_service import InvoiceService
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
+from src.services.scheduler_service import SchedulerService
 from src.skills.system.skill import SystemModule
 from src.utils.constants import (
     APP_NAME,
@@ -215,6 +220,13 @@ class Bootstrap:
                 if not load_result.success:
                     logger.error(f"Failed to auto-load plugin: {load_result.message}")
 
+        job_registry = JobRegistry()
+        scheduler = Scheduler(registry=job_registry, execution_engine=execution_engine)
+        scheduler_service = SchedulerService(config=config, scheduler=scheduler)
+        for default_job in Bootstrap._default_jobs(config):
+            scheduler_service.register(default_job)
+        router.register(SchedulerModule(scheduler_service))
+
         from src.modules.test_module import TestModule
         router.register(TestModule())
         return router
@@ -254,6 +266,81 @@ class Bootstrap:
                 restart_policy=RestartPolicy.NEVER,
             ),
         ]
+
+    @staticmethod
+    def _default_jobs(config: Config) -> list[Job]:
+        """Return the default Job Scheduler entries registered at startup.
+
+        Registered as examples only, per EP-011's task brief ("Register
+        only as examples ... No business logic"). Each job's `command`
+        is resolved from the same configuration entries InvoiceService
+        ('invoice.script') and FastResponseService
+        ('fast_response.workbook') already use as their single source
+        of truth, so `scheduler run <job>` hands the ExecutionEngine a
+        real, executable target and the Scheduler's own job status
+        (SUCCESS/FAILED) stays consistent with the target those
+        services operate on, instead of duplicating or inventing a
+        separate name for it. Each uses a MANUAL schedule so the
+        automatic tick loop never attempts to run them on its own.
+
+        NOTE: "Daily Backup" (listed alongside these two in EP-011's
+        task brief, annotated "(TODO)") is intentionally not
+        registered here: no backup script/target exists anywhere in
+        this project's configuration, so registering it would mean
+        inventing one -- forbidden by AI_GENERATION_STANDARD.md's
+        Unknown API Policy.
+
+        # TODO:
+        # Register a real "Daily Backup" job once a backup script/target
+        # is defined in configuration.
+
+        Args:
+            config: Loaded application configuration, used to resolve
+                'invoice.script' and 'fast_response.workbook'.
+
+        Returns:
+            The Invoice Automation and Fast Response Board example jobs.
+        """
+        invoice_script = config.get("invoice.script")
+        fast_response_workbook = config.get("fast_response.workbook")
+
+        jobs: list[Job] = []
+
+        if isinstance(invoice_script, str) and invoice_script.strip():
+            jobs.append(
+                Job(
+                    id="invoice_automation",
+                    name="Invoice Automation",
+                    description="Example scheduled job for Invoice Automation (EP-005).",
+                    command=invoice_script.strip(),
+                    schedule=Schedule(type=ScheduleType.MANUAL),
+                )
+            )
+        else:
+            # TODO:
+            # 'invoice.script' is missing or invalid in config/config.yaml,
+            # so the Invoice Automation example job cannot be registered
+            # with a real ExecutionEngine target.
+            pass
+
+        if isinstance(fast_response_workbook, str) and fast_response_workbook.strip():
+            jobs.append(
+                Job(
+                    id="fast_response_board",
+                    name="Fast Response Board",
+                    description="Example scheduled job for Fast Response Board (EP-006).",
+                    command=fast_response_workbook.strip(),
+                    schedule=Schedule(type=ScheduleType.MANUAL),
+                )
+            )
+        else:
+            # TODO:
+            # 'fast_response.workbook' is missing or invalid in
+            # config/config.yaml, so the Fast Response Board example job
+            # cannot be registered with a real ExecutionEngine target.
+            pass
+
+        return jobs
 
     def _create_required_directories(self) -> None:
         """Create all directories required by the application at runtime.

@@ -21,6 +21,7 @@ from src.core.execution.process_registry import ProcessRegistry
 from src.core.logger import Logger
 from src.core.orchestrator import Orchestrator
 from src.core.plugins.plugin_context import PluginContext
+from src.core.plugins.plugin_discovery import PluginDiscovery
 from src.core.plugins.plugin_loader import PluginLoader
 from src.core.plugins.plugin_registry import PluginRegistry
 from src.core.processes.process import Process, RestartPolicy
@@ -182,21 +183,37 @@ class Bootstrap:
         plugin_loader = PluginLoader(registry=plugin_registry, context=plugin_context)
         for default_plugin in PluginService.default_plugins():
             plugin_registry.register(default_plugin)
+
+        # EP-010: discovery is optional (plugins.auto_discovery) and the
+        # configured directory need not exist yet -- PluginDiscovery
+        # itself treats an absent directory as "nothing to discover".
+        plugin_discovery = (
+            PluginDiscovery(
+                plugin_directory=PROJECT_ROOT / str(config.get("plugins.plugin_directory", "plugins"))
+            )
+            if bool(config.get("plugins.auto_discovery", True))
+            else None
+        )
         plugin_service = PluginService(
-            registry=plugin_registry, loader=plugin_loader, config=config
+            registry=plugin_registry,
+            loader=plugin_loader,
+            config=config,
+            discovery=plugin_discovery,
         )
         router.register(PluginModule(plugin_service))
+
+        if plugin_discovery is not None:
+            plugin_service.discover_plugins()
 
         if bool(config.get("plugins.enabled", True)) and bool(
             config.get("plugins.auto_load", True)
         ):
-            for default_plugin in PluginService.default_plugins():
-                load_result = plugin_service.load_plugin(default_plugin.id)
+            # load_all() covers every registered plugin -- default and
+            # discovered alike -- so newly discovered plugins are
+            # picked up automatically without touching this file again.
+            for load_result in plugin_service.load_all():
                 if not load_result.success:
-                    logger.error(
-                        f"Failed to auto-load plugin '{default_plugin.id}': "
-                        f"{load_result.message}"
-                    )
+                    logger.error(f"Failed to auto-load plugin: {load_result.message}")
 
         from src.modules.test_module import TestModule
         router.register(TestModule())

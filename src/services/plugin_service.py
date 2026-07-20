@@ -10,6 +10,15 @@ EP-009.1 adds id/alias resolution ahead of every lookup and lifecycle
 call, so `plugin info/load/unload/reload` accept either a plugin's
 canonical id or one of its declared aliases, plus a "Did you mean"
 suggestion when neither matches.
+
+EP-010 adds an optional PluginDiscovery collaborator: `discover_plugins()`
+registers every manifest PluginDiscovery finds under the configured
+plugin directory, reusing PluginRegistry.register() for duplicate-id
+detection and PluginLoader.resolve_dependencies() for dependency
+validation rather than re-implementing either check here. `load_all()`
+and `reload_all()` reuse the existing single-plugin methods so newly
+discovered plugins are picked up by Bootstrap's auto-load step without
+Bootstrap or PluginService needing to know about them individually.
 """
 
 from __future__ import annotations
@@ -21,6 +30,7 @@ from loguru import logger
 from src.core.command_router import CommandResult
 from src.core.config import Config
 from src.core.plugins.plugin import Plugin, PluginStatus
+from src.core.plugins.plugin_discovery import PluginDiscovery, PluginDiscoveryError
 from src.core.plugins.plugin_loader import (
     DependencyCycleError,
     MissingDependencyError,
@@ -29,7 +39,11 @@ from src.core.plugins.plugin_loader import (
     PluginLoader,
     VersionMismatchError,
 )
-from src.core.plugins.plugin_registry import PluginNotFoundError, PluginRegistry
+from src.core.plugins.plugin_registry import (
+    PluginNotFoundError,
+    PluginRegistry,
+    PluginRegistryError,
+)
 
 _LOAD_ERRORS = (
     PluginNotFoundError,
@@ -54,6 +68,10 @@ class PluginDoctorReport:
         aliases_ok: Whether no id/alias is claimed by more than one
             registered plugin (EP-009.1 "Duplicate aliases" /
             "Duplicate plugins" / "Registry consistency").
+        discovery_ok: Whether auto-discovery is healthy. True when no
+            PluginDiscovery is configured (discovery is optional) or
+            when the configured plugin directory could be scanned
+            without error (EP-010 "Discovery").
         context_ok: Whether the PluginLoader's PluginContext exposes a
             configuration and execution engine reference.
     """
@@ -63,6 +81,7 @@ class PluginDoctorReport:
     dependencies_ok: bool
     configuration_ok: bool
     aliases_ok: bool
+    discovery_ok: bool
     context_ok: bool
 
     @property
@@ -74,6 +93,7 @@ class PluginDoctorReport:
             and self.dependencies_ok
             and self.configuration_ok
             and self.aliases_ok
+            and self.discovery_ok
             and self.context_ok
         )
 
@@ -83,24 +103,38 @@ class PluginService:
 
     Responsibilities:
         - Resolve a plugin id or alias to a canonical plugin id.
-        - Load / unload / reload a registered plugin.
+        - Discover and register plugins from the configured plugin
+            directory (EP-010).
+        - Load / unload / reload a registered plugin, individually or
+            for every enabled plugin at once.
         - List all registered plugins.
         - Return a single plugin's metadata for `plugin info`.
         - Report plugins currently RUNNING for `plugin status`.
         - Run the `plugin doctor` readiness checks.
     """
 
-    def __init__(self, registry: PluginRegistry, loader: PluginLoader, config: Config) -> None:
+    def __init__(
+        self,
+        registry: PluginRegistry,
+        loader: PluginLoader,
+        config: Config,
+        discovery: PluginDiscovery | None = None,
+    ) -> None:
         """Initialize the PluginService.
 
         Args:
             registry: Catalog of known plugins.
             loader: Loader used to drive plugin lifecycle transitions.
             config: Loaded application configuration ('plugins.*').
+            discovery: Scanner used by `discover_plugins()` to find
+                plugins under the configured plugin directory (EP-010).
+                Optional: when None, `discover_plugins()` is a no-op,
+                so auto-discovery remains an opt-in capability.
         """
         self._registry = registry
         self._loader = loader
         self._config = config
+        self._discovery = discovery
 
     # ---------- Public API ----------
 
@@ -191,8 +225,76 @@ class PluginService:
             dependencies_ok=self._validate_dependencies(),
             configuration_ok=self._config.get("plugins.enabled") is not None,
             aliases_ok=not self._registry.duplicate_aliases(),
+            discovery_ok=self._check_discovery(),
             context_ok=self._loader.context_is_ready(),
         )
+
+    # ---------- Bulk lifecycle (EP-010) ----------
+
+    def load_all(self) -> list[CommandResult]:
+        """Attempt to load every enabled, registered plugin.
+
+        Reuses `load_plugin()` per plugin rather than re-implementing
+        active-state checks, so an already-active plugin is reported
+        as a failed CommandResult (PluginAlreadyLoadedError) exactly
+        as it would be through a single `plugin load` call.
+
+        Returns:
+            One CommandResult per enabled plugin, in catalog order.
+        """
+        return [self.load_plugin(plugin.id) for plugin in self._registry.list() if plugin.enabled]
+
+    def reload_all(self) -> list[CommandResult]:
+        """Reload every enabled, registered plugin.
+
+        Returns:
+            One CommandResult per enabled plugin, in catalog order.
+        """
+        return [self.reload_plugin(plugin.id) for plugin in self._registry.list() if plugin.enabled]
+
+    def discover_plugins(self) -> list[str]:
+        """Discover plugins and register every one that validates.
+
+        Each discovered manifest is registered, then its dependency
+        chain is immediately checked by reusing PluginLoader's
+        existing `resolve_dependencies()` (never duplicating that
+        check here, per this project's rules). A plugin whose
+        dependencies do not resolve is unregistered again, so only
+        fully valid plugins remain in the catalog (EP-010 "Validate
+        dependencies before registration").
+
+        Returns:
+            Canonical ids of plugins newly registered this call.
+            Manifests that fail structural validation, duplicate an
+            existing id, or fail dependency resolution are skipped and
+            logged rather than raised, per EP-010 "Ignore invalid
+            plugins". Returns an empty list if no PluginDiscovery was
+            configured.
+        """
+        if self._discovery is None:
+            logger.info("Plugin auto-discovery is not configured; skipping.")
+            return []
+
+        registered: list[str] = []
+        for manifest in self._discovery.discover():
+            plugin = manifest.to_plugin()
+            try:
+                self._registry.register(plugin)
+            except PluginRegistryError as exc:
+                logger.error(f"Plugin skipped: '{plugin.id}': {exc}")
+                continue
+
+            try:
+                self._loader.resolve_dependencies(plugin.id)
+            except (PluginNotFoundError, MissingDependencyError, DependencyCycleError) as exc:
+                logger.error(f"Plugin skipped: '{plugin.id}': {exc}")
+                self._registry.unregister(plugin.id)
+                continue
+
+            registered.append(plugin.id)
+            logger.info(f"Plugin registered: '{plugin.id}'.")
+
+        return registered
 
     # ---------- Default Plugins ----------
 
@@ -279,4 +381,26 @@ class PluginService:
             except (PluginNotFoundError, MissingDependencyError, DependencyCycleError) as exc:
                 logger.error(f"Dependency check failed for '{plugin.id}': {exc}")
                 return False
+        return True
+
+    def _check_discovery(self) -> bool:
+        """Return whether auto-discovery is healthy.
+
+        Auto-discovery is optional: this reports True when no
+        PluginDiscovery is configured, and also True when the
+        configured plugin directory is simply absent (PluginDiscovery
+        itself treats a missing directory as "nothing to discover",
+        not an error). It only reports False if the plugin directory
+        exists but could not be scanned.
+
+        Returns:
+            True if discovery is either unconfigured or scannable.
+        """
+        if self._discovery is None:
+            return True
+        try:
+            self._discovery.discover()
+        except PluginDiscoveryError as exc:
+            logger.error(f"Discovery check failed: {exc}")
+            return False
         return True

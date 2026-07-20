@@ -1,191 +1,157 @@
-"""Plugin manifest domain model for EP-010 Plugin Manifest & Auto Discovery.
+"""Plugin manifest model for EP-010 Plugin Manifest & Auto Discovery.
 
 PluginManifest is the strongly typed, validated representation of a
-single plugin's on-disk manifest file (read by PluginDiscovery). It
-owns manifest-shape validation only: required fields, field types, and
-structural dependency checks (self-dependency, duplicates). It performs
-no filesystem access, no entry-point resolution, and no registry
-mutation -- those responsibilities belong to PluginDiscovery and
-PluginLoader respectively, matching this project's Single Source of
-Truth rule and the "one responsibility per component" rule in
-AI_GENERATION_STANDARD.md.
+single plugin's on-disk manifest file (see plugin_discovery.py for the
+manifest.yaml file format and lookup convention). It owns structural
+manifest validation only.
+
+Catalog-wide checks already have an owner elsewhere and are
+deliberately NOT duplicated here, per this project's "never duplicate
+existing functionality" rule:
+    - Unique id across the whole catalog: PluginRegistry.register()
+      already raises PluginRegistryError for a duplicate id.
+    - Dependency existence across the whole catalog: PluginLoader.
+      resolve_dependencies() already raises MissingDependencyError /
+      DependencyCycleError.
+
+This module performs no filesystem access and no dynamic imports --
+those are PluginDiscovery's responsibility.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Callable
 
-_REQUIRED_FIELDS: tuple[str, ...] = ("id", "name", "version", "entry_point")
+from src.core.plugins.plugin import Plugin, PluginInterface
+
+_REQUIRED_STRING_FIELDS: tuple[str, ...] = ("id", "name", "version", "description", "author")
 
 
-class PluginManifestError(Exception):
-    """Raised when a plugin manifest fails validation."""
+class ManifestValidationError(Exception):
+    """Raised when a plugin manifest fails structural validation."""
 
 
 @dataclass(frozen=True)
 class PluginManifest:
-    """A single plugin's validated, strongly typed manifest.
+    """Strongly typed, validated plugin manifest.
 
     Attributes:
-        id: Unique, stable plugin identifier (e.g. "invoice_automation").
+        id: Unique, stable plugin identifier.
         name: Human-readable display name.
         version: Version string (e.g. "1.0.0").
-        entry_point: Reference to the plugin's entry point, in the form
-            "<relative_module_path>:<ClassName>" (e.g.
-            "plugin.py:MyPlugin"), where the module path is relative to
-            this plugin's own directory. Resolution into an importable
-            class is performed by PluginLoader, not by this module.
-        description: Short description of the plugin. Defaults to "".
-        author: Plugin author or owning team. Defaults to "".
-        dependencies: Ids of plugins that must be loaded first.
+        description: Short description shown by `plugin info`.
+        author: Plugin author or owning team.
+        enabled: Whether this plugin participates in auto-loading.
+        dependencies: IDs of plugins that must load before this one.
         capabilities: Free-form capability tags this plugin provides.
-        enabled: Whether this plugin should be activated automatically
-            once discovered. Defaults to True.
+        entry_point: Factory that creates the plugin's runtime
+            instance, already resolved to a callable by
+            PluginDiscovery, or None for a metadata-only plugin.
     """
 
     id: str
     name: str
     version: str
-    entry_point: str
-    description: str = ""
-    author: str = ""
+    description: str
+    author: str
+    enabled: bool = True
     dependencies: tuple[str, ...] = field(default_factory=tuple)
     capabilities: tuple[str, ...] = field(default_factory=tuple)
-    enabled: bool = True
+    entry_point: Callable[[], PluginInterface] | None = None
 
     @staticmethod
-    def from_dict(data: dict[str, Any], source: str) -> "PluginManifest":
+    def from_dict(data: dict[str, Any]) -> "PluginManifest":
         """Build and validate a PluginManifest from raw manifest data.
 
         Args:
-            data: Parsed manifest mapping (e.g. from YAML).
-            source: Path or identifier of the manifest, used only to
-                make error messages actionable.
+            data: The parsed manifest file content. `entry_point`, if
+                present, must already be resolved to a callable (or
+                None) by the caller -- dynamic imports are a
+                filesystem/module concern, not manifest validation.
 
         Returns:
-            The validated PluginManifest.
+            A validated PluginManifest.
 
         Raises:
-            PluginManifestError: If `data` is not a mapping, a required
-                field is missing/blank, a field has the wrong type, an
-                entry_point is malformed, dependencies/capabilities
-                contain non-string or blank entries, dependencies
-                contain duplicates, or the manifest declares a
-                dependency on itself.
+            ManifestValidationError: If a required field is missing or
+                blank, `dependencies`/`capabilities` are not lists of
+                strings, `id` appears in its own `dependencies`,
+                `capabilities` contains a duplicate, `enabled` is not
+                a boolean, or `entry_point` is neither None nor
+                callable.
         """
-        if not isinstance(data, dict):
-            raise PluginManifestError(f"Manifest at '{source}' must be a mapping.")
+        for field_name in _REQUIRED_STRING_FIELDS:
+            value = data.get(field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ManifestValidationError(f"Manifest missing required field '{field_name}'.")
 
-        missing = [
-            field_name
-            for field_name in _REQUIRED_FIELDS
-            if not str(data.get(field_name, "")).strip()
-        ]
-        if missing:
-            raise PluginManifestError(
-                f"Manifest at '{source}' is missing required field(s): "
-                f"{', '.join(missing)}."
-            )
+        plugin_id = data["id"]
+        dependencies = PluginManifest._as_string_tuple(data.get("dependencies", []), "dependencies")
+        capabilities = PluginManifest._as_string_tuple(data.get("capabilities", []), "capabilities")
 
-        plugin_id = str(data["id"]).strip()
-        entry_point = PluginManifest._validate_entry_point(str(data["entry_point"]).strip(), source)
-
-        dependencies = PluginManifest._as_str_tuple(
-            data.get("dependencies", ()), "dependencies", source
-        )
         if plugin_id in dependencies:
-            raise PluginManifestError(f"Manifest at '{source}' declares a dependency on itself.")
-        if len(set(dependencies)) != len(dependencies):
-            raise PluginManifestError(f"Manifest at '{source}' declares duplicate dependencies.")
-
-        capabilities = PluginManifest._as_str_tuple(
-            data.get("capabilities", ()), "capabilities", source
-        )
+            raise ManifestValidationError(f"Plugin '{plugin_id}' cannot depend on itself.")
+        if len(set(capabilities)) != len(capabilities):
+            raise ManifestValidationError(f"Plugin '{plugin_id}' declares a duplicate capability.")
 
         enabled = data.get("enabled", True)
         if not isinstance(enabled, bool):
-            raise PluginManifestError(f"Manifest at '{source}' field 'enabled' must be a boolean.")
+            raise ManifestValidationError(f"Plugin '{plugin_id}' field 'enabled' must be a boolean.")
+
+        entry_point = data.get("entry_point")
+        if entry_point is not None and not callable(entry_point):
+            raise ManifestValidationError(
+                f"Plugin '{plugin_id}' field 'entry_point' must be a resolved callable or None."
+            )
 
         return PluginManifest(
             id=plugin_id,
-            name=str(data["name"]).strip(),
-            version=str(data["version"]).strip(),
-            entry_point=entry_point,
-            description=str(data.get("description", "")).strip(),
-            author=str(data.get("author", "")).strip(),
+            name=data["name"],
+            version=data["version"],
+            description=data["description"],
+            author=data["author"],
+            enabled=enabled,
             dependencies=dependencies,
             capabilities=capabilities,
-            enabled=enabled,
+            entry_point=entry_point,
         )
 
     @staticmethod
-    def _validate_entry_point(entry_point: str, source: str) -> str:
-        """Validate `entry_point` matches "<module_path>:<ClassName>".
-
-        Args:
-            entry_point: The raw entry_point string to validate.
-            source: Manifest path/identifier, used in error messages.
-
-        Returns:
-            The validated entry_point string, unchanged.
-
-        Raises:
-            PluginManifestError: If `entry_point` does not contain
-                exactly one colon, or either side of it is blank.
-        """
-        if entry_point.count(":") != 1 or not all(
-            part.strip() for part in entry_point.split(":")
-        ):
-            raise PluginManifestError(
-                f"Manifest at '{source}' has invalid entry_point '{entry_point}'; "
-                "expected format '<module_path>:<ClassName>'."
-            )
-        return entry_point
-
-    @staticmethod
-    def _as_str_tuple(value: Any, field_name: str, source: str) -> tuple[str, ...]:
-        """Validate and normalize a list-of-strings manifest field.
+    def _as_string_tuple(value: Any, field_name: str) -> tuple[str, ...]:
+        """Validate and coerce a manifest list field to a tuple of strings.
 
         Args:
             value: The raw field value from manifest data.
-            field_name: Name of the field, used in error messages.
-            source: Manifest path/identifier, used in error messages.
+            field_name: The field's name, for error messages.
 
         Returns:
-            A tuple of stripped, non-empty strings. Empty if `value` is
-            None or an empty string.
+            `value` as a tuple of strings.
 
         Raises:
-            PluginManifestError: If `value` is not a list/tuple, or
-                contains a non-string or blank entry.
+            ManifestValidationError: If `value` is not a list of strings.
         """
-        if value in (None, ""):
-            return ()
-        if not isinstance(value, (list, tuple)):
-            raise PluginManifestError(f"Manifest at '{source}' field '{field_name}' must be a list.")
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise ManifestValidationError(f"Manifest field '{field_name}' must be a list of strings.")
+        return tuple(value)
 
-        result: list[str] = []
-        for item in value:
-            if not isinstance(item, str) or not item.strip():
-                raise PluginManifestError(
-                    f"Manifest at '{source}' field '{field_name}' must contain non-empty strings."
-                )
-            result.append(item.strip())
-        return tuple(result)
+    def to_plugin(self) -> Plugin:
+        """Convert this manifest into a catalog-ready Plugin.
 
-
-def validate_unique_ids(manifests: Sequence[PluginManifest]) -> None:
-    """Validate that every manifest in `manifests` declares a unique id.
-
-    Args:
-        manifests: Manifests to check for id collisions.
-
-    Raises:
-        PluginManifestError: On the first duplicate id encountered.
-    """
-    seen: set[str] = set()
-    for manifest in manifests:
-        if manifest.id in seen:
-            raise PluginManifestError(f"Duplicate plugin id discovered: '{manifest.id}'.")
-        seen.add(manifest.id)
+        Returns:
+            A Plugin with the default `status=PluginStatus.REGISTERED`
+            and no aliases (manifests do not declare aliases; aliases
+            are an EP-009.1 CLI concern assigned separately, e.g. by
+            PluginService.default_plugins()).
+        """
+        return Plugin(
+            id=self.id,
+            name=self.name,
+            version=self.version,
+            description=self.description,
+            author=self.author,
+            enabled=self.enabled,
+            entry_point=self.entry_point,
+            dependencies=self.dependencies,
+            capabilities=self.capabilities,
+        )

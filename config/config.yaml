@@ -44,7 +44,9 @@ processes:
 plugins:
   enabled: true
   auto_load: true
-  # Reserved for a future external plugin directory / manifest loader.
-  # EP-009 stores plugin metadata in Python objects only (see
-  # "Plugin Manifest": "Do NOT implement external manifest files yet.").
+  auto_discovery: true
+  # Directory scanned by PluginDiscovery (EP-010), relative to the
+  # project root. Each subdirectory is expected to contain a
+  # manifest.yaml (see src/core/plugins/plugin_discovery.py for the
+  # file layout). Missing directory = nothing to discover, not an error.
   plugin_directory: "plugins"

@@ -1,172 +1,198 @@
 """Plugin discovery for EP-010 Plugin Manifest & Auto Discovery.
 
-PluginDiscovery scans a configured plugin directory for subdirectories
-containing a manifest file, reads and validates each manifest, and
-returns every successfully discovered plugin. It performs no
-registration and no entry-point resolution -- those responsibilities
-belong to PluginLoader (see plugin_loader.py's `load_discovered`),
-matching this project's "one responsibility per component" rule.
-Invalid or malformed manifests are skipped and logged rather than
-raising, so a single bad plugin cannot abort discovery of the rest.
+PluginDiscovery scans a configured plugin directory for plugin
+packages and returns a validated PluginManifest for every package
+whose manifest is well-formed. It performs no registration and no
+lifecycle activation -- those remain owned by PluginRegistry and
+PluginLoader respectively, matching this project's Single Source of
+Truth rule. A manifest that fails to parse or validate is logged and
+skipped rather than raised, per EP-010's "Ignore invalid plugins".
+
+Plugin package layout expected under the plugin directory::
+
+    <plugin_directory>/<plugin_name>/manifest.yaml
+
+`manifest.yaml` fields: id, name, version, description, author,
+enabled, dependencies, capabilities, entry_point. `entry_point`, if
+present, must be a "module.path:callable_name" string; PluginDiscovery
+imports that module and resolves the callable so the resulting
+PluginManifest.entry_point is ready for PluginLoader to invoke. A
+manifest with no `entry_point` produces a metadata-only plugin (see
+EP-009 "Default Plugins").
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import importlib
 from pathlib import Path
+from typing import Callable
 
 import yaml
 from loguru import logger
 
-from src.core.plugins.plugin_manifest import PluginManifest, PluginManifestError
+from src.core.plugins.plugin import PluginInterface
+from src.core.plugins.plugin_manifest import ManifestValidationError, PluginManifest
 
-MANIFEST_FILENAMES: tuple[str, ...] = ("plugin.yaml", "plugin.yml")
+_MANIFEST_FILENAME = "manifest.yaml"
 
 
 class PluginDiscoveryError(Exception):
-    """Raised when the configured plugin directory cannot be scanned."""
-
-
-@dataclass(frozen=True)
-class DiscoveredPlugin:
-    """A single plugin found on disk with a validated manifest.
-
-    Attributes:
-        manifest: The validated PluginManifest.
-        plugin_directory: Directory containing the plugin and its
-            manifest file. Entry-point module paths in `manifest` are
-            resolved relative to this directory.
-        manifest_path: Full path of the manifest file that was read.
-    """
-
-    manifest: PluginManifest
-    plugin_directory: Path
-    manifest_path: Path
+    """Raised when the plugin directory itself cannot be scanned."""
 
 
 class PluginDiscovery:
-    """Scans a directory for plugin manifests and returns validated plugins.
+    """Scans a plugin directory and returns validated plugin manifests.
 
     Responsibilities:
-        - Scan the configured plugin directory for subdirectories.
-        - Find each subdirectory's manifest file, if any.
-        - Read and validate manifests.
-        - Ignore invalid plugins, logging why each was skipped.
-        - Return every successfully discovered plugin.
+        - Scan the configured plugin directory for plugin packages.
+        - Read each package's manifest.yaml.
+        - Resolve a manifest's declared entry point to a callable.
+        - Validate each manifest, skipping (and logging) invalid ones.
+        - Return every successfully discovered PluginManifest.
     """
 
     def __init__(self, plugin_directory: Path) -> None:
         """Initialize the PluginDiscovery.
 
         Args:
-            plugin_directory: Root directory to scan for plugin
-                subdirectories (each expected to contain a manifest
-                file named "plugin.yaml" or "plugin.yml").
+            plugin_directory: Root directory containing plugin
+                packages, one subdirectory per plugin.
         """
         self._plugin_directory = plugin_directory
 
-    def discover(self) -> list[DiscoveredPlugin]:
-        """Scan `plugin_directory` and return every validly-discovered plugin.
+    @property
+    def plugin_directory(self) -> Path:
+        """Return the directory this instance scans for plugin packages."""
+        return self._plugin_directory
 
-        A missing plugin directory is treated as "nothing to
-        discover" rather than an error, since auto-discovery must not
-        prevent Jarvis from starting when no plugin directory has been
-        created yet.
+    def discover(self) -> list[PluginManifest]:
+        """Scan `plugin_directory` and return every valid plugin manifest.
 
         Returns:
-            Discovered plugins, in directory-scan order. Empty if the
-            plugin directory does not exist or contains no valid
-            plugins.
+            Validated PluginManifest entries for every plugin package
+            whose manifest parsed and validated successfully. Empty if
+            the plugin directory does not exist -- auto-discovery is
+            optional, so an absent directory is not an error.
 
         Raises:
-            PluginDiscoveryError: If `plugin_directory` exists but is
-                not a directory.
+            PluginDiscoveryError: If `plugin_directory` exists but
+                cannot be listed (e.g. a permissions error).
         """
         if not self._plugin_directory.exists():
             logger.info(
-                f"Plugin directory not found, skipping discovery: "
-                f"'{self._plugin_directory}'."
+                f"Plugin directory not found, skipping discovery: '{self._plugin_directory}'."
             )
             return []
-        if not self._plugin_directory.is_dir():
+
+        try:
+            entries = sorted(self._plugin_directory.iterdir())
+        except OSError as exc:
             raise PluginDiscoveryError(
-                f"Plugin directory is not a directory: '{self._plugin_directory}'."
-            )
+                f"Unable to scan plugin directory '{self._plugin_directory}': {exc}"
+            ) from exc
 
-        discovered: list[DiscoveredPlugin] = []
-        seen_ids: set[str] = set()
-
-        for entry in sorted(self._plugin_directory.iterdir()):
+        manifests: list[PluginManifest] = []
+        for entry in entries:
             if not entry.is_dir():
                 continue
+            manifest = self._load_manifest(entry)
+            if manifest is not None:
+                manifests.append(manifest)
 
-            manifest_path = self._find_manifest(entry)
-            if manifest_path is None:
-                logger.debug(f"No manifest found, skipping: '{entry}'.")
-                continue
+        logger.info(f"Discovery completed: {len(manifests)} plugin(s) found.")
+        return manifests
 
-            manifest = self._read_manifest(manifest_path)
-            if manifest is None:
-                continue
-            logger.info(f"Manifest loaded: '{manifest_path}'.")
+    # ---------- Internal helpers ----------
 
-            if manifest.id in seen_ids:
-                logger.error(
-                    f"Manifest validation failed: duplicate plugin id "
-                    f"'{manifest.id}' at '{manifest_path}'."
-                )
-                continue
-
-            seen_ids.add(manifest.id)
-            discovered.append(
-                DiscoveredPlugin(
-                    manifest=manifest, plugin_directory=entry, manifest_path=manifest_path
-                )
-            )
-            logger.info(f"Plugin discovered: '{manifest.id}' at '{entry}'.")
-
-        logger.info(f"Discovery completed: {len(discovered)} plugin(s) found.")
-        return discovered
-
-    @staticmethod
-    def _find_manifest(plugin_directory: Path) -> Path | None:
-        """Return the manifest file inside `plugin_directory`, if present.
+    def _load_manifest(self, plugin_dir: Path) -> PluginManifest | None:
+        """Read, resolve, and validate a single plugin package's manifest.
 
         Args:
-            plugin_directory: A candidate plugin subdirectory.
+            plugin_dir: The plugin package's directory.
 
         Returns:
-            The path to the first matching manifest filename found, or
-            None if `plugin_directory` contains no manifest file.
+            A validated PluginManifest, or None if this package has no
+            manifest file, invalid YAML, an unresolved entry point, or
+            fails PluginManifest validation. Every skip is logged.
         """
-        for filename in MANIFEST_FILENAMES:
-            candidate = plugin_directory / filename
-            if candidate.is_file():
-                return candidate
-        return None
+        manifest_path = plugin_dir / _MANIFEST_FILENAME
+        if not manifest_path.is_file():
+            return None
 
-    @staticmethod
-    def _read_manifest(manifest_path: Path) -> PluginManifest | None:
-        """Read and validate a single manifest file.
-
-        Args:
-            manifest_path: Path to the manifest file to read.
-
-        Returns:
-            The validated PluginManifest, or None if the file could
-            not be read, parsed as YAML, or validated. Each failure
-            case is logged as "Manifest validation failed" rather than
-            raised, so discovery of other plugins can continue.
-        """
         try:
             with manifest_path.open("r", encoding="utf-8") as file:
-                data = yaml.safe_load(file)
-        except (OSError, yaml.YAMLError) as exc:
-            logger.error(f"Manifest validation failed: '{manifest_path}': {exc}")
+                raw = yaml.safe_load(file)
+        except (yaml.YAMLError, OSError) as exc:
+            logger.error(f"Manifest validation failed for '{plugin_dir.name}': {exc}")
             return None
 
-        try:
-            return PluginManifest.from_dict(data or {}, source=str(manifest_path))
-        except PluginManifestError as exc:
-            logger.error(f"Manifest validation failed: '{manifest_path}': {exc}")
+        if not isinstance(raw, dict):
+            logger.error(
+                f"Manifest validation failed for '{plugin_dir.name}': "
+                "manifest.yaml must contain a mapping."
+            )
             return None
+
+        logger.debug(f"Manifest loaded: '{plugin_dir.name}'.")
+
+        try:
+            entry_point = self._resolve_entry_point(raw.get("entry_point"), plugin_dir.name)
+        except PluginDiscoveryError as exc:
+            logger.error(f"Manifest validation failed for '{plugin_dir.name}': {exc}")
+            return None
+
+        payload = dict(raw)
+        payload["entry_point"] = entry_point
+
+        try:
+            manifest = PluginManifest.from_dict(payload)
+        except ManifestValidationError as exc:
+            logger.error(f"Manifest validation failed for '{plugin_dir.name}': {exc}")
+            return None
+
+        logger.info(f"Plugin discovered: '{manifest.id}'.")
+        return manifest
+
+    @staticmethod
+    def _resolve_entry_point(
+        reference: object, plugin_name: str
+    ) -> Callable[[], PluginInterface] | None:
+        """Resolve a manifest's "module.path:callable" entry point string.
+
+        Args:
+            reference: The raw `entry_point` value from manifest.yaml,
+                or None for a metadata-only plugin.
+            plugin_name: The plugin package's directory name, for
+                error messages.
+
+        Returns:
+            The imported callable, or None if `reference` is None.
+
+        Raises:
+            PluginDiscoveryError: If `reference` is not a
+                "module.path:callable" string, the module cannot be
+                imported, or the callable is not found on it.
+        """
+        if reference is None:
+            return None
+
+        if not isinstance(reference, str) or ":" not in reference:
+            raise PluginDiscoveryError(
+                f"Plugin '{plugin_name}' entry_point must be a 'module.path:callable' string."
+            )
+
+        module_path, _, attribute = reference.partition(":")
+        try:
+            module = importlib.import_module(module_path)
+        except ImportError as exc:
+            raise PluginDiscoveryError(
+                f"Plugin '{plugin_name}' entry_point module '{module_path}' "
+                f"could not be imported: {exc}"
+            ) from exc
+
+        entry_point = getattr(module, attribute, None)
+        if entry_point is None or not callable(entry_point):
+            raise PluginDiscoveryError(
+                f"Plugin '{plugin_name}' entry_point '{reference}' does not resolve to a callable."
+            )
+        return entry_point

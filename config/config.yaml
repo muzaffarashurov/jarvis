@@ -55,3 +55,13 @@ plugins:
   # manifest.yaml (see src/core/plugins/plugin_discovery.py for the
   # file layout). Missing directory = nothing to discover, not an error.
   plugin_directory: "plugins"
+
+telegram:
+  # EP-012 Telegram Gateway. Disabled by default -- Telegram is only an
+  # external interface; the rest of Jarvis starts and runs normally
+  # whether or not this section is configured.
+  enabled: false
+  auto_start: false
+  token: ""
+  allowed_chat_ids: []
+  polling_interval: 2

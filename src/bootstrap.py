@@ -30,16 +30,20 @@ from src.core.scheduler.job import Job, Schedule, ScheduleType
 from src.core.scheduler.job_registry import JobRegistry
 from src.core.scheduler.scheduler import Scheduler
 from src.core.shell import InteractiveShell
+from src.core.telegram.telegram_client import TelegramClient
+from src.core.telegram.telegram_router import TelegramRouter
 from src.modules.fast_response_module import FastResponseModule
 from src.modules.invoice_module import InvoiceModule
 from src.modules.plugin_module import PluginModule
 from src.modules.process_module import ProcessModule
 from src.modules.scheduler_module import SchedulerModule
+from src.modules.telegram_module import TelegramModule
 from src.services.fast_response_service import FastResponseService
 from src.services.invoice_service import InvoiceService
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.scheduler_service import SchedulerService
+from src.services.telegram_service import TelegramService
 from src.skills.system.skill import SystemModule
 from src.utils.constants import (
     APP_NAME,
@@ -226,6 +230,24 @@ class Bootstrap:
         for default_job in Bootstrap._default_jobs(config):
             scheduler_service.register(default_job)
         router.register(SchedulerModule(scheduler_service))
+
+        telegram_token = config.get("telegram.token")
+        telegram_client = (
+            TelegramClient(token=telegram_token.strip())
+            if isinstance(telegram_token, str) and telegram_token.strip()
+            else None
+        )
+        telegram_allowed_chat_ids = config.get("telegram.allowed_chat_ids", [])
+        telegram_router = TelegramRouter(
+            command_router=router,
+            allowed_chat_ids=telegram_allowed_chat_ids
+            if isinstance(telegram_allowed_chat_ids, list)
+            else [],
+        )
+        telegram_service = TelegramService(
+            config=config, client=telegram_client, router=telegram_router
+        )
+        router.register(TelegramModule(telegram_service))
 
         from src.modules.test_module import TestModule
         router.register(TestModule())

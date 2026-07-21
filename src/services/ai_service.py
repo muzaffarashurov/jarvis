@@ -20,12 +20,81 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from src.core.ai.provider import ProviderError
 from src.core.ai.provider_manager import ProviderManager
 from src.core.ai.provider_registry import ProviderNotFoundError
 from src.core.command_router import CommandResult
 from src.core.config import Config
 
-__all__ = ["AIDoctorReport", "AIService", "AIStatus", "ProviderInfo"]
+__all__ = [
+    "AIDoctorReport",
+    "AIService",
+    "AIStatus",
+    "AskResult",
+    "ModelsResult",
+    "PingReport",
+    "ProviderInfo",
+]
+
+_NO_PROVIDER_SELECTED: str = "No AI provider is currently selected. Use 'ai use <provider>'."
+
+
+@dataclass(frozen=True)
+class AskResult:
+    """Result of `ai ask <prompt>` / `ai test` (EP-015).
+
+    Attributes:
+        success: Whether communication with the provider succeeded.
+        provider: The provider name queried (e.g. "claude"), or "" if
+            no provider was selected.
+        model: The model that produced the reply, or "" on failure.
+        text: The reply text, or "" on failure.
+        error: A user-friendly error message, or "" on success.
+    """
+
+    success: bool
+    provider: str
+    model: str
+    text: str
+    error: str
+
+
+@dataclass(frozen=True)
+class PingReport:
+    """Result of `ai ping` (EP-015).
+
+    Attributes:
+        provider: The provider name checked, or "" if none selected.
+        reachable: Whether the provider's API could be reached.
+        latency_ms: Round-trip time for the check, in milliseconds.
+        model: The model identifier used for the check.
+        authenticated: Whether the configured credentials were
+            accepted.
+        message: Human-readable detail, especially on failure.
+    """
+
+    provider: str
+    reachable: bool
+    latency_ms: float
+    model: str
+    authenticated: bool
+    message: str
+
+
+@dataclass(frozen=True)
+class ModelsResult:
+    """Result of `ai models` (EP-015).
+
+    Attributes:
+        provider: The provider name queried, or "" if none selected.
+        models: The models available from this provider's own
+            configuration (never discovered online).
+        error: A user-friendly error message, or "" on success.
+    """
+
+    provider: str
+    models: tuple[str, ...]
+    error: str
 
 
 @dataclass(frozen=True)
@@ -213,3 +282,88 @@ class AIService:
             connectivity_ok=connectivity_ok,
             configuration_errors=tuple(configuration_errors),
         )
+
+    # ---------- EP-015: real communication ----------
+
+    def ask(self, prompt: str) -> AskResult:
+        """Send `prompt` to the currently active provider and return its reply.
+
+        Each call is independent -- no conversation history is kept
+        or sent (EP-015: memory integration is left to a future EP).
+
+        Args:
+            prompt: The user prompt to send.
+
+        Returns:
+            An AskResult describing the reply, or a user-friendly
+            error if communication failed.
+        """
+        current = self._provider_manager.get_current()
+        if current is None:
+            return AskResult(success=False, provider="", model="", text="", error=_NO_PROVIDER_SELECTED)
+
+        if not self._provider_manager.is_enabled():
+            message = "AI subsystem is disabled. Enable 'ai.enabled' in config.yaml to use a provider."
+            return AskResult(success=False, provider=current.name(), model="", text="", error=message)
+
+        name = current.name()
+        try:
+            response = current.ask(prompt)
+        except ProviderError as exc:
+            logger.error(f"AI request failed (provider='{name}'): {exc}")
+            return AskResult(success=False, provider=name, model="", text="", error=str(exc))
+
+        return AskResult(success=True, provider=name, model=response.model, text=response.text, error="")
+
+    def test(self) -> AskResult:
+        """Send a fixed "Hello" prompt to verify successful communication.
+
+        Returns:
+            The same AskResult shape as `ask()`.
+        """
+        return self.ask("Hello")
+
+    def ping(self) -> PingReport:
+        """Check reachability, latency, model and authentication for the active provider.
+
+        Returns:
+            A PingReport describing the connectivity check.
+        """
+        current = self._provider_manager.get_current()
+        if current is None:
+            return PingReport(
+                provider="",
+                reachable=False,
+                latency_ms=0.0,
+                model="",
+                authenticated=False,
+                message=_NO_PROVIDER_SELECTED,
+            )
+
+        result = current.ping()
+        logger.info(
+            f"AI ping (provider='{current.name()}', reachable={result.reachable}, "
+            f"latency={result.latency_ms:.0f}ms)."
+        )
+        return PingReport(
+            provider=current.name(),
+            reachable=result.reachable,
+            latency_ms=result.latency_ms,
+            model=result.model,
+            authenticated=result.authenticated,
+            message=result.message,
+        )
+
+    def models(self) -> ModelsResult:
+        """List the models available from the active provider's own configuration.
+
+        Never performs online discovery (EP-015).
+
+        Returns:
+            A ModelsResult describing the available models.
+        """
+        current = self._provider_manager.get_current()
+        if current is None:
+            return ModelsResult(provider="", models=(), error=_NO_PROVIDER_SELECTED)
+
+        return ModelsResult(provider=current.name(), models=tuple(current.list_models()), error="")

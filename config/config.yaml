@@ -93,8 +93,14 @@ providers:
   # this section only describes how each provider would be reached
   # once implemented -- no network requests are made by this EP.
   claude:
+    # EP-015 Claude Provider. Real Anthropic API integration; never
+    # print or log 'api_key'.
     enabled: false
     api_key: ""
+    model: "claude-sonnet-4"
+    timeout: 120
+    max_tokens: 4096
+    temperature: 0.2
   openai:
     enabled: false
     api_key: ""

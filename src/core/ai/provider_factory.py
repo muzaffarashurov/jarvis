@@ -3,17 +3,24 @@
 ProviderFactory is the single place that knows how to turn
 'providers.*' configuration entries (see config/config.yaml) into
 AIProvider instances. Per EP-014 ("Actual provider implementations
-will be added in future EPs"), it does not integrate with any real AI
-API: every provider it builds is a `ConfigDrivenProvider`, whose
-status/availability/health are derived entirely from
-'providers.<name>' configuration values, with no network request of
-any kind.
+will be added in future EPs"), every provider it builds was a
+`ConfigDrivenProvider`, whose status/availability/health are derived
+entirely from 'providers.<name>' configuration values, with no
+network request of any kind.
+
+EP-015 (Claude Provider) is the first such future EP: for the
+"claude" provider name, this factory now builds a real ClaudeProvider
+(see src/core/ai/claude_provider.py) instead of the placeholder.
+Every other known provider name (openai, ollama, lmstudio) is
+unchanged and still builds a ConfigDrivenProvider, per this task's
+"Do NOT modify" scope.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from src.core.ai.claude_provider import ClaudeProvider
 from src.core.ai.provider import AIProvider, ProviderHealth, ProviderStatus
 from src.core.config import Config
 
@@ -126,14 +133,18 @@ class ProviderFactory:
                 KNOWN_PROVIDER_NAMES).
 
         Returns:
-            A ConfigDrivenProvider reflecting `name`'s current
-            configuration.
+            A real ClaudeProvider for "claude" (EP-015); a
+            ConfigDrivenProvider reflecting `name`'s current
+            configuration for every other known provider name.
 
         Raises:
             ValueError: If `name` is not a known provider name.
         """
         if name not in _CREDENTIAL_KEYS:
             raise ValueError(f"Unknown AI provider name: '{name}'.")
+
+        if name == "claude":
+            return self._build_claude()
 
         credential_key = _CREDENTIAL_KEYS[name]
         enabled = bool(self._config.get(f"providers.{name}.enabled", False))
@@ -146,4 +157,30 @@ class ProviderFactory:
             enabled=enabled,
             credential_key=credential_key,
             credential_value=credential_value,
+        )
+
+    def _build_claude(self) -> AIProvider:
+        """Build the real ClaudeProvider from 'providers.claude' configuration (EP-015).
+
+        Returns:
+            A ClaudeProvider reflecting 'providers.claude.*'.
+        """
+        enabled = bool(self._config.get("providers.claude.enabled", False))
+        api_key = self._config.get("providers.claude.api_key", "")
+        if not isinstance(api_key, str):
+            api_key = ""
+        model = self._config.get("providers.claude.model", "claude-sonnet-4")
+        if not isinstance(model, str):
+            model = "claude-sonnet-4"
+        timeout = self._config.get("providers.claude.timeout", 120)
+        max_tokens = self._config.get("providers.claude.max_tokens", 4096)
+        temperature = self._config.get("providers.claude.temperature", 0.2)
+
+        return ClaudeProvider(
+            enabled=enabled,
+            api_key=api_key,
+            model=model,
+            timeout=int(timeout) if isinstance(timeout, (int, float)) else 120,
+            max_tokens=int(max_tokens) if isinstance(max_tokens, (int, float)) else 4096,
+            temperature=float(temperature) if isinstance(temperature, (int, float)) else 0.2,
         )

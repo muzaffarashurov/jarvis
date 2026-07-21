@@ -13,7 +13,15 @@ from __future__ import annotations
 from typing import Callable
 
 from src.core.command_router import CommandResult
-from src.services.ai_service import AIDoctorReport, AIService, AIStatus, ProviderInfo
+from src.services.ai_service import (
+    AIDoctorReport,
+    AIService,
+    AIStatus,
+    AskResult,
+    ModelsResult,
+    PingReport,
+    ProviderInfo,
+)
 
 HELP_TEXT: str = (
     "Available commands\n\n"
@@ -23,6 +31,10 @@ HELP_TEXT: str = (
     "ai current\n"
     "ai use <provider>\n"
     "ai disable\n"
+    "ai ask <prompt>\n"
+    "ai ping\n"
+    "ai models\n"
+    "ai test\n"
     "ai help"
 )
 
@@ -57,6 +69,10 @@ class AIModule:
             "current": self._current,
             "use": self._use,
             "disable": self._disable,
+            "ask": self._ask,
+            "ping": self._ping,
+            "models": self._models,
+            "test": self._test,
             "help": self._help,
         }
 
@@ -158,6 +174,73 @@ class AIModule:
             lines.append("Configuration errors : NONE")
         lines.append(f"Result : {'READY' if report.is_ready else 'FAILED'}")
         return CommandResult(success=report.is_ready, message="\n\n".join(lines))
+
+    def _ask(self, arguments: list[str]) -> CommandResult:
+        """Send a prompt to the currently active AI provider.
+
+        Args:
+            arguments: The prompt words (joined with spaces).
+
+        Returns:
+            A CommandResult with the provider's reply, or a
+            user-friendly error message.
+        """
+        if not arguments:
+            return CommandResult(success=False, message="Usage: ai ask <prompt>")
+
+        prompt = " ".join(arguments)
+        result: AskResult = self._service.ask(prompt)
+        if not result.success:
+            return CommandResult(success=False, message=result.error)
+
+        message = f"{self._display_name(result.provider)}:\n{result.text}"
+        return CommandResult(success=True, message=message)
+
+    def _ping(self, arguments: list[str]) -> CommandResult:
+        """Check reachability, latency, model and authentication for the active provider."""
+        report: PingReport = self._service.ping()
+        if not report.provider:
+            return CommandResult(success=False, message=report.message)
+
+        lines = [
+            "AI Ping",
+            f"Provider : {self._display_name(report.provider)}",
+            f"Reachable : {self._mark(report.reachable)}",
+            f"Latency : {report.latency_ms:.0f} ms",
+            f"Model : {report.model or 'n/a'}",
+            f"Authentication : {self._mark(report.authenticated)}",
+        ]
+        if report.message:
+            lines.append(f"Message : {report.message}")
+
+        success = report.reachable and report.authenticated
+        return CommandResult(success=success, message="\n".join(lines))
+
+    def _models(self, arguments: list[str]) -> CommandResult:
+        """List the models available from the active provider's own configuration."""
+        result: ModelsResult = self._service.models()
+        if result.error:
+            return CommandResult(success=False, message=result.error)
+        if not result.models:
+            return CommandResult(
+                success=True, message=f"No models configured for '{self._display_name(result.provider)}'."
+            )
+
+        lines = [f"Models ({self._display_name(result.provider)})", ""]
+        lines.extend(f"- {model}" for model in result.models)
+        return CommandResult(success=True, message="\n".join(lines))
+
+    def _test(self, arguments: list[str]) -> CommandResult:
+        """Send a fixed "Hello" prompt to verify successful communication."""
+        result: AskResult = self._service.test()
+        if not result.success:
+            return CommandResult(success=False, message=f"Test failed: {result.error}")
+
+        message = (
+            f"Test successful.\n\n"
+            f"{self._display_name(result.provider)} ({result.model}):\n{result.text}"
+        )
+        return CommandResult(success=True, message=message)
 
     @staticmethod
     def _mark(value: bool) -> str:

@@ -9,6 +9,9 @@ from colorama import Style
 from colorama import init as colorama_init
 from loguru import logger
 
+from src.core.ai.provider_factory import ProviderFactory
+from src.core.ai.provider_manager import ProviderManager
+from src.core.ai.provider_registry import ProviderRegistry as AIProviderRegistry
 from src.core.command_router import CommandRouter
 from src.core.config import Config, ConfigError
 from src.core.events import EventBus
@@ -33,6 +36,7 @@ from src.core.scheduler.scheduler import Scheduler
 from src.core.shell import InteractiveShell
 from src.core.telegram.telegram_client import TelegramClient
 from src.core.telegram.telegram_router import TelegramRouter
+from src.modules.ai_module import AIModule
 from src.modules.fast_response_module import FastResponseModule
 from src.modules.invoice_module import InvoiceModule
 from src.modules.memory_module import MemoryModule
@@ -40,6 +44,7 @@ from src.modules.plugin_module import PluginModule
 from src.modules.process_module import ProcessModule
 from src.modules.scheduler_module import SchedulerModule
 from src.modules.telegram_module import TelegramModule
+from src.services.ai_service import AIService
 from src.services.fast_response_service import FastResponseService
 from src.services.invoice_service import InvoiceService
 from src.services.memory_service import MemoryService
@@ -167,6 +172,23 @@ class Bootstrap:
         memory_service = MemoryService(config=config, store=memory_store)
         self._memory_service = memory_service
         router.register(MemoryModule(memory_service))
+
+        # EP-014: AI Provider Manager. Depends only on Config; has no
+        # dependency on any other business-logic module, matching
+        # MemoryService above. Every provider is a config-driven
+        # placeholder (see ProviderFactory) -- no network requests, no
+        # AI API calls, no chat/streaming (EP-014's "IMPORTANT" section).
+        ai_provider_registry = AIProviderRegistry()
+        ai_provider_manager = ProviderManager(
+            registry=ai_provider_registry,
+            enabled=bool(config.get("ai.enabled", False)),
+            default_provider=str(config.get("ai.default_provider", "none")),
+        )
+        provider_factory = ProviderFactory(config=config)
+        for provider in provider_factory.build_all():
+            ai_provider_manager.register_provider(provider)
+        ai_service = AIService(config=config, provider_manager=ai_provider_manager)
+        router.register(AIModule(ai_service))
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))

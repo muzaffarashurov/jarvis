@@ -77,3 +77,30 @@ telegram:
   token: ""
   allowed_chat_ids: []
   polling_interval: 2
+
+ai:
+  # EP-014 AI Provider Manager. Disabled provider selection by default
+  # ("none") -- the rest of Jarvis never needs to know which provider
+  # (if any) is active; see src/core/ai/provider_manager.py.
+  enabled: true
+  default_provider: "none"
+  timeout: 120
+  retry_count: 2
+  max_context_messages: 20
+
+providers:
+  # EP-014 AI Provider Manager. Every provider is disabled by default;
+  # this section only describes how each provider would be reached
+  # once implemented -- no network requests are made by this EP.
+  claude:
+    enabled: false
+    api_key: ""
+  openai:
+    enabled: false
+    api_key: ""
+  ollama:
+    enabled: false
+    endpoint: "http://localhost:11434"
+  lmstudio:
+    enabled: false
+    endpoint: "http://localhost:1234"

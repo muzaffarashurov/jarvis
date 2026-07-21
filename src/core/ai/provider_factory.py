@@ -8,12 +8,14 @@ will be added in future EPs"), every provider it builds was a
 entirely from 'providers.<name>' configuration values, with no
 network request of any kind.
 
-EP-015 (Claude Provider) is the first such future EP: for the
-"claude" provider name, this factory now builds a real ClaudeProvider
+EP-015 (Claude Provider) was the first such future EP: for the
+"claude" provider name, this factory builds a real ClaudeProvider
 (see src/core/ai/claude_provider.py) instead of the placeholder.
-Every other known provider name (openai, ollama, lmstudio) is
-unchanged and still builds a ConfigDrivenProvider, per this task's
-"Do NOT modify" scope.
+EP-015.1 (Gemini Provider) adds a second: for the "gemini" provider
+name, this factory builds a real GeminiProvider (see
+src/core/ai/providers/gemini_provider.py). Every other known
+provider name (openai, ollama, lmstudio) is unchanged and still
+builds a ConfigDrivenProvider, per this task's "Do NOT modify" scope.
 """
 
 from __future__ import annotations
@@ -22,20 +24,23 @@ from typing import Any
 
 from src.core.ai.claude_provider import ClaudeProvider
 from src.core.ai.provider import AIProvider, ProviderHealth, ProviderStatus
+from src.core.ai.providers.gemini_provider import GeminiProvider
 from src.core.config import Config
 
 # Provider names Jarvis's configuration currently recognizes (see
-# 'providers.*' in config/config.yaml). Gemini, DeepSeek and
-# OpenRouter are named as future providers in EP-014's task brief but
-# have no 'providers.*' configuration section yet, so they are not
-# built here -- adding their configuration section is left to the EP
-# that implements them, per the Configuration Policy.
-KNOWN_PROVIDER_NAMES: tuple[str, ...] = ("claude", "openai", "ollama", "lmstudio")
+# 'providers.*' in config/config.yaml). DeepSeek and OpenRouter are
+# named as future providers in EP-014's task brief but have no
+# 'providers.*' configuration section yet, so they are not built here
+# -- adding their configuration section is left to the EP that
+# implements them, per the Configuration Policy. Gemini was added by
+# EP-015.1.
+KNOWN_PROVIDER_NAMES: tuple[str, ...] = ("claude", "gemini", "openai", "ollama", "lmstudio")
 
 # Configuration key each known provider uses to describe how it is
 # reached: API-key-based providers vs. endpoint-based local providers.
 _CREDENTIAL_KEYS: dict[str, str] = {
     "claude": "api_key",
+    "gemini": "api_key",
     "openai": "api_key",
     "ollama": "endpoint",
     "lmstudio": "endpoint",
@@ -145,6 +150,8 @@ class ProviderFactory:
 
         if name == "claude":
             return self._build_claude()
+        if name == "gemini":
+            return self._build_gemini()
 
         credential_key = _CREDENTIAL_KEYS[name]
         enabled = bool(self._config.get(f"providers.{name}.enabled", False))
@@ -177,6 +184,32 @@ class ProviderFactory:
         temperature = self._config.get("providers.claude.temperature", 0.2)
 
         return ClaudeProvider(
+            enabled=enabled,
+            api_key=api_key,
+            model=model,
+            timeout=int(timeout) if isinstance(timeout, (int, float)) else 120,
+            max_tokens=int(max_tokens) if isinstance(max_tokens, (int, float)) else 4096,
+            temperature=float(temperature) if isinstance(temperature, (int, float)) else 0.2,
+        )
+
+    def _build_gemini(self) -> AIProvider:
+        """Build the real GeminiProvider from 'providers.gemini' configuration (EP-015.1).
+
+        Returns:
+            A GeminiProvider reflecting 'providers.gemini.*'.
+        """
+        enabled = bool(self._config.get("providers.gemini.enabled", False))
+        api_key = self._config.get("providers.gemini.api_key", "")
+        if not isinstance(api_key, str):
+            api_key = ""
+        model = self._config.get("providers.gemini.model", "gemini-2.5-flash")
+        if not isinstance(model, str):
+            model = "gemini-2.5-flash"
+        timeout = self._config.get("providers.gemini.timeout", 120)
+        max_tokens = self._config.get("providers.gemini.max_tokens", 4096)
+        temperature = self._config.get("providers.gemini.temperature", 0.2)
+
+        return GeminiProvider(
             enabled=enabled,
             api_key=api_key,
             model=model,

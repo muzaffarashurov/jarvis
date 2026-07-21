@@ -104,6 +104,15 @@ providers:
   openai:
     enabled: false
     api_key: ""
+  gemini:
+    # EP-015.1 Gemini Provider. Real Google Gemini API integration;
+    # never print or log 'api_key'.
+    enabled: false
+    api_key: ""
+    model: "gemini-2.5-flash"
+    timeout: 120
+    temperature: 0.2
+    max_tokens: 4096
   ollama:
     enabled: false
     endpoint: "http://localhost:11434"

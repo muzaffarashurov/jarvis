@@ -12,6 +12,16 @@ requests, calls any AI API, or implements chat/streaming -- `doctor()`
 and `providers()` diagnostics are derived entirely from configuration
 and from each provider's own configuration-derived `health()`/
 `is_available()` checks.
+
+EP-016 additively wires the Conversation Engine into `ask()`/`test()`:
+ConversationManager is injected so every request appends to (and
+reads history from) the current conversation. AIProvider.ask() still
+accepts a single `prompt: str` (its EP-015 contract is unchanged, per
+AI_GENERATION_STANDARD.md's Public API Policy), so history is
+rendered into one provider-format transcript string before being sent
+-- ConversationManager/Conversation stay provider-independent. When
+'conversation.enabled' is False, `ask()` falls back to EP-015's
+original single-shot behavior.
 """
 
 from __future__ import annotations
@@ -20,6 +30,8 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from src.core.ai.conversation import Conversation
+from src.core.ai.conversation_manager import ConversationManager
 from src.core.ai.provider import ModelValidationResult, ProviderError
 from src.core.ai.provider_manager import ProviderManager
 from src.core.ai.provider_registry import ProviderNotFoundError
@@ -203,17 +215,27 @@ class AIService:
     Implements no provider-specific or network logic of its own.
     """
 
-    def __init__(self, config: Config, provider_manager: ProviderManager) -> None:
+    def __init__(
+        self,
+        config: Config,
+        provider_manager: ProviderManager,
+        conversation_manager: ConversationManager,
+    ) -> None:
         """Initialize the AIService.
 
         Args:
             config: Loaded application configuration, used to resolve
-                'ai.enabled' and 'ai.default_provider' for diagnostics.
+                'ai.enabled', 'ai.default_provider', 'ai.max_context_messages'
+                and 'conversation.enabled' for diagnostics/`ask()`.
             provider_manager: The ProviderManager used to select and
                 inspect AI providers.
+            conversation_manager: The ConversationManager (EP-016)
+                whose current conversation `ask()`/`test()` read from
+                and append to.
         """
         self._config = config
         self._provider_manager = provider_manager
+        self._conversation_manager = conversation_manager
 
     # ---------- Public API ----------
 
@@ -349,8 +371,14 @@ class AIService:
     def ask(self, prompt: str) -> AskResult:
         """Send `prompt` to the currently active provider and return its reply.
 
-        Each call is independent -- no conversation history is kept
-        or sent (EP-015: memory integration is left to a future EP).
+        When 'conversation.enabled' is True (EP-016, the default), the
+        current conversation records `prompt` via `append_user()`
+        before the request and the reply via `append_assistant()`
+        after, saving afterward if 'conversation.auto_save' is
+        enabled. The provider still only ever sees a single rendered
+        prompt string (`_render_conversation_prompt()`), never a
+        Message list. When 'conversation.enabled' is False, this
+        behaves exactly as in EP-015: no history is kept or sent.
 
         Args:
             prompt: The user prompt to send.
@@ -368,12 +396,16 @@ class AIService:
             return AskResult(success=False, provider=current.name(), model="", text="", error=message)
 
         name = current.name()
+        conversation = self._begin_turn(prompt)
+        outgoing_prompt = self._render_conversation_prompt(conversation) if conversation else prompt
+
         try:
-            response = current.ask(prompt)
+            response = current.ask(outgoing_prompt)
         except ProviderError as exc:
             logger.error(f"AI request failed (provider='{name}'): {exc}")
             return AskResult(success=False, provider=name, model="", text="", error=str(exc))
 
+        self._complete_turn(conversation, response.text)
         return AskResult(success=True, provider=name, model=response.model, text=response.text, error="")
 
     def test(self) -> AskResult:
@@ -428,3 +460,40 @@ class AIService:
             return ModelsResult(provider="", models=(), error=_NO_PROVIDER_SELECTED)
 
         return ModelsResult(provider=current.name(), models=tuple(current.list_models()), error="")
+
+    # ---------- EP-016: Conversation Engine helpers ----------
+
+    def _begin_turn(self, prompt: str) -> Conversation | None:
+        """Append `prompt` to the current conversation, if enabled.
+
+        Returns:
+            The current Conversation `prompt` was recorded to, or
+            None if 'conversation.enabled' is False (EP-015 fallback).
+        """
+        if not bool(self._config.get("conversation.enabled", True)):
+            return None
+        conversation = self._conversation_manager.current()
+        conversation.append_user(prompt)
+        return conversation
+
+    def _complete_turn(self, conversation: Conversation | None, reply_text: str) -> None:
+        """Append the provider's reply to `conversation` and save, if enabled."""
+        if conversation is None:
+            return
+        conversation.append_assistant(reply_text)
+        if self._conversation_manager.is_auto_save() and self._conversation_manager.save():
+            logger.info(f"Conversation saved: '{conversation.title}'.")
+
+    def _render_conversation_prompt(self, conversation: Conversation) -> str:
+        """Render `conversation`'s recent history into one provider-format prompt.
+
+        AIProvider.ask() accepts only a `prompt: str` (EP-015's
+        unchanged contract), so history is rendered as a role-labeled
+        transcript instead of a Message list. Bounded by the existing
+        'ai.max_context_messages' (EP-014) rather than a new key.
+        """
+        limit = int(self._config.get("ai.max_context_messages", 20))
+        history = conversation.messages()
+        if limit > 0:
+            history = history[-limit:]
+        return "\n".join(f"{message.role.value.capitalize()}: {message.content}" for message in history)

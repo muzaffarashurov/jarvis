@@ -9,6 +9,7 @@ from colorama import Style
 from colorama import init as colorama_init
 from loguru import logger
 
+from src.core.ai.conversation_manager import ConversationManager
 from src.core.ai.provider_factory import ProviderFactory
 from src.core.ai.provider_manager import ProviderManager
 from src.core.ai.provider_registry import ProviderRegistry as AIProviderRegistry
@@ -37,6 +38,7 @@ from src.core.shell import InteractiveShell
 from src.core.telegram.telegram_client import TelegramClient
 from src.core.telegram.telegram_router import TelegramRouter
 from src.modules.ai_module import AIModule
+from src.modules.conversation_module import ConversationModule
 from src.modules.fast_response_module import FastResponseModule
 from src.modules.invoice_module import InvoiceModule
 from src.modules.memory_module import MemoryModule
@@ -173,6 +175,13 @@ class Bootstrap:
         self._memory_service = memory_service
         router.register(MemoryModule(memory_service))
 
+        # EP-016: Conversation Engine. Depends only on Config, matching
+        # MemoryStore/ProviderRegistry above; provider-independent
+        # (no import of Claude/Gemini/OpenAI/Ollama/LM Studio). Wired
+        # before AIService so it can be injected into it.
+        conversation_manager = ConversationManager(config=config)
+        router.register(ConversationModule(conversation_manager))
+
         # EP-014: AI Provider Manager. Depends only on Config; has no
         # dependency on any other business-logic module, matching
         # MemoryService above. Every provider is a config-driven
@@ -187,7 +196,11 @@ class Bootstrap:
         provider_factory = ProviderFactory(config=config)
         for provider in provider_factory.build_all():
             ai_provider_manager.register_provider(provider)
-        ai_service = AIService(config=config, provider_manager=ai_provider_manager)
+        ai_service = AIService(
+            config=config,
+            provider_manager=ai_provider_manager,
+            conversation_manager=conversation_manager,
+        )
         router.register(AIModule(ai_service))
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)

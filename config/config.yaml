@@ -88,6 +88,18 @@ ai:
   retry_count: 2
   max_context_messages: 20
 
+conversation:
+  # EP-016 Conversation Engine. Provider-independent chat session
+  # storage shared by the CLI, Voice Assistant, Telegram, Desktop UI,
+  # REST API and Scheduler; see src/core/ai/conversation_manager.py.
+  # "default" is created automatically at startup.
+  enabled: true
+  auto_save: true
+  max_messages: 100
+  max_conversations: 100
+  storage_file: "data/database/conversations.json"
+  truncate_strategy: "oldest"
+
 providers:
   # EP-014 AI Provider Manager. Every provider is disabled by default;
   # this section only describes how each provider would be reached

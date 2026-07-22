@@ -95,6 +95,35 @@ class PingResult:
     message: str
 
 
+@dataclass(frozen=True)
+class ModelValidationResult:
+    """Result of `AIProvider.validate_configured_model()` (EP-015.2 / EP-015.3).
+
+    Shared return type for every provider's model-existence check, so
+    AIService and the CLI can format the outcome of `ai use <provider>`
+    identically regardless of which provider is active. Providers that
+    can verify their configured model against a live model list (e.g.
+    GeminiProvider, via ModelService.ListModels) override
+    `validate_configured_model()` and return real values here; every
+    other provider relies on `AIProvider`'s default implementation.
+
+    Attributes:
+        valid: Whether the configured model was confirmed usable.
+        configured_model: The model this provider is configured to
+            use, or "" if this provider does not expose one generically.
+        available_models: Every model this provider confirmed is
+            available, or an empty tuple if not (or not applicable).
+        suggested_model: Closest available match by name, or None.
+        message: Human-readable summary, especially on failure.
+    """
+
+    valid: bool
+    configured_model: str
+    available_models: tuple[str, ...]
+    suggested_model: str | None
+    message: str
+
+
 class ProviderError(Exception):
     """Base class for errors raised while talking to an AI provider (EP-015)."""
 
@@ -220,3 +249,39 @@ class AIProvider(ABC):
         empty list.
         """
         return []
+
+    def validate_configured_model(self) -> ModelValidationResult:
+        """Verify this provider's configured model is usable (EP-015.2 / EP-015.3).
+
+        Called by `AIService.use_provider()` immediately after
+        `ai use <provider>` selects this provider, so problems surface
+        right away instead of on the next `ask()`. Base implementation
+        performs no per-model check (it has no generic way to know
+        which model a provider is configured for) and instead falls
+        back to this provider's own configuration-derived `health()`
+        check -- never a network request. Providers that can confirm
+        their configured model against a live model list (e.g.
+        GeminiProvider, via ModelService.ListModels) should override
+        this method with a real check.
+
+        Returns:
+            A ModelValidationResult: `valid` mirrors `health().available`;
+            `configured_model` is "" since the base class has no
+            generic concept of a single configured model name.
+        """
+        healthy = self.health()
+        if not healthy.available:
+            return ModelValidationResult(
+                valid=False,
+                configured_model="",
+                available_models=(),
+                suggested_model=None,
+                message=healthy.message,
+            )
+        return ModelValidationResult(
+            valid=True,
+            configured_model="",
+            available_models=(),
+            suggested_model=None,
+            message=f"Provider '{self.name()}' does not implement model-level validation.",
+        )

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from src.core.ai.provider import ProviderError
+from src.core.ai.provider import ModelValidationResult, ProviderError
 from src.core.ai.provider_manager import ProviderManager
 from src.core.ai.provider_registry import ProviderNotFoundError
 from src.core.command_router import CommandResult
@@ -34,6 +34,7 @@ __all__ = [
     "ModelsResult",
     "PingReport",
     "ProviderInfo",
+    "ProviderSelectionResult",
 ]
 
 _NO_PROVIDER_SELECTED: str = "No AI provider is currently selected. Use 'ai use <provider>'."
@@ -135,6 +136,29 @@ class ProviderInfo:
 
 
 @dataclass(frozen=True)
+class ProviderSelectionResult:
+    """Result of `ai use <provider>` (EP-015.3).
+
+    Attributes:
+        success: Whether `name` was selected as the current provider.
+            False if the AI subsystem is disabled or `name` is not a
+            registered provider; `validation` is always None in that
+            case, since no provider was selected to validate.
+        provider: The provider name that was requested.
+        message: A short, human-friendly status line -- the selection
+            error on failure, or "AI provider set to '<name>'." on
+            success.
+        validation: The result of calling `provider.validate_configured_model()`
+            immediately after selection, or None if selection failed.
+    """
+
+    success: bool
+    provider: str
+    message: str
+    validation: ModelValidationResult | None
+
+
+@dataclass(frozen=True)
 class AIDoctorReport:
     """Result of `ai doctor`'s diagnostic checks.
 
@@ -221,29 +245,66 @@ class AIService:
             )
         return rows
 
-    def use_provider(self, name: str) -> CommandResult:
+    def use_provider(self, name: str) -> ProviderSelectionResult:
         """Select `name` as the currently active AI provider.
+
+        Immediately after selection, this calls
+        `provider.validate_configured_model()` (EP-015.3) so a
+        misconfigured model (e.g. a typo in 'providers.gemini.model')
+        is reported right away instead of only surfacing on the next
+        `ask()`/`ping()`. Every provider supports this call: providers
+        that can verify their model against a live model list (e.g.
+        GeminiProvider) override it with a real check; every other
+        provider falls back to `AIProvider`'s configuration-derived
+        default (see src/core/ai/provider.py) -- so existing providers
+        (OpenAI, Claude, Ollama, LM Studio) work unmodified. Never
+        raises: `validate_configured_model()` maps every failure into
+        `ModelValidationResult`, never a raw provider exception.
 
         Args:
             name: The registered provider name to activate (e.g.
                 "ollama").
 
         Returns:
-            A CommandResult describing whether the provider was
-            selected.
+            A ProviderSelectionResult describing whether `name` was
+            selected and, on success, the model validation outcome.
         """
         if not self._provider_manager.is_enabled():
             message = "AI subsystem is disabled. Enable 'ai.enabled' in config.yaml to use a provider."
             logger.error(f"AI use rejected: {message}")
-            return CommandResult(success=False, message=message)
+            return ProviderSelectionResult(success=False, provider=name, message=message, validation=None)
 
+        logger.info(f"Provider selected: '{name}'.")
         try:
             self._provider_manager.set_current(name)
         except ProviderNotFoundError as exc:
             logger.error(f"AI use failed: {exc}")
-            return CommandResult(success=False, message=str(exc))
+            return ProviderSelectionResult(success=False, provider=name, message=str(exc), validation=None)
 
-        return CommandResult(success=True, message=f"AI provider set to '{name}'.")
+        logger.info(f"Current provider changed: '{name}'.")
+
+        provider = self._provider_manager.get_current()
+        validation: ModelValidationResult | None = None
+        if provider is not None:
+            logger.info(f"Model validation started (provider='{name}').")
+            validation = provider.validate_configured_model()
+            if validation.valid:
+                logger.info(
+                    f"Model validation passed (provider='{name}', "
+                    f"model='{validation.configured_model}')."
+                )
+            else:
+                logger.warning(
+                    f"Model validation failed (provider='{name}', "
+                    f"model='{validation.configured_model}'): {validation.message}"
+                )
+
+        return ProviderSelectionResult(
+            success=True,
+            provider=name,
+            message=f"AI provider set to '{name}'.",
+            validation=validation,
+        )
 
     def disable(self) -> CommandResult:
         """Disable the AI subsystem and clear the current provider selection."""

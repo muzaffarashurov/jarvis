@@ -21,6 +21,7 @@ from src.services.ai_service import (
     ModelsResult,
     PingReport,
     ProviderInfo,
+    ProviderSelectionResult,
 )
 
 HELP_TEXT: str = (
@@ -43,6 +44,7 @@ HELP_TEXT: str = (
 # providers by their lowercase identifier (e.g. "lmstudio").
 _DISPLAY_NAMES: dict[str, str] = {
     "claude": "Claude",
+    "gemini": "Gemini",
     "openai": "OpenAI",
     "ollama": "Ollama",
     "lmstudio": "LM Studio",
@@ -142,6 +144,12 @@ class AIModule:
     def _use(self, arguments: list[str]) -> CommandResult:
         """Select an AI provider as the currently active provider.
 
+        On success, also shows the outcome of the model validation
+        `AIService.use_provider()` runs immediately after selection
+        (EP-015.3): the configured model and whether it was confirmed
+        usable, or the provider's diagnostic (available models and
+        closest match) if not.
+
         Args:
             arguments: `[provider_name]`.
 
@@ -151,7 +159,27 @@ class AIModule:
         if len(arguments) != 1:
             return CommandResult(success=False, message="Usage: ai use <provider>")
 
-        return self._service.use_provider(arguments[0].lower())
+        result: ProviderSelectionResult = self._service.use_provider(arguments[0].lower())
+        if not result.success:
+            return CommandResult(success=False, message=result.message)
+
+        lines = [f"Provider: {self._display_name(result.provider)}"]
+        validation = result.validation
+        if validation is not None and validation.configured_model:
+            lines.append(f"Configured model: {validation.configured_model}")
+        if validation is not None:
+            if validation.valid:
+                lines.append("Status: OK")
+            else:
+                lines.append("Status: NOT FOUND")
+                available = ", ".join(validation.available_models) or "(none returned)"
+                lines.append(f"Available models: {available}")
+                if validation.suggested_model:
+                    lines.append(f"Closest match: {validation.suggested_model}")
+                lines.append(f"Message: {validation.message}")
+        lines.append(result.message)
+
+        return CommandResult(success=True, message="\n".join(lines))
 
     def _disable(self, arguments: list[str]) -> CommandResult:
         """Disable the AI subsystem."""

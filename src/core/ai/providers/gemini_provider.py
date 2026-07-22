@@ -1,4 +1,4 @@
-"""Gemini Provider (EP-015.1 / EP-015.2): real Google Gemini API integration.
+"""Gemini Provider (EP-015.1 / EP-015.2 / EP-015.3): real Google Gemini API integration.
 
 GeminiProvider is the second concrete AIProvider (EP-014), talking to
 a real AI API over HTTPS via the existing `requests` dependency, the
@@ -21,21 +21,20 @@ Responsibilities:
     - Every failure maps into the shared ProviderError hierarchy
       (src/core/ai/provider.py); never logs/returns the raw API key.
 
-EP-015.2 scope note: `ai use <provider>` runs entirely through
-ProviderManager.set_current(), which only checks the name is
-registered and never calls back into the provider. This task forbids
-modifying ProviderManager/AIService, so `ai use gemini` cannot itself
-trigger a live check here. `validate_configured_model()` implements
-that check, self-contained and ready to wire in -- see its TODO.
-Until wired, the same diagnostic surfaces on the next
-`ask()`/`ping()`/`ai test` against an invalid model.
+EP-015.3 note: `validate_configured_model()` is now called by
+AIService.use_provider() right after `ai use gemini` selects this
+provider, so an invalid 'providers.gemini.model' is reported
+immediately instead of only surfacing on the next
+`ask()`/`ping()`/`ai test`. `ping()` also reuses this same check (via
+`validate_configured_model()`) to decide `authenticated` from
+ListModels rather than from a generateContent call alone, so an
+invalid model no longer masquerades as a failed authentication.
 """
 
 from __future__ import annotations
 
 import difflib
 import time
-from dataclasses import dataclass
 from typing import Any
 
 import requests
@@ -43,6 +42,7 @@ from loguru import logger
 
 from src.core.ai.provider import (
     AIProvider,
+    ModelValidationResult,
     PingResult,
     ProviderAuthenticationError,
     ProviderConfigurationError,
@@ -56,33 +56,12 @@ from src.core.ai.provider import (
     ProviderUnavailableError,
 )
 
-__all__ = ["GeminiProvider", "ModelValidationResult"]
+__all__ = ["GeminiProvider"]
 
 _API_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/models"
 _PROVIDER_NAME: str = "gemini"
 _GENERATE_CONTENT_METHOD: str = "generateContent"
 _MODEL_NAME_PREFIX: str = "models/"
-
-
-@dataclass(frozen=True)
-class ModelValidationResult:
-    """Result of `GeminiProvider.validate_configured_model()` (EP-015.2).
-
-    Attributes:
-        valid: Whether 'providers.gemini.model' is in the live
-            ListModels result for this API key.
-        configured_model: The model set in 'providers.gemini.model'.
-        available_models: Every model this key can call
-            `generateContent` on, per ModelService.ListModels.
-        suggested_model: Closest available match by name (or None).
-        message: Human-readable summary.
-    """
-
-    valid: bool
-    configured_model: str
-    available_models: tuple[str, ...]
-    suggested_model: str | None
-    message: str
 
 
 class GeminiProvider(AIProvider):
@@ -204,7 +183,19 @@ class GeminiProvider(AIProvider):
         return result
 
     def ping(self) -> PingResult:
-        """Check reachability, latency, model and authentication for this provider."""
+        """Check reachability, latency, model and authentication for this provider.
+
+        `authenticated` reflects API authentication only (EP-015.3):
+        it is derived from `validate_configured_model()`, which calls
+        ModelService.ListModels -- if that call succeeds, the API key
+        is valid, regardless of whether 'providers.gemini.model' is
+        itself usable for `generateContent`. `reachable` reflects
+        whether text generation is *currently* available: it is only
+        True once an actual `generateContent` call (via `ask()`)
+        succeeds. This avoids the EP-015.2 bug where an invalid
+        configured model (a `generateContent` 404) was reported as a
+        failed authentication.
+        """
         if not self.is_available():
             return PingResult(
                 reachable=False,
@@ -215,14 +206,28 @@ class GeminiProvider(AIProvider):
             )
 
         started = time.monotonic()
+        validation = self.validate_configured_model()
+
+        # ListModels succeeded if either the model matched (valid) or it
+        # returned a (possibly non-matching) model list -- both mean the
+        # API key itself was accepted. An empty available_models with
+        # valid=False means ListModels itself could not be completed
+        # (e.g. bad credentials), which is a real authentication failure.
+        listmodels_ok = validation.valid or bool(validation.available_models)
+        if not listmodels_ok:
+            return self._ping_result(started, reachable=False, authenticated=False, message=validation.message)
+
+        if not validation.valid:
+            # Authenticated, but the configured model can't currently
+            # generate text -- text generation is not reachable.
+            return self._ping_result(started, reachable=False, authenticated=True, message=validation.message)
+
         try:
             response = self.ask("ping", max_tokens=1)
-        except ProviderAuthenticationError as exc:
-            return self._ping_result(started, reachable=True, authenticated=False, message=str(exc))
         except ProviderRateLimitError as exc:
             return self._ping_result(started, reachable=True, authenticated=True, message=str(exc))
         except ProviderError as exc:
-            return self._ping_result(started, reachable=False, authenticated=False, message=str(exc))
+            return self._ping_result(started, reachable=False, authenticated=True, message=str(exc))
 
         return PingResult(
             reachable=True,
@@ -272,16 +277,10 @@ class GeminiProvider(AIProvider):
     def validate_configured_model(self) -> ModelValidationResult:
         """Verify 'providers.gemini.model' against the live ListModels result (EP-015.2).
 
-        The model-existence check requested for `ai use gemini`,
-        implemented self-contained so it is ready to be wired in.
-
-        TODO: ProviderManager.set_current() only checks the name is
-        registered and never calls back into the provider; wiring
-        this into `ai use gemini` needs one call in
-        AIService.use_provider() after set_current() succeeds -- out
-        of this task's allowed scope, so not yet called automatically.
-        Until then, the same diagnostic surfaces on the next
-        `ask()`/`ping()`/`ai test` via `_build_model_not_found_error()`.
+        Called by `AIService.use_provider()` right after `ai use
+        gemini` selects this provider (EP-015.3), and reused by
+        `ping()` to determine `authenticated` from ListModels rather
+        than from a generateContent call alone.
 
         Returns:
             Whether the configured model exists for this API key,

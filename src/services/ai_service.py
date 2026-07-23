@@ -15,13 +15,22 @@ and from each provider's own configuration-derived `health()`/
 
 EP-016 additively wires the Conversation Engine into `ask()`/`test()`:
 ConversationManager is injected so every request appends to (and
-reads history from) the current conversation. AIProvider.ask() still
-accepts a single `prompt: str` (its EP-015 contract is unchanged, per
-AI_GENERATION_STANDARD.md's Public API Policy), so history is
-rendered into one provider-format transcript string before being sent
--- ConversationManager/Conversation stay provider-independent. When
-'conversation.enabled' is False, `ask()` falls back to EP-015's
-original single-shot behavior.
+reads history from) the current conversation.
+
+EP-017 additively wires the Prompt Engine into `ask()`/`test()`:
+PromptManager is injected so every request is composed through it
+before being sent, per EP-017's fixed flow:
+
+    User -> Conversation Engine -> Prompt Engine -> ProviderManager -> Provider
+
+AIProvider.ask() still accepts a single `prompt: str` (its EP-015
+contract is unchanged, per AI_GENERATION_STANDARD.md's Public API
+Policy), so the conversation history is rendered into context text and
+the Prompt Engine's `Prompt.rendered` is what is actually sent --
+ConversationManager/Conversation/PromptManager/PromptBuilder/Prompt all
+stay provider-independent. When 'conversation.enabled' is False,
+`ask()` falls back to EP-015's original single-shot behavior, still
+routed through the Prompt Engine.
 """
 
 from __future__ import annotations
@@ -32,6 +41,8 @@ from loguru import logger
 
 from src.core.ai.conversation import Conversation
 from src.core.ai.conversation_manager import ConversationManager
+from src.core.ai.prompt_builder import PromptTemplateNotFoundError, PromptValidationError
+from src.core.ai.prompt_manager import PromptManager
 from src.core.ai.provider import ModelValidationResult, ProviderError
 from src.core.ai.provider_manager import ProviderManager
 from src.core.ai.provider_registry import ProviderNotFoundError
@@ -220,6 +231,7 @@ class AIService:
         config: Config,
         provider_manager: ProviderManager,
         conversation_manager: ConversationManager,
+        prompt_manager: PromptManager,
     ) -> None:
         """Initialize the AIService.
 
@@ -232,10 +244,13 @@ class AIService:
             conversation_manager: The ConversationManager (EP-016)
                 whose current conversation `ask()`/`test()` read from
                 and append to.
+            prompt_manager: The PromptManager (EP-017) `ask()`/`test()`
+                use to compose the final prompt sent to the provider.
         """
         self._config = config
         self._provider_manager = provider_manager
         self._conversation_manager = conversation_manager
+        self._prompt_manager = prompt_manager
 
     # ---------- Public API ----------
 
@@ -371,14 +386,19 @@ class AIService:
     def ask(self, prompt: str) -> AskResult:
         """Send `prompt` to the currently active provider and return its reply.
 
-        When 'conversation.enabled' is True (EP-016, the default), the
+        Follows EP-017's fixed flow: User -> Conversation Engine ->
+        Prompt Engine -> ProviderManager -> Provider. When
+        'conversation.enabled' is True (EP-016, the default), the
         current conversation records `prompt` via `append_user()`
         before the request and the reply via `append_assistant()`
         after, saving afterward if 'conversation.auto_save' is
-        enabled. The provider still only ever sees a single rendered
-        prompt string (`_render_conversation_prompt()`), never a
-        Message list. When 'conversation.enabled' is False, this
-        behaves exactly as in EP-015: no history is kept or sent.
+        enabled; prior history is rendered into context text and
+        handed to the Prompt Engine (`_render_conversation_context()`).
+        When 'conversation.enabled' is False, no history is kept or
+        sent, matching EP-015's original single-shot behavior -- `ask()`
+        still routes through the Prompt Engine either way. The
+        provider still only ever sees a single final prompt string
+        (`Prompt.rendered`), never a Message list or Prompt object.
 
         Args:
             prompt: The user prompt to send.
@@ -397,10 +417,20 @@ class AIService:
 
         name = current.name()
         conversation = self._begin_turn(prompt)
-        outgoing_prompt = self._render_conversation_prompt(conversation) if conversation else prompt
+        context = self._render_conversation_context(conversation) if conversation else ""
 
         try:
-            response = current.ask(outgoing_prompt)
+            built_prompt = self._prompt_manager.build(
+                user_prompt=prompt,
+                context=[context] if context else None,
+                provider_name=name,
+            )
+        except (PromptValidationError, PromptTemplateNotFoundError) as exc:
+            logger.error(f"Prompt Engine rejected request (provider='{name}'): {exc}")
+            return AskResult(success=False, provider=name, model="", text="", error=str(exc))
+
+        try:
+            response = current.ask(built_prompt.rendered)
         except ProviderError as exc:
             logger.error(f"AI request failed (provider='{name}'): {exc}")
             return AskResult(success=False, provider=name, model="", text="", error=str(exc))
@@ -484,16 +514,21 @@ class AIService:
         if self._conversation_manager.is_auto_save() and self._conversation_manager.save():
             logger.info(f"Conversation saved: '{conversation.title}'.")
 
-    def _render_conversation_prompt(self, conversation: Conversation) -> str:
-        """Render `conversation`'s recent history into one provider-format prompt.
+    def _render_conversation_context(self, conversation: Conversation) -> str:
+        """Render `conversation`'s prior history into Prompt Engine context text.
 
-        AIProvider.ask() accepts only a `prompt: str` (EP-015's
-        unchanged contract), so history is rendered as a role-labeled
-        transcript instead of a Message list. Bounded by the existing
-        'ai.max_context_messages' (EP-014) rather than a new key.
+        Excludes the just-appended current turn (`_begin_turn()`'s
+        `append_user()` call): that turn is passed to PromptManager.build()
+        separately, as `user_prompt`, so it is not duplicated in the
+        Prompt Engine's "Conversation Context" stage. Bounded by the
+        existing 'ai.max_context_messages' (EP-014) rather than a new
+        key. Rendered as a role-labeled transcript since AIProvider.ask()
+        accepts only a `prompt: str` (EP-015's unchanged contract).
         """
         limit = int(self._config.get("ai.max_context_messages", 20))
-        history = conversation.messages()
+        history = conversation.messages()[:-1]
         if limit > 0:
             history = history[-limit:]
+        if not history:
+            return ""
         return "\n".join(f"{message.role.value.capitalize()}: {message.content}" for message in history)

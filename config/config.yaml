@@ -100,6 +100,18 @@ conversation:
   storage_file: "data/database/conversations.json"
   truncate_strategy: "oldest"
 
+prompt:
+  # EP-017 Prompt Engine. Provider-independent prompt composition
+  # shared by every AI request; see src/core/ai/prompt_manager.py.
+  # Templates are read from 'paths.prompts' (already reserved above).
+  enabled: true
+  system_prompt: ""
+  append_datetime: false
+  append_provider_name: false
+  append_os_information: false
+  append_working_directory: false
+  max_prompt_size: 32000
+
 providers:
   # EP-014 AI Provider Manager. Every provider is disabled by default;
   # this section only describes how each provider would be reached

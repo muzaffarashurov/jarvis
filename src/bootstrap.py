@@ -9,6 +9,7 @@ from colorama import Style
 from colorama import init as colorama_init
 from loguru import logger
 
+from src.core.ai.context_manager import ContextManager
 from src.core.ai.conversation_manager import ConversationManager
 from src.core.ai.prompt_manager import PromptManager
 from src.core.ai.provider_factory import ProviderFactory
@@ -189,6 +190,14 @@ class Bootstrap:
         # AIService so it can be injected into it.
         prompt_manager = PromptManager(config=config)
 
+        # EP-018: Context Engine. Depends only on Config, matching
+        # ConversationManager/PromptManager above; provider-independent
+        # (no import of Claude/Gemini/OpenAI/Ollama/LM Studio). Wired
+        # before AIService so it can be injected into it. Only one
+        # ContextManager instance may exist, so its ContextLoader's
+        # project-files cache is reused across every request.
+        context_manager = ContextManager(config=config)
+
         # EP-014: AI Provider Manager. Depends only on Config; has no
         # dependency on any other business-logic module, matching
         # MemoryService above. Every provider is a config-driven
@@ -208,6 +217,7 @@ class Bootstrap:
             provider_manager=ai_provider_manager,
             conversation_manager=conversation_manager,
             prompt_manager=prompt_manager,
+            context_manager=context_manager,
         )
         router.register(AIModule(ai_service))
 

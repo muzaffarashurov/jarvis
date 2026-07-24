@@ -587,6 +587,20 @@ Never silently add new packages.
 
 ---
 
+## Completion Rule
+
+An EP is NOT complete after analysis.
+
+An EP is complete only after:
+
+- all code is generated;
+- every modified file is shown;
+- implementation is finished.
+
+Never stop after an audit or summary if code generation was requested.
+
+---
+
 # Final Rule
 
 When in doubt

@@ -19,18 +19,28 @@ reads history from) the current conversation.
 
 EP-017 additively wires the Prompt Engine into `ask()`/`test()`:
 PromptManager is injected so every request is composed through it
-before being sent, per EP-017's fixed flow:
+before being sent.
 
-    User -> Conversation Engine -> Prompt Engine -> ProviderManager -> Provider
+EP-018.1 additively wires the Context Engine into `ask()`/`test()`:
+ContextManager is injected (constructed once in the composition root,
+matching ConversationManager/PromptManager) and replaces the legacy
+private `_render_conversation_context()` helper. The fixed flow is now:
+
+    User -> Conversation Engine -> Context Engine -> Prompt Engine -> ProviderManager -> Provider
 
 AIProvider.ask() still accepts a single `prompt: str` (its EP-015
 contract is unchanged, per AI_GENERATION_STANDARD.md's Public API
-Policy), so the conversation history is rendered into context text and
-the Prompt Engine's `Prompt.rendered` is what is actually sent --
-ConversationManager/Conversation/PromptManager/PromptBuilder/Prompt all
-stay provider-independent. When 'conversation.enabled' is False,
-`ask()` falls back to EP-015's original single-shot behavior, still
-routed through the Prompt Engine.
+Policy). `ContextManager.create()` composes a Context from the current
+conversation (plus project docs, working directory, etc. per EP-018),
+and `Context.rendered` is handed to the Prompt Engine as context; the
+Prompt Engine's `Prompt.rendered` is what is actually sent --
+ConversationManager/Conversation/ContextManager/Context/PromptManager/
+PromptBuilder/Prompt all stay provider-independent. When
+'conversation.enabled' is False, `ask()` falls back to EP-015's
+original single-shot behavior (an empty conversation still yields
+whatever non-conversation Context sources -- project files, working
+directory, etc. -- are enabled), still routed through the Context and
+Prompt Engines.
 """
 
 from __future__ import annotations
@@ -39,6 +49,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from src.core.ai.context_manager import ContextManager
 from src.core.ai.conversation import Conversation
 from src.core.ai.conversation_manager import ConversationManager
 from src.core.ai.prompt_builder import PromptTemplateNotFoundError, PromptValidationError
@@ -232,6 +243,7 @@ class AIService:
         provider_manager: ProviderManager,
         conversation_manager: ConversationManager,
         prompt_manager: PromptManager,
+        context_manager: ContextManager,
     ) -> None:
         """Initialize the AIService.
 
@@ -246,11 +258,16 @@ class AIService:
                 and append to.
             prompt_manager: The PromptManager (EP-017) `ask()`/`test()`
                 use to compose the final prompt sent to the provider.
+            context_manager: The ContextManager (EP-018) `ask()` uses
+                to compose the project/working-directory/conversation
+                Context whose `.rendered` text is handed to the Prompt
+                Engine, replacing the legacy `_render_conversation_context()`.
         """
         self._config = config
         self._provider_manager = provider_manager
         self._conversation_manager = conversation_manager
         self._prompt_manager = prompt_manager
+        self._context_manager = context_manager
 
     # ---------- Public API ----------
 
@@ -386,19 +403,22 @@ class AIService:
     def ask(self, prompt: str) -> AskResult:
         """Send `prompt` to the currently active provider and return its reply.
 
-        Follows EP-017's fixed flow: User -> Conversation Engine ->
-        Prompt Engine -> ProviderManager -> Provider. When
-        'conversation.enabled' is True (EP-016, the default), the
+        Follows EP-018's fixed flow: User -> Conversation Engine ->
+        Context Engine -> Prompt Engine -> ProviderManager -> Provider.
+        When 'conversation.enabled' is True (EP-016, the default), the
         current conversation records `prompt` via `append_user()`
         before the request and the reply via `append_assistant()`
         after, saving afterward if 'conversation.auto_save' is
-        enabled; prior history is rendered into context text and
-        handed to the Prompt Engine (`_render_conversation_context()`).
-        When 'conversation.enabled' is False, no history is kept or
-        sent, matching EP-015's original single-shot behavior -- `ask()`
-        still routes through the Prompt Engine either way. The
-        provider still only ever sees a single final prompt string
-        (`Prompt.rendered`), never a Message list or Prompt object.
+        enabled; the (possibly None) conversation is handed to
+        `ContextManager.create()`, whose resulting `Context.rendered`
+        (conversation history, project docs, working directory, etc.)
+        is what is passed to the Prompt Engine as context. When
+        'conversation.enabled' is False, no history is kept or sent,
+        matching EP-015's original single-shot behavior -- `ask()`
+        still routes through the Context and Prompt Engines either
+        way. The provider still only ever sees a single final prompt
+        string (`Prompt.rendered`), never a Message list, Context, or
+        Prompt object.
 
         Args:
             prompt: The user prompt to send.
@@ -417,7 +437,7 @@ class AIService:
 
         name = current.name()
         conversation = self._begin_turn(prompt)
-        context = self._render_conversation_context(conversation) if conversation else ""
+        context = self._context_manager.create(conversation=conversation).rendered
 
         try:
             built_prompt = self._prompt_manager.build(
@@ -513,22 +533,3 @@ class AIService:
         conversation.append_assistant(reply_text)
         if self._conversation_manager.is_auto_save() and self._conversation_manager.save():
             logger.info(f"Conversation saved: '{conversation.title}'.")
-
-    def _render_conversation_context(self, conversation: Conversation) -> str:
-        """Render `conversation`'s prior history into Prompt Engine context text.
-
-        Excludes the just-appended current turn (`_begin_turn()`'s
-        `append_user()` call): that turn is passed to PromptManager.build()
-        separately, as `user_prompt`, so it is not duplicated in the
-        Prompt Engine's "Conversation Context" stage. Bounded by the
-        existing 'ai.max_context_messages' (EP-014) rather than a new
-        key. Rendered as a role-labeled transcript since AIProvider.ask()
-        accepts only a `prompt: str` (EP-015's unchanged contract).
-        """
-        limit = int(self._config.get("ai.max_context_messages", 20))
-        history = conversation.messages()[:-1]
-        if limit > 0:
-            history = history[-limit:]
-        if not history:
-            return ""
-        return "\n".join(f"{message.role.value.capitalize()}: {message.content}" for message in history)

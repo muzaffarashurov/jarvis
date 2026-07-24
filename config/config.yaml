@@ -112,6 +112,19 @@ prompt:
   append_working_directory: false
   max_prompt_size: 32000
 
+context:
+  # EP-018 Context Loader. Provider-independent context gathering,
+  # supplying the Prompt Engine's "Conversation Context" stage; see
+  # src/core/ai/context_manager.py. 'include_environment' defaults to
+  # false since even the safe whitelisted environment summary is
+  # extra tokens most requests do not need.
+  enabled: true
+  auto_load: true
+  max_context_size: 50000
+  include_environment: false
+  include_working_directory: true
+  include_project_files: true
+
 providers:
   # EP-014 AI Provider Manager. Every provider is disabled by default;
   # this section only describes how each provider would be reached
@@ -119,7 +132,7 @@ providers:
   claude:
     # EP-015 Claude Provider. Real Anthropic API integration; never
     # print or log 'api_key'.
-    enabled: false
+    enabled: true
     api_key: ""
     model: "claude-sonnet-4"
     timeout: 120
@@ -131,7 +144,7 @@ providers:
   gemini:
     # EP-015.1 Gemini Provider. Real Google Gemini API integration;
     # never print or log 'api_key'.
-    enabled: false
+    enabled: true
     api_key: ""
     model: "gemini-flash-latest"
     timeout: 120

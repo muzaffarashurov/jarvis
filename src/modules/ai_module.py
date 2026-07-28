@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Callable
 
+from src.core.ai.context_manager import ContextStatusReport
 from src.core.command_router import CommandResult
 from src.services.ai_service import (
     AIDoctorReport,
@@ -36,6 +37,7 @@ HELP_TEXT: str = (
     "ai ping\n"
     "ai models\n"
     "ai test\n"
+    "ai context\n"
     "ai help"
 )
 
@@ -75,6 +77,7 @@ class AIModule:
             "ping": self._ping,
             "models": self._models,
             "test": self._test,
+            "context": self._context,
             "help": self._help,
         }
 
@@ -269,6 +272,28 @@ class AIModule:
             f"{self._display_name(result.provider)} ({result.model}):\n{result.text}"
         )
         return CommandResult(success=True, message=message)
+
+    def _context(self, arguments: list[str]) -> CommandResult:
+        """Display Context Engine diagnostics (EP-018.2): repository root, working
+        directory, loaded/selected/missing documents, cache status, and context size.
+        """
+        report: ContextStatusReport = self._service.context_status()
+        lines = [
+            "Context Status",
+            f"Repository root : {report.repository_root or 'n/a'}",
+            f"Working directory : {report.working_directory or 'n/a'}",
+            f"Loaded documents : {', '.join(report.loaded_documents) or 'NONE'}",
+            f"Selected documents : {', '.join(report.selected_documents) or 'NONE'}",
+            f"Missing documents : {', '.join(report.missing_documents) or 'NONE'}",
+            f"Cached documents : {', '.join(report.cached_documents) or 'NONE'}",
+            f"Total context size : {report.total_context_size} characters",
+        ]
+        if report.document_sizes:
+            lines.append("Context size per document :")
+            lines.extend(
+                f"  - {name}: {size} characters" for name, size in report.document_sizes.items()
+            )
+        return CommandResult(success=True, message="\n".join(lines))
 
     @staticmethod
     def _mark(value: bool) -> str:

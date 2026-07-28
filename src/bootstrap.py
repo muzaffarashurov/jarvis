@@ -196,7 +196,28 @@ class Bootstrap:
         # before AIService so it can be injected into it. Only one
         # ContextManager instance may exist, so its ContextLoader's
         # project-files cache is reused across every request.
-        context_manager = ContextManager(config=config)
+        #
+        # EP-018.5 Unified Prompt Budget: PromptBuilder's
+        # 'prompt.max_prompt_size' is the project's ONE prompt-size
+        # authority. ContextManager/ContextLoader maintain no size
+        # configuration of their own -- here, in the composition root,
+        # we inject PromptManager's public `document_budget()` (which
+        # simply forwards to PromptBuilder.resolve_document_budget())
+        # as the callable ContextLoader must consult on every load().
+        # This is why PromptManager is (and must remain) wired before
+        # ContextManager.
+        #
+        # EP-018.6 Conversation Budget Enforcement: same pattern, for
+        # the conversation-history side of the budget --
+        # `conversation_budget` forwards PromptManager's
+        # `conversation_budget()` (= 'prompt.reserved_conversation_history',
+        # the exact figure `document_budget()` already reserves) so
+        # ContextLoader can finally enforce it on Conversation Context.
+        context_manager = ContextManager(
+            config=config,
+            document_budget=prompt_manager.document_budget,
+            conversation_budget=prompt_manager.conversation_budget,
+        )
 
         # EP-014: AI Provider Manager. Depends only on Config; has no
         # dependency on any other business-logic module, matching

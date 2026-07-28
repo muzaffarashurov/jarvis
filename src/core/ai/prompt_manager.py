@@ -93,6 +93,45 @@ class PromptManager:
         """Return whether the configurable default system prompt is applied ('prompt.enabled')."""
         return bool(self._config.get("prompt.enabled", True))
 
+    def document_budget(self) -> int:
+        """Return the document budget derived from the prompt max size.
+
+        EP-018.5 "Unified Prompt Budget": this is the single public
+        entry point other subsystems (namely ContextManager /
+        ContextLoader, see `src/core/ai/context_manager.py`) use to
+        learn how many characters of document content they may load.
+        It never introduces a second ceiling of its own -- it simply
+        forwards to PromptBuilder's `resolve_document_budget()`, the
+        one place this is computed, keeping PromptBuilder the sole
+        owner of prompt sizing while still letting ContextManager
+        depend on an abstraction (a plain callable) instead of
+        importing PromptBuilder directly (Dependency Inversion).
+
+        Returns:
+            The number of characters ContextLoader may spend on
+            documents, derived from 'prompt.max_prompt_size' minus the
+            configured 'prompt.reserved_*' headroom.
+        """
+        return PromptBuilder.resolve_document_budget(self._config)
+
+    def conversation_budget(self) -> int:
+        """Return the conversation-history budget reserved out of the prompt max size.
+
+        EP-018.6 "Conversation Budget Enforcement": the public entry
+        point ContextManager/ContextLoader use to learn how many
+        characters of rendered conversation history they may keep.
+        Forwards to PromptBuilder's `resolve_conversation_budget()`
+        exactly like `document_budget()` forwards to
+        `resolve_document_budget()` -- no logic of its own, no second
+        configuration key.
+
+        Returns:
+            The number of characters ContextLoader may spend on
+            rendered conversation history, from
+            'prompt.reserved_conversation_history'.
+        """
+        return PromptBuilder.resolve_conversation_budget(self._config)
+
     # ---------- Build ----------
 
     def build(

@@ -111,19 +111,38 @@ prompt:
   append_os_information: false
   append_working_directory: false
   max_prompt_size: 32000
+  # EP-018.5 Unified Prompt Budget: 'max_prompt_size' above is the
+  # ONE prompt-size authority in the project (see
+  # src/core/ai/prompt_builder.py). ContextLoader's document budget is
+  # derived from it: Document Budget = max_prompt_size - reserved_*
+  # (sum of the four settings below). There is deliberately no
+  # 'context.max_size'/'context.max_context_size' key anywhere in this
+  # file any more -- a second, independent ceiling there is exactly
+  # the bug EP-018.5 fixes. Tune these four instead.
+  reserved_system_prompt: 2000
+  reserved_conversation_history: 8000
+  reserved_user_prompt: 2000
+  reserved_provider_overhead: 1000
 
 context:
   # EP-018 Context Loader. Provider-independent context gathering,
   # supplying the Prompt Engine's "Conversation Context" stage; see
   # src/core/ai/context_manager.py. 'include_environment' defaults to
   # false since even the safe whitelisted environment summary is
-  # extra tokens most requests do not need.
+  # extra tokens most requests do not need. No sizing setting lives
+  # here (see 'prompt.max_prompt_size' / 'prompt.reserved_*' above)
+  # -- ContextLoader's document budget is injected, never configured
+  # locally (EP-018.5).
   enabled: true
   auto_load: true
-  max_context_size: 50000
   include_environment: false
   include_working_directory: true
   include_project_files: true
+  # EP-018.2 Smart Context Selection: when true, only the project
+  # documents relevant to the current request are loaded (falling
+  # back to README.md if none match); when false, every detected
+  # project document is loaded on every request (EP-018.1 behavior).
+  smart_selection: true
 
 providers:
   # EP-014 AI Provider Manager. Every provider is disabled by default;

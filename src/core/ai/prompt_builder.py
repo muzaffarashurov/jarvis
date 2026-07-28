@@ -31,6 +31,39 @@ object is guaranteed to pass the same checks regardless of which
 PromptManager method created it. Configuration mistakes (e.g. a
 non-numeric 'prompt.max_prompt_size') are also resolved defensively
 here, raising PromptValidationError instead of a raw ValueError.
+
+EP-018.5 Unified Prompt Budget: PromptBuilder is the SOLE authority on
+prompt sizing in the project -- 'prompt.max_prompt_size' is the only
+size ceiling that exists. Nothing else (ContextLoader included) may
+define an independent one. `resolve_max_prompt_size()` and
+`resolve_document_budget()` are exposed as stateless, config-only
+functions of this authority precisely so other EP-017/EP-018
+components can *derive* a sub-budget from it via Dependency Injection
+instead of re-declaring their own ceiling:
+
+    Document Budget = Prompt Max Size - Reserved Space
+
+...where Reserved Space is the configurable sum of everything else
+"Prompt Flow" (see the module docstring above) will place alongside
+the documents: System Prompt, Conversation History, User Prompt, and
+Provider Overhead ('prompt.reserved_*', all generic/provider-agnostic
+headroom, never a provider-specific figure). ContextLoader consumes
+this exclusively through the `document_budget` callable injected into
+`ContextManager`/`ContextLoader` (see `context_manager.py`,
+`context_loader.py`) -- it never reads 'prompt.*' or any sizing key of
+its own, so the two subsystems cannot drift out of sync again.
+
+EP-018.6 Conversation Budget Enforcement: the "Reserved Conversation
+History" figure above was, as of EP-018.5, spent only once, as
+bookkeeping subtracted out of the document budget -- nothing actually
+enforced it on the rendered Conversation Context itself, which is why
+it could still grow unbounded and overflow the final prompt.
+`resolve_conversation_budget()` exposes that exact same
+'prompt.reserved_conversation_history' figure (not a new setting) as
+its own budget, injected into `ContextLoader` alongside
+`document_budget` so `_render_conversation()` can finally enforce it:
+oldest messages are dropped first, newest are kept, chronological
+order is preserved, and the rendered text never exceeds the budget.
 """
 
 from __future__ import annotations
@@ -45,6 +78,16 @@ from src.core.config import Config
 
 DEFAULT_TEMPLATE_DIRECTORY: str = "prompts"
 DEFAULT_MAX_PROMPT_SIZE: int = 32000
+
+# EP-018.5: default headroom reserved out of 'prompt.max_prompt_size'
+# for each non-document "Prompt Flow" stage, used whenever the
+# corresponding 'prompt.reserved_*' setting is not configured. These
+# are fallback *defaults* for an operator-configurable value, not a
+# hardcoded budget -- the actual reservation always comes from Config.
+DEFAULT_RESERVED_SYSTEM_PROMPT: int = 2_000
+DEFAULT_RESERVED_CONVERSATION_HISTORY: int = 8_000
+DEFAULT_RESERVED_USER_PROMPT: int = 2_000
+DEFAULT_RESERVED_PROVIDER_OVERHEAD: int = 1_000
 
 
 class PromptBuilderError(Exception):
@@ -295,20 +338,33 @@ class PromptBuilder:
         if not rendered.strip():
             raise PromptValidationError("Prompt is empty.")
 
-        max_size = self._resolve_max_prompt_size()
+        max_size = self.resolve_max_prompt_size(self._config)
         if max_size > 0 and len(rendered) > max_size:
             raise PromptValidationError(
                 f"Prompt exceeds maximum size ({len(rendered)} > {max_size} characters)."
             )
 
-    def _resolve_max_prompt_size(self) -> int:
+    @staticmethod
+    def resolve_max_prompt_size(config: Config) -> int:
         """Resolve 'prompt.max_prompt_size' from configuration.
+
+        This is PromptBuilder's ONE size ceiling for the whole project
+        (EP-018.5's "Single Source of Truth"). It is a `@staticmethod`,
+        not an instance method, precisely so other components (see
+        `resolve_document_budget()` below, and `PromptManager.
+        document_budget()`) can call it without constructing a
+        PromptBuilder -- there is exactly one place this value is
+        computed, regardless of who needs it.
 
         Configuration mistakes must never surface as raw Python
         exceptions (EP-017.1's "Error Handling"): a non-numeric or
         otherwise unconvertible value is reported as a clear
         PromptValidationError instead of letting `int()` raise
         ValueError/TypeError.
+
+        Args:
+            config: The Config to resolve 'prompt.max_prompt_size'
+                from.
 
         Returns:
             The configured maximum prompt size, in characters.
@@ -317,12 +373,112 @@ class PromptBuilder:
             PromptValidationError: If 'prompt.max_prompt_size' is set
                 to a value that cannot be interpreted as an integer.
         """
-        raw_value = self._config.get("prompt.max_prompt_size", DEFAULT_MAX_PROMPT_SIZE)
+        raw_value = config.get("prompt.max_prompt_size", DEFAULT_MAX_PROMPT_SIZE)
         try:
             return int(raw_value)
         except (TypeError, ValueError) as exc:
             raise PromptValidationError(
                 "Invalid configuration: 'prompt.max_prompt_size' must be an integer "
+                f"(got {raw_value!r} of type '{type(raw_value).__name__}')."
+            ) from exc
+
+    @staticmethod
+    def resolve_document_budget(config: Config) -> int:
+        """Derive the usable document budget from the prompt max size.
+
+        EP-018.5 "Unified Prompt Budget": this is the ONLY place the
+        document budget is computed anywhere in the project. It is a
+        pure function of Config -- no provider-specific logic, no
+        second independent ceiling -- so ContextLoader can consume it
+        by Dependency Injection (see `ContextManager.__init__`'s
+        `document_budget` parameter and `PromptManager.
+        document_budget()`) instead of maintaining a budget of its
+        own:
+
+            Document Budget = Prompt Max Size - Reserved Space
+
+        Reserved Space is the configurable headroom left for every
+        other stage of EP-017's "Prompt Flow" that will sit alongside
+        the documents in the final prompt: the system prompt, the
+        conversation history, the user prompt, and generic
+        (provider-agnostic) provider overhead. Each is independently
+        configurable via 'prompt.reserved_*' so operators can tune it
+        without touching code, and each falls back to a DEFAULT_
+        RESERVED_* constant above when unset.
+
+        Args:
+            config: The Config to resolve the budget from.
+
+        Returns:
+            The number of characters ContextLoader may spend on
+            documents, never less than zero.
+
+        Raises:
+            PromptValidationError: If 'prompt.max_prompt_size' or any
+                'prompt.reserved_*' setting cannot be interpreted as
+                an integer.
+        """
+        max_prompt_size = PromptBuilder.resolve_max_prompt_size(config)
+
+        reserved_settings = (
+            ("prompt.reserved_system_prompt", DEFAULT_RESERVED_SYSTEM_PROMPT),
+            ("prompt.reserved_conversation_history", DEFAULT_RESERVED_CONVERSATION_HISTORY),
+            ("prompt.reserved_user_prompt", DEFAULT_RESERVED_USER_PROMPT),
+            ("prompt.reserved_provider_overhead", DEFAULT_RESERVED_PROVIDER_OVERHEAD),
+        )
+        reserved_total = 0
+        for key, default in reserved_settings:
+            raw_value = config.get(key, default)
+            try:
+                reserved_total += int(raw_value)
+            except (TypeError, ValueError) as exc:
+                raise PromptValidationError(
+                    f"Invalid configuration: '{key}' must be an integer "
+                    f"(got {raw_value!r} of type '{type(raw_value).__name__}')."
+                ) from exc
+
+        return max(0, max_prompt_size - reserved_total)
+
+    @staticmethod
+    def resolve_conversation_budget(config: Config) -> int:
+        """Resolve the conversation-history budget reserved out of the prompt max size.
+
+        EP-018.6 "Conversation Budget Enforcement": this is
+        'prompt.reserved_conversation_history' -- the exact same
+        setting `resolve_document_budget()` above already subtracts
+        when deriving the document budget. EP-018.5 introduced that
+        subtraction as *bookkeeping* only (headroom set aside so the
+        document budget wouldn't overclaim space); it was never
+        exposed for anything to actually enforce as a ceiling on the
+        rendered Conversation Context. This method exposes that same
+        reserved figure, unchanged, as its own budget so ContextLoader
+        can enforce it (see `ContextManager`'s injected
+        `conversation_budget` and `ContextLoader._render_conversation()`)
+        -- deliberately not a second, independent configuration key:
+        it is the one already-defined value, just finally consumed by
+        something.
+
+        Args:
+            config: The Config to resolve
+                'prompt.reserved_conversation_history' from.
+
+        Returns:
+            The number of characters ContextLoader may spend on
+            rendered conversation history.
+
+        Raises:
+            PromptValidationError: If
+                'prompt.reserved_conversation_history' cannot be
+                interpreted as an integer.
+        """
+        raw_value = config.get(
+            "prompt.reserved_conversation_history", DEFAULT_RESERVED_CONVERSATION_HISTORY
+        )
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise PromptValidationError(
+                "Invalid configuration: 'prompt.reserved_conversation_history' must be an integer "
                 f"(got {raw_value!r} of type '{type(raw_value).__name__}')."
             ) from exc
 

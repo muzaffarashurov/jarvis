@@ -24,9 +24,19 @@ before being sent.
 EP-018.1 additively wires the Context Engine into `ask()`/`test()`:
 ContextManager is injected (constructed once in the composition root,
 matching ConversationManager/PromptManager) and replaces the legacy
-private `_render_conversation_context()` helper. The fixed flow is now:
+private `_render_conversation_context()` helper. It also expands
+`ContextLoader`'s project-document set (JARVIS_ROADMAP.md,
+PROJECT_MANIFEST.md, PROJECT_RULES.md, PROCESS_CATALOG.md,
+CHANGELOG.md, ...) and adds `context_status()` for `ai context`
+diagnostics. The fixed flow is now:
 
     User -> Conversation Engine -> Context Engine -> Prompt Engine -> ProviderManager -> Provider
+
+EP-018.2 additively adds Smart Context Selection: `ask()` passes
+`prompt` to `ContextManager.create()` as `query`, so only the project
+documents relevant to that request are loaded (see
+`ContextLoader._select_relevant_documents()`), instead of every
+detected document on every request.
 
 AIProvider.ask() still accepts a single `prompt: str` (its EP-015
 contract is unchanged, per AI_GENERATION_STANDARD.md's Public API
@@ -49,7 +59,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
-from src.core.ai.context_manager import ContextManager
+from src.core.ai.context_manager import ContextManager, ContextStatusReport
 from src.core.ai.conversation import Conversation
 from src.core.ai.conversation_manager import ConversationManager
 from src.core.ai.prompt_builder import PromptTemplateNotFoundError, PromptValidationError
@@ -398,6 +408,18 @@ class AIService:
             configuration_errors=tuple(configuration_errors),
         )
 
+    def context_status(self) -> ContextStatusReport:
+        """Return `ai context` diagnostics for the Context Engine (EP-018.2).
+
+        Reflects whichever request the shared ContextManager most
+        recently built a Context for -- empty before the first
+        `ask()`/`test()` call.
+
+        Returns:
+            The Context Engine's diagnostic snapshot.
+        """
+        return self._context_manager.status()
+
     # ---------- EP-015: real communication ----------
 
     def ask(self, prompt: str) -> AskResult:
@@ -437,7 +459,7 @@ class AIService:
 
         name = current.name()
         conversation = self._begin_turn(prompt)
-        context = self._context_manager.create(conversation=conversation).rendered
+        context = self._context_manager.create(conversation=conversation, query=prompt).rendered
 
         try:
             built_prompt = self._prompt_manager.build(

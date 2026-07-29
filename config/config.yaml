@@ -144,6 +144,18 @@ context:
   # project document is loaded on every request (EP-018.1 behavior).
   smart_selection: true
 
+indexing:
+  # EP-019 Project Index Engine integration. Read by IndexService
+  # ('indexing.*'); ProjectIndexer itself takes no configuration (it
+  # only exposes build/rebuild/load/save/clear) -- these settings
+  # control the CLI integration layer only, i.e. which IndexStorage
+  # backend 'index build'/'index rebuild' persist the built index to.
+  # "json" persists to 'storage_file' (JsonIndexStorage); anything
+  # else (e.g. "memory") keeps the index in process memory only
+  # (MemoryIndexStorage).
+  storage_backend: "json"
+  storage_file: "data/database/project_index.json"
+
 providers:
   # EP-014 AI Provider Manager. Every provider is disabled by default;
   # this section only describes how each provider would be reached

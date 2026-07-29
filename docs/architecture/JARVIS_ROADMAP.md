@@ -1,8 +1,6 @@
-# JARVIS_ROADMAP.md
-
 # Jarvis Development Roadmap
 
-Version: 1.0
+Version: 2.0
 
 Status: Active Development
 
@@ -12,33 +10,44 @@ Status: Active Development
 
 Jarvis is not a chatbot.
 
-Jarvis is not another LLM.
+Jarvis is not a single Large Language Model.
 
 Jarvis is an AI Operating System.
 
-The long-term goal is to build a provider-independent intelligent operating system capable of orchestrating AI models, workflows, automation, tools and autonomous agents through a single unified architecture.
+Its purpose is to orchestrate AI providers, project knowledge, memory, workflows, tools and autonomous agents through a unified architecture.
 
-Every Engineering Project (EP) contributes one reusable building block toward this vision.
+Every Engineering Package (EP) contributes one reusable architectural building block.
 
 ---
 
-# Development Principles
+# Engineering Principles
 
 Every EP must:
 
-- extend the current architecture
-- never redesign completed modules
-- remain backward compatible
-- be provider independent whenever possible
-- reuse existing infrastructure
+- extend the existing architecture
+- preserve backward compatibility
+- follow PROJECT_MANIFEST.md
 - follow AI_GENERATION_STANDARD.md
-- generate production-quality code only
+- remain provider independent
+- avoid duplicated functionality
+- reuse existing infrastructure
+- include automated tests
+- deliver production-quality code
+
+Large EPs may be implemented incrementally using sub-packages:
+
+- EP-018.1
+- EP-018.2
+- EP-018.3
+- ...
+
+Sub-packages never replace the main EP number.
 
 ---
 
 # Current Progress
 
-Completed:
+## Completed
 
 EP-001 Core Foundation
 
@@ -66,13 +75,39 @@ EP-012 Core Refactoring
 
 EP-013 AI Infrastructure Preparation
 
-EP-014 Provider Manager
+EP-014 AI Provider Manager
 
-EP-015 AI Providers
-
-Current:
+EP-015 AI Provider Integration
 
 EP-016 Conversation Engine
+
+EP-017 Prompt Engine
+
+EP-018 Universal Context Engine
+
+Completed sub-packages:
+
+- EP-018.1 Context Engine Foundation
+- EP-018.2 PROJECT_MANIFEST Integration
+- EP-018.3 Repository Detection
+- EP-018.4 Document Budget
+- EP-018.5 Unified Prompt Budget
+- EP-018.6 Conversation Budget
+
+---
+
+## Current
+
+EP-019 Project Index Engine
+
+Planned implementation:
+
+- EP-019.1 Repository Scanner
+- EP-019.2 File Index
+- EP-019.3 Chunk Generator
+- EP-019.4 Metadata Builder
+- EP-019.5 Incremental Index
+- EP-019.6 Testing & Validation
 
 ---
 
@@ -108,147 +143,147 @@ EP-013 AI Infrastructure
 
 ---
 
-## Phase 2 — Artificial Intelligence
+## Phase 2 — AI Core
 
-EP-014 Provider Manager
+EP-014 AI Provider Manager
 
-EP-015 AI Providers
+EP-015 AI Provider Integration
 
 EP-016 Conversation Engine
 
 EP-017 Prompt Engine
 
-EP-018 Context Loader
+EP-018 Universal Context Engine
 
-EP-019 Capability Registry
+EP-019 Project Index Engine
 
-EP-020 AI Router
+EP-020 Retrieval Engine
+
+EP-021 Embedding Engine
+
+EP-022 RAG Engine
 
 ---
 
 ## Phase 3 — Memory
 
-EP-021 Memory Manager
+EP-023 Memory Manager
 
-EP-022 Knowledge Base
+EP-024 Knowledge Base
 
-EP-023 Long-Term Memory
+EP-025 Long-Term Memory
 
-EP-024 Semantic Search
+EP-026 Semantic Search
 
-EP-025 Context Compression
-
----
-
-## Phase 4 — Agents
-
-EP-026 Agent Framework
-
-EP-027 Planning Engine
-
-EP-028 Execution Engine
-
-EP-029 Task Delegation
-
-EP-030 Multi-Agent Collaboration
+EP-027 Context Compression
 
 ---
 
-## Phase 5 — Workflow
+## Phase 4 — Agent Framework
 
-EP-031 Workflow Engine
+EP-028 Agent Framework
 
-EP-032 Scheduler
+EP-029 Planning Engine
 
-EP-033 Automation Engine
+EP-030 Execution Engine
 
-EP-034 Background Workers
+EP-031 Tool Engine
 
-EP-035 Event Bus
+EP-032 Multi-Agent Collaboration
+
+---
+
+## Phase 5 — Workflow Automation
+
+EP-033 Workflow Engine
+
+EP-034 Scheduler
+
+EP-035 Automation Engine
+
+EP-036 Background Workers
+
+EP-037 Event Bus
 
 ---
 
 ## Phase 6 — Integrations
 
-EP-036 GitHub
+EP-038 Git Integration
 
-EP-037 Telegram
+EP-039 GitHub Integration
 
-EP-038 Discord
+EP-040 Telegram Integration
 
-EP-039 Email
+EP-041 Discord Integration
 
-EP-040 REST API
+EP-042 Email Integration
 
-EP-041 Desktop UI
+EP-043 REST API
 
-EP-042 Web Dashboard
+EP-044 Desktop UI
+
+EP-045 Web Dashboard
 
 ---
 
 ## Phase 7 — Voice
 
-EP-043 Speech-to-Text
+EP-046 Speech-to-Text
 
-EP-044 Text-to-Speech
+EP-047 Text-to-Speech
 
-EP-045 Wake Word
+EP-048 Wake Word
 
-EP-046 Voice Assistant
+EP-049 Voice Assistant
 
 ---
 
-## Phase 8 — Computer Control
+## Phase 8 — Computer Automation
 
-EP-047 Computer Use
+EP-050 Computer Use
 
-EP-048 Browser Automation
+EP-051 Browser Automation
 
-EP-049 File Automation
+EP-052 File Automation
 
-EP-050 Vision Integration
+EP-053 Vision Integration
 
 ---
 
 ## Phase 9 — Intelligence
 
-EP-051 Self Reflection
+EP-054 Self Reflection
 
-EP-052 Prompt Optimizer
+EP-055 Prompt Optimizer
 
-EP-053 Capability Learning
+EP-056 Capability Learning
 
-EP-054 Memory Optimization
+EP-057 Memory Optimization
 
-EP-055 Autonomous Planning
+EP-058 Autonomous Planning
 
 ---
 
 ## Phase 10 — Jarvis Operating System
 
-EP-056 Distributed Execution
+EP-059 Distributed Runtime
 
-EP-057 Multi-Device Synchronization
-
-EP-058 Cloud Runtime
-
-EP-059 Plugin Marketplace
-
-EP-060 Jarvis OS
+EP-060 Jarvis Operating System
 
 ---
 
 # Architecture Evolution
 
-Core
+Core Platform
 
 ↓
 
-Provider Layer
+AI Provider Layer
 
 ↓
 
-Conversation
+Conversation Engine
 
 ↓
 
@@ -256,23 +291,23 @@ Prompt Engine
 
 ↓
 
-Context Loader
+Universal Context Engine
 
 ↓
 
-Capability Registry
+Project Index
 
 ↓
 
-AI Router
+Retrieval
 
 ↓
 
-Workflow Engine
+Embeddings
 
 ↓
 
-Agent Framework
+RAG
 
 ↓
 
@@ -280,11 +315,15 @@ Memory
 
 ↓
 
-Planning
+Agent Framework
 
 ↓
 
-Execution
+Tool Engine
+
+↓
+
+Workflow Engine
 
 ↓
 
@@ -296,32 +335,78 @@ Voice
 
 ↓
 
-Desktop
+User Interfaces
 
 ↓
 
-Jarvis OS
+Jarvis Operating System
+
+---
+
+# Engineering Package Policy
+
+Large Engineering Packages should be implemented in multiple incremental iterations.
+
+Example:
+
+EP-018 Universal Context Engine
+
+- EP-018.1 Foundation
+- EP-018.2 Manifest Integration
+- EP-018.3 Repository Detection
+- EP-018.4 Document Budget
+- EP-018.5 Unified Prompt Budget
+- EP-018.6 Conversation Budget
+
+EP-019 Project Index Engine
+
+- EP-019.1 Repository Scanner
+- EP-019.2 File Index
+- EP-019.3 Chunk Generator
+- EP-019.4 Metadata Builder
+- EP-019.5 Incremental Index
+- EP-019.6 Testing
+- Status: Completed
+
+This approach allows large architectural modules to evolve without changing the long-term roadmap.
 
 ---
 
 # Current Objective
 
-Complete every Engineering Project sequentially.
+Jarvis evolves incrementally through Engineering Packages.
 
-Each EP must improve Jarvis without breaking previous functionality.
+Only one major Engineering Package should be actively implemented at a time.
 
-Quality is always preferred over speed.
+Each completed Engineering Package becomes a permanent architectural building block for future development.
 
----
+The implementation order is defined by this roadmap.
+
+The currently active Engineering Package is tracked separately by the engineering process and project documentation.
+
+# Long-Term Goal
+
+Build a provider-independent AI Operating System capable of:
+
+- understanding software projects
+- maintaining engineering knowledge
+- retrieving relevant information
+- planning complex tasks
+- executing tools
+- coordinating multiple AI providers
+- orchestrating autonomous agents
+- automating engineering workflows
+
+The ultimate goal is to create a modular, reusable and extensible AI Operating System that remains independent of any single AI provider or technology.
 
 # Notes
 
-This roadmap defines the long-term development plan.
+This roadmap defines the official long-term engineering direction of Jarvis.
 
-It is intentionally ambitious.
+The numbering of Engineering Packages is stable.
 
-Future EP numbers may be inserted if required.
+New functionality should normally be implemented as sub-packages (EP-XXX.Y) rather than renumbering the roadmap.
 
-The architecture may evolve, but completed modules should never be redesigned unless absolutely necessary.
+Completed EPs should not be redesigned unless an explicit architectural decision requires it.
 
 End of document.

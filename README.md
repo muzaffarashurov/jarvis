@@ -10,79 +10,78 @@
 
 ## Vision
 
-Jarvis is a modular AI operating system designed to automate everyday work.
+Jarvis is a modular AI Operating System designed to orchestrate AI providers, tools, workflows and autonomous agents through a unified architecture.
 
-Unlike a traditional chatbot, Jarvis acts as an intelligent orchestrator capable of coordinating multiple skills such as:
+Rather than acting as a single chatbot, Jarvis provides a reusable platform for building intelligent assistants capable of software development, automation, desktop control and knowledge management.
 
-- 🎤 Voice interaction
-- 💬 Telegram automation
-- 📦 Invoice processing
-- 📊 Excel automation
-- 📑 Presentation generation
-- 💻 Software development
-- 🌐 Browser automation
-- 🖥 Desktop control
-- 🧠 Long-term memory
-- 🤖 AI model orchestration
+The architecture is provider-independent and designed for long-term evolution.
 
 ---
 
 ## Current Status
 
-Current version:
+Current Version:
 
-v0.1.0-alpha
+**v0.1.0-alpha**
 
-Project is under active development.
+Status:
+
+- Active Development
+- Architecture Stabilized
+- Engineering Packages in Progress
 
 ---
 
 ## Project Structure
 
+```text
+jarvis/
+├── src/
+├── config/
+├── docs/
+├── knowledge/
+├── tests/
+├── data/
+├── templates/
+└── PROJECT_MANIFEST.md
 ```
-Jarvis
-│
-├── Core
-├── AI
-├── Skills
-├── UI
-├── Templates
-├── Knowledge
-└── Data
-```
+
+Project discovery is driven by `PROJECT_MANIFEST.md`, which references the documents describing the architecture, engineering workflow and development standards.
 
 ---
 
-## Roadmap
+## Documentation
 
-### Phase 1
+Project documentation is organized under the `docs/` directory.
 
-- Core
-- Voice
-- Telegram
-- Invoice Automation
-- Excel Automation
+The most important documents are:
 
-### Phase 2
+- PROJECT_MANIFEST.md
+- JARVIS_ROADMAP.md
+- PROJECT_OVERVIEW.md
+- JARVIS_ARCHITECTURE_VISION.md
+- ENGINEERING_GUIDE.md
+- AI_GENERATION_STANDARD.md
 
-- Presentations
-- Reports
-- Browser Automation
+The complete development roadmap is maintained in `docs/architecture/JARVIS_ROADMAP.md`.
 
-### Phase 3
+---
 
-- Coding Assistant
-- GitHub Integration
-- Desktop Automation
+## Getting Started
 
-### Phase 4
+To understand the project architecture, follow this reading order:
 
-- Memory
-- Plugins
-- AI Skills Marketplace
+1. PROJECT_MANIFEST.md
+2. docs/architecture/PROJECT_OVERVIEW.md
+3. docs/architecture/JARVIS_ARCHITECTURE_VISION.md
+4. docs/architecture/JARVIS_ROADMAP.md
+5. docs/engineering/ENGINEERING_GUIDE.md
+6. AI_GENERATION_STANDARD.md
+
+These documents describe the project architecture, engineering workflow and development standards.
 
 ---
 
 ## License
 
-MIT License
+Released under the MIT License.

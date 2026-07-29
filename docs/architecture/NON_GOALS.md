@@ -46,3 +46,15 @@ Avoid:
 - hardcoded providers
 - monolithic modules
 - AI-specific architecture
+
+---
+
+# Long-Term Philosophy
+
+Jarvis evolves by extending existing architecture rather than replacing it.
+
+Every new capability should become a reusable building block.
+
+Architectural consistency is always more important than short-term functionality.
+
+The goal is not to create another AI application, but to build a reusable AI Operating System.

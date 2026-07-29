@@ -10,12 +10,27 @@ It is NOT an implementation guide.
 
 Every architectural decision should be consistent with this document.
 
-Before writing code also read:
+Before implementing any feature, Jarvis must first understand the project.
+
+The Context Engine automatically discovers the project through:
 
 1. PROJECT_MANIFEST.md
-2. PROJECT_RULES.md
-3. AI_GENERATION_STANDARD.md
-4. NEXT_TASK.md
+
+The manifest defines:
+
+- project identity
+- required project documents
+- architecture documents
+- engineering documents
+- context documents
+- startup documents
+
+Additional project knowledge is loaded dynamically according to the manifest.
+
+Implementation must always follow:
+
+- PROJECT_MANIFEST.md
+- AI_GENERATION_STANDARD.md
 
 Architecture has higher priority than implementation convenience.
 
@@ -497,27 +512,34 @@ Require user confirmation unless explicitly configured otherwise.
 
 # Project Knowledge
 
-Jarvis should understand every project.
+Jarvis should automatically understand every software project before performing any engineering task.
 
-Before generating code it should automatically load:
+The entry point for project understanding is always:
 
-README
+PROJECT_MANIFEST.md
 
-PROJECT_MANIFEST
+The manifest describes:
 
-PROJECT_RULES
+- project identity
+- project documentation
+- architecture documents
+- engineering documents
+- coding standards
+- startup documents
+- context documents
 
-NEXT_TASK
+The Universal Context Engine is responsible for:
 
-PROCESS_CATALOG
+- discovering the project
+- locating the project root
+- reading PROJECT_MANIFEST.md
+- loading only the required documentation
+- respecting prompt budgets
+- building a provider-independent project context
 
-AI_GENERATION_STANDARD
+Project Index and Retrieval Engine may later extend this knowledge by indexing source code and retrieving only the most relevant project information.
 
-Architecture documents
-
-Relevant source code
-
-The user should not repeatedly explain the project.
+The user should never need to repeatedly explain the same project.
 
 ---
 
@@ -618,30 +640,6 @@ Workflows may evolve.
 The architecture must remain stable.
 
 Every architectural decision should be evaluated by one simple question:
-
-"Does this make Jarvis a better AI Operating System?"
-
-If the answer is yes,
-
-the decision is probably correct.
-
-# Non-Goals
-
-Jarvis is not built around AI models.
-
-Jarvis is built around solving problems.
-
-AI providers will change.
-
-Tools will change.
-
-Services will change.
-
-Workflows will evolve.
-
-The architecture should remain stable.
-
-Every architectural decision should answer one question:
 
 "Does this make Jarvis a better AI Operating System?"
 

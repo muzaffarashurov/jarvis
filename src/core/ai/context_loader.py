@@ -70,7 +70,6 @@ refreshing them by id) belong to ContextManager, not here.
 
 from __future__ import annotations
 
-import fnmatch
 import platform
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -84,12 +83,17 @@ from loguru import logger
 from src.core.ai.context import Context
 from src.core.ai.conversation import Conversation
 from src.core.config import Config
+from src.core.project_manifest import (
+    DEFAULT_PRIORITY,
+    DocumentCache,
+    ManifestDocument,
+    ManifestLoader,
+    ProjectManifest,
+    expand_document_entries,
+    priority_weight,
+)
 
 __all__ = ["ContextLoader", "ContextStatusReport"]
-
-# The single project-specific file name ContextLoader is ever allowed to hardcode.
-_MANIFEST_FILENAME = "PROJECT_MANIFEST.md"
-_MAX_SEARCH_DEPTH = 32
 
 # Fixed, project-independent EP-018 section names.
 _SECTION_IDENTITY = "project identity"
@@ -106,24 +110,6 @@ _DEFAULT_SECTIONS: frozenset[str] = frozenset(
         _SECTION_ACTIVE_PROCESS,
     }
 )
-
-# The manifest heading listing every project document ContextLoader
-# may load: a list of file paths and/or directory references (path
-# ending in '/'). This is the sole source of "Project Documents" --
-# EP-018.4 scopes out any form of automatic/keyword/semantic document
-# discovery beyond what the manifest explicitly declares.
-_DOCUMENTS_HEADING = "Context Documents"
-
-_PRIORITY_WEIGHTS = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-_DEFAULT_PRIORITY = "medium"
-
-# Safety net on top of the manifest's own ignore rules: never read a
-# binary/asset file, never descend into well-known noise directories.
-_TEXT_EXTENSIONS = frozenset(
-    {".md", ".txt", ".rst", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".json", ".xml", ".csv"}
-)
-_DEFAULT_IGNORE_DIRECTORIES = frozenset({".git", ".venv", "__pycache__", "node_modules", "dist", "build"})
-_MAX_DOCUMENT_BYTES = 512_000
 
 
 def _utc_now() -> datetime:
@@ -167,41 +153,6 @@ class ContextStatusReport:
     budget_exceeded: bool = False
     generated_at: datetime = field(default_factory=_utc_now)
     token_estimate: int = 0
-
-
-@dataclass(frozen=True)
-class _ManifestDocument:
-    """One document-category entry: a repository-relative path or directory reference."""
-
-    path: str
-    priority: str = _DEFAULT_PRIORITY
-
-
-@dataclass(frozen=True)
-class _ProjectManifest:
-    """The parsed contents of one project's `PROJECT_MANIFEST.md`."""
-
-    repository_root: Path
-    project_name: str
-    version: str
-    project_type: str
-    description: str
-    documents: tuple[_ManifestDocument, ...]
-    sections: frozenset[str]
-    configuration_files: tuple[str, ...]
-    active_process_hint: str
-    ignore_directories: frozenset[str]
-    ignore_paths: tuple[str, ...]
-    ignore_file_patterns: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class _ManifestCacheEntry:
-    """A cached, parsed manifest plus the file state it was parsed from."""
-
-    path: Path
-    mtime: float
-    manifest: _ProjectManifest
 
 
 @dataclass(frozen=True)
@@ -283,8 +234,8 @@ class ContextLoader:
         self._document_budget = document_budget
         self._conversation_budget = conversation_budget
         self._lock = RLock()
-        self._manifest_cache: _ManifestCacheEntry | None = None
-        self._document_cache: dict[str, tuple[float, str]] = {}
+        self._manifest_loader = ManifestLoader()
+        self._document_cache = DocumentCache()
         self._additional_blocks: list[str] = []
         self._pending: _PendingContext = _PendingContext()
         self._status = ContextStatusReport()
@@ -315,7 +266,7 @@ class ContextLoader:
     def refresh(self) -> "ContextLoader":
         """Invalidate every cache so the next `load()` rereads all files from disk."""
         with self._lock:
-            self._manifest_cache = None
+            self._manifest_loader.refresh()
             self._document_cache.clear()
         logger.info("Context Loader cache cleared; manifest and documents will be reread.")
         return self
@@ -353,9 +304,9 @@ class ContextLoader:
                 self._status = ContextStatusReport(generated_at=_utc_now())
                 return self
 
-            manifest = self._get_manifest()
+            manifest = self._manifest_loader.get()
             repository_root = manifest.repository_root if manifest else Path.cwd()
-            sections = manifest.sections if manifest else _DEFAULT_SECTIONS
+            sections = (manifest.sections if manifest and manifest.sections else _DEFAULT_SECTIONS)
             auto_load = bool(self._config.get("context.auto_load", True))
 
             def enabled(section: str) -> bool:
@@ -469,63 +420,6 @@ class ContextLoader:
         with self._lock:
             return self._status
 
-    # ---------- Manifest ----------
-
-    def _get_manifest(self) -> _ProjectManifest | None:
-        """Return the parsed manifest, reusing the cache while the file is unchanged."""
-        manifest_path = self._find_manifest_path()
-        if manifest_path is None:
-            logger.warning(f"'{_MANIFEST_FILENAME}' not found; automatic project context sections are disabled.")
-            return None
-
-        try:
-            mtime = manifest_path.stat().st_mtime
-        except OSError as exc:
-            logger.warning(f"Unable to inspect manifest '{manifest_path}': {exc}")
-            return None
-
-        cached = self._manifest_cache
-        if cached is not None and cached.path == manifest_path and cached.mtime == mtime:
-            return cached.manifest
-
-        try:
-            text = manifest_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            logger.warning(f"Unable to read manifest '{manifest_path}': {exc}")
-            return None
-
-        manifest = _parse_manifest(text, manifest_path)
-        self._manifest_cache = _ManifestCacheEntry(path=manifest_path, mtime=mtime, manifest=manifest)
-        logger.info(f"Manifest loaded: '{manifest_path}' (project '{manifest.project_name or 'unnamed'}').")
-        return manifest
-
-    @staticmethod
-    def _find_manifest_path() -> Path | None:
-        """Locate `PROJECT_MANIFEST.md` by walking upward from likely starting points.
-
-        Repository root is never hardcoded or assumed -- it is always
-        the directory the manifest is actually found in. The current
-        working directory is authoritative (the common case: a process
-        launched from within the target project); the directory this
-        module itself lives in is only a deterministic fallback for
-        when the caller's cwd is outside the project entirely, tried
-        in a fixed order so two candidate manifests are never raced.
-        """
-        cwd = Path.cwd().resolve()
-        module_dir = Path(__file__).resolve().parent
-        starting_points = [cwd] if module_dir == cwd else [cwd, module_dir]
-
-        for start in starting_points:
-            current = start
-            for _ in range(_MAX_SEARCH_DEPTH):
-                candidate = current / _MANIFEST_FILENAME
-                if candidate.is_file():
-                    return candidate
-                if current.parent == current:
-                    break
-                current = current.parent
-        return None
-
     # ---------- Section rendering ----------
 
     @staticmethod
@@ -534,7 +428,7 @@ class ContextLoader:
         return name in sections
 
     @staticmethod
-    def _render_identity(manifest: _ProjectManifest) -> str:
+    def _render_identity(manifest: ProjectManifest) -> str:
         """Render the "Project Identity" section, or "" if the manifest carries none."""
         lines = ["Project Identity", ""]
         if manifest.project_name:
@@ -549,7 +443,7 @@ class ContextLoader:
         return "\n".join(lines) if len(lines) > 2 else ""
 
     @staticmethod
-    def _render_configuration(manifest: _ProjectManifest) -> str:
+    def _render_configuration(manifest: ProjectManifest) -> str:
         """Render "Configuration" as a file-name list only -- never file content.
 
         Configuration files commonly hold secrets/credentials, which
@@ -614,7 +508,7 @@ class ContextLoader:
 
     # ---------- Project documents ----------
 
-    def _load_documents(self, manifest: _ProjectManifest, budget: int) -> _DocumentsResult:
+    def _load_documents(self, manifest: ProjectManifest, budget: int) -> _DocumentsResult:
         """Load "Context Documents" strictly in priority order, within `budget` characters.
 
         Ties within the same priority break by manifest declaration
@@ -625,36 +519,17 @@ class ContextLoader:
         reduced by whatever other sections precede "Project Documents"
         in `Context.rendered`.
         """
-        ignore_directories = _DEFAULT_IGNORE_DIRECTORIES | manifest.ignore_directories
-        entries = self._expand_entries(manifest, manifest.documents, ignore_directories)
+        entries = expand_document_entries(manifest)
         ordered = [
             entry
             for _, entry in sorted(
-                enumerate(entries), key=lambda pair: (_priority_weight(pair[1][1].priority), pair[0])
+                enumerate(entries), key=lambda pair: (priority_weight(pair[1][1].priority), pair[0])
             )
         ]
         return self._materialize_documents(manifest.repository_root, ordered, budget)
 
-    def _expand_entries(
-        self,
-        manifest: _ProjectManifest,
-        documents: tuple[_ManifestDocument, ...],
-        ignore_directories: frozenset[str],
-    ) -> list[tuple[str, _ManifestDocument]]:
-        """Expand manifest document entries into ordered, deduplicated (path, entry) pairs."""
-        results: list[tuple[str, _ManifestDocument]] = []
-        seen: set[str] = set()
-        for document in documents:
-            for resolved_path in self._expand_document(manifest, document, ignore_directories):
-                relative_path = self._relative_path(resolved_path, manifest.repository_root)
-                if relative_path in seen:
-                    continue
-                seen.add(relative_path)
-                results.append((relative_path, document))
-        return results
-
     def _materialize_documents(
-        self, repository_root: Path, ordered: list[tuple[str, _ManifestDocument]], budget: int
+        self, repository_root: Path, ordered: list[tuple[str, ManifestDocument]], budget: int
     ) -> _DocumentsResult:
         """Read documents in `ordered`, stopping once `budget` is exhausted.
 
@@ -691,7 +566,7 @@ class ContextLoader:
                 continue
 
             try:
-                content, was_cached = self._read_document(full_path)
+                content, was_cached = self._document_cache.read(full_path)
             except OSError as exc:
                 note = f"Could not load:\n{relative_path}\n{exc}"
                 blocks.append(note)
@@ -703,7 +578,7 @@ class ContextLoader:
             if was_cached:
                 cached.append(relative_path)
 
-            priority_label = (document.priority.strip() or _DEFAULT_PRIORITY).title()
+            priority_label = (document.priority.strip() or DEFAULT_PRIORITY).title()
             block, truncated, loaded_size = _render_document_block(relative_path, priority_label, content, remaining)
             blocks.append(block)
             remaining -= len(block) + 2
@@ -733,80 +608,6 @@ class ContextLoader:
             sizes=sizes,
             budget_exceeded=budget_exceeded,
         )
-
-    def _expand_document(
-        self, manifest: _ProjectManifest, document: _ManifestDocument, ignore_directories: frozenset[str]
-    ) -> list[Path]:
-        """Expand one manifest document entry into concrete candidate file paths.
-
-        A path ending in '/' (or an existing directory) is expanded
-        into every text file beneath it, honoring ignore rules and the
-        text/binary safety whitelist. Any other path is returned as a
-        single candidate (existence is checked later).
-        """
-        target = manifest.repository_root / document.path
-        if not document.path.endswith("/") and not target.is_dir():
-            return [target]
-        if not target.is_dir():
-            return []
-
-        results: list[Path] = []
-        for path in sorted(target.rglob("*")):
-            if not path.is_file():
-                continue
-            if any(part in ignore_directories for part in path.relative_to(manifest.repository_root).parts):
-                continue
-            relative = self._relative_path(path, manifest.repository_root)
-            if any(relative.startswith(prefix) for prefix in manifest.ignore_paths):
-                continue
-            if any(fnmatch.fnmatch(path.name, pattern) for pattern in manifest.ignore_file_patterns):
-                continue
-            if path.suffix.lower() not in _TEXT_EXTENSIONS:
-                continue
-            results.append(path)
-        return results
-
-    def _read_document(self, path: Path) -> tuple[str, bool]:
-        """Read one document, reusing the cache while its mtime is unchanged.
-
-        Files larger than `_MAX_DOCUMENT_BYTES` are capped at read time
-        (logged, never raised) as a hard safety net independent of the
-        character budget, which is applied afterward.
-
-        Returns:
-            (content, was_served_from_cache).
-
-        Raises:
-            OSError: If the file cannot be stat'd or read.
-        """
-        key = str(path.resolve())
-        stat = path.stat()
-        mtime = stat.st_mtime
-
-        with self._lock:
-            cached_entry = self._document_cache.get(key)
-        if cached_entry is not None and cached_entry[0] == mtime:
-            return cached_entry[1], True
-
-        if stat.st_size > _MAX_DOCUMENT_BYTES:
-            logger.warning(
-                f"Project document '{path}' is {stat.st_size} bytes; capping the read at {_MAX_DOCUMENT_BYTES}."
-            )
-
-        with path.open("r", encoding="utf-8", errors="replace") as file:
-            content = file.read(_MAX_DOCUMENT_BYTES)
-
-        with self._lock:
-            self._document_cache[key] = (mtime, content)
-        return content, False
-
-    @staticmethod
-    def _relative_path(path: Path, repository_root: Path) -> str:
-        """Return `path` relative to `repository_root`, forward-slashed; falls back to `path` itself."""
-        try:
-            return path.resolve().relative_to(repository_root.resolve()).as_posix()
-        except ValueError:
-            return path.as_posix()
 
     def _resolve_document_budget(self) -> int:
         """Resolve the document budget from the injected `document_budget` callable.
@@ -859,11 +660,6 @@ class ContextLoader:
 # ---------- Document block rendering (module-level: no instance state needed) ----------
 
 
-def _priority_weight(priority: str) -> int:
-    """Map a document priority label to a sort weight (lower sorts first)."""
-    return _PRIORITY_WEIGHTS.get(priority.lower(), _PRIORITY_WEIGHTS[_DEFAULT_PRIORITY])
-
-
 def _estimate_tokens(text: str) -> int:
     """Roughly estimate the token count of `text` (~4 characters per token)."""
     return len(text) // 4 if text else 0
@@ -913,136 +709,3 @@ def _render_document_block(relative_path: str, priority_label: str, content: str
     # so the "never exceed the configured limit" guarantee always holds.
     return build(body, truncated=True)[:budget], True, len(body)
 
-
-def _parse_manifest(text: str, manifest_path: Path) -> _ProjectManifest:
-    """Parse a `PROJECT_MANIFEST.md`'s content into a `_ProjectManifest`.
-
-    The format is itself project-independent: '#' headings are fixed,
-    known categories; a heading's body is a list if any of its lines
-    start with '- ' (each item optionally carrying indented 'key:
-    value' attributes), otherwise a plain scalar paragraph. Only the
-    *category names* below are ever hardcoded -- their content never is.
-    """
-    sections = _parse_sections(text)
-    return _ProjectManifest(
-        repository_root=_resolve_repository_root(sections, manifest_path),
-        project_name=_scalar(sections, "Project Name"),
-        version=_scalar(sections, "Current Version"),
-        project_type=_scalar(sections, "Project Type"),
-        description=_scalar(sections, "Project Description"),
-        documents=tuple(_documents_from(sections.get(_DOCUMENTS_HEADING))),
-        sections=_parse_context_sections(sections),
-        configuration_files=_string_list(sections, "Configuration Files"),
-        active_process_hint=_first_item(sections, "Active Processes"),
-        ignore_directories=frozenset(_string_list(sections, "Ignore Directories")),
-        ignore_paths=_string_list(sections, "Ignore Paths"),
-        ignore_file_patterns=_string_list(sections, "Ignore Files"),
-    )
-
-
-def _parse_sections(text: str) -> dict[str, list[Any]]:
-    """Split a manifest's raw text into `heading -> parsed body` pairs."""
-    raw_bodies: dict[str, list[str]] = {}
-    current_heading: str | None = None
-    for line in text.splitlines():
-        if line.startswith("# ") and not line.startswith("## "):
-            current_heading = line[2:].strip()
-            raw_bodies.setdefault(current_heading, [])
-            continue
-        if current_heading is not None:
-            raw_bodies[current_heading].append(line)
-    return {heading: _parse_body(lines) for heading, lines in raw_bodies.items()}
-
-
-def _parse_body(lines: list[str]) -> Any:
-    """Parse one heading's body into a list (bullets, optionally with 'key: value' attributes) or a scalar string."""
-    items: list[Any] = []
-    scalar_lines: list[str] = []
-    is_list = False
-    current_item: dict[str, str] | str | None = None
-
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-
-        if stripped.startswith("- "):
-            is_list = True
-            if current_item is not None:
-                items.append(current_item)
-            body = stripped[2:].strip()
-            if ":" in body:
-                key, _, value = body.partition(":")
-                current_item = {key.strip(): value.strip()}
-            else:
-                current_item = body
-            continue
-
-        if is_list and isinstance(current_item, dict) and line.startswith((" ", "\t")) and ":" in stripped:
-            key, _, value = stripped.partition(":")
-            current_item[key.strip()] = value.strip()
-            continue
-
-        if not is_list:
-            scalar_lines.append(stripped)
-
-    if current_item is not None:
-        items.append(current_item)
-    return items if is_list else " ".join(scalar_lines).strip()
-
-
-def _scalar(sections: dict[str, Any], heading: str) -> str:
-    """Return heading `heading`'s scalar value, or "" if absent/list-shaped."""
-    value = sections.get(heading, "")
-    return value if isinstance(value, str) else ""
-
-
-def _string_list(sections: dict[str, Any], heading: str) -> tuple[str, ...]:
-    """Return heading `heading`'s list items as plain strings, or () if absent/scalar."""
-    value = sections.get(heading, [])
-    if not isinstance(value, list):
-        return ()
-    return tuple(str(item).strip() for item in value if str(item).strip())
-
-
-def _first_item(sections: dict[str, Any], heading: str) -> str:
-    """Return the first item of a list-shaped heading, or the scalar itself if not a list."""
-    value = sections.get(heading, "")
-    if isinstance(value, list):
-        return str(value[0]).strip() if value else ""
-    return value
-
-
-def _documents_from(raw_items: Any) -> list[_ManifestDocument]:
-    """Convert one document-category heading's parsed body into `_ManifestDocument`s."""
-    if not isinstance(raw_items, list):
-        return []
-    documents: list[_ManifestDocument] = []
-    for item in raw_items:
-        if isinstance(item, dict):
-            path = item.get("path", "").strip()
-            priority = (item.get("priority") or _DEFAULT_PRIORITY).strip().lower()
-        else:
-            path = str(item).strip()
-            priority = _DEFAULT_PRIORITY
-        if path:
-            documents.append(_ManifestDocument(path=path, priority=priority or _DEFAULT_PRIORITY))
-    return documents
-
-
-def _parse_context_sections(sections: dict[str, Any]) -> frozenset[str]:
-    """Parse "Context Sections" into active, lowercased section names (default: every section)."""
-    declared = _string_list(sections, "Context Sections")
-    return frozenset(name.lower() for name in declared) if declared else _DEFAULT_SECTIONS
-
-
-def _resolve_repository_root(sections: dict[str, Any], manifest_path: Path) -> Path:
-    """Resolve the repository root: the manifest's own directory, or its explicit override."""
-    default_root = manifest_path.parent
-    override = _scalar(sections, "Repository Root")
-    if not override:
-        return default_root
-    override_path = Path(override)
-    if not override_path.is_absolute():
-        override_path = default_root / override_path
-    return override_path.resolve()

@@ -24,6 +24,7 @@ from src.core.execution.executors.process_executor import ProcessExecutor
 from src.core.execution.executors.python_executor import PythonExecutor
 from src.core.execution.executors.url_executor import UrlExecutor
 from src.core.execution.process_registry import ProcessRegistry
+from src.core.indexing import IndexStorage, JsonIndexStorage, MemoryIndexStorage, ProjectIndexer
 from src.core.logger import Logger
 from src.core.memory.memory_store import MemoryStore
 from src.core.orchestrator import Orchestrator
@@ -42,6 +43,7 @@ from src.core.telegram.telegram_router import TelegramRouter
 from src.modules.ai_module import AIModule
 from src.modules.conversation_module import ConversationModule
 from src.modules.fast_response_module import FastResponseModule
+from src.modules.index_module import IndexModule
 from src.modules.invoice_module import InvoiceModule
 from src.modules.memory_module import MemoryModule
 from src.modules.plugin_module import PluginModule
@@ -50,6 +52,7 @@ from src.modules.scheduler_module import SchedulerModule
 from src.modules.telegram_module import TelegramModule
 from src.services.ai_service import AIService
 from src.services.fast_response_service import FastResponseService
+from src.services.index_service import IndexService
 from src.services.invoice_service import InvoiceService
 from src.services.memory_service import MemoryService
 from src.services.plugin_service import PluginService
@@ -104,6 +107,7 @@ class Bootstrap:
         self._command_router: CommandRouter | None = None
         self._shell: InteractiveShell | None = None
         self._memory_service: MemoryService | None = None
+        self._index_service: IndexService | None = None
         colorama_init(autoreset=True)
 
     def run(self) -> Orchestrator:
@@ -176,6 +180,27 @@ class Bootstrap:
         memory_service = MemoryService(config=config, store=memory_store)
         self._memory_service = memory_service
         router.register(MemoryModule(memory_service))
+
+        # EP-019: Project Index Engine integration. Depends only on
+        # Config (to resolve 'indexing.*') and ProjectIndexer itself
+        # (EP-019, untouched) -- no dependency on ContextLoader,
+        # PromptBuilder, PromptManager, ContextManager or any AI
+        # provider, matching EP-019's own architectural constraint.
+        # Wired here, alongside MemoryService above, since both are
+        # independent of the AI-facing EP-016/017/018 wiring below.
+        index_storage_backend = str(config.get("indexing.storage_backend", "json")).lower()
+        index_storage: IndexStorage
+        if index_storage_backend == "memory":
+            index_storage = MemoryIndexStorage()
+        else:
+            index_storage = JsonIndexStorage(
+                self._project_root
+                / str(config.get("indexing.storage_file", "data/database/project_index.json"))
+            )
+        project_indexer = ProjectIndexer(storage=index_storage)
+        index_service = IndexService(indexer=project_indexer, storage=index_storage)
+        self._index_service = index_service
+        router.register(IndexModule(index_service))
 
         # EP-016: Conversation Engine. Depends only on Config, matching
         # MemoryStore/ProviderRegistry above; provider-independent
@@ -601,3 +626,13 @@ class Bootstrap:
             completed.
         """
         return self._memory_service
+
+    @property
+    def index_service(self) -> IndexService | None:
+        """Return the IndexService built for EP-019, if available.
+
+        Returns:
+            The IndexService instance, or None if `run()` has not
+            completed.
+        """
+        return self._index_service

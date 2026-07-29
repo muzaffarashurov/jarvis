@@ -1,109 +1,146 @@
 # HOW_TO_START.md
 
-# How to Start Working on Jarvis
+# How to Start Working on a Project
 
-If you are a new AI working on this repository, read the following documents in order.
+Version: 2.0
 
----
-
-## Step 1
-
-Read
-
-JARVIS_ARCHITECTURE_VISION.md
-
-Purpose:
-
-Understand what Jarvis is.
-
-Understand the long-term goals.
-
-Understand the architecture philosophy.
-
-Do NOT start coding before reading it.
+Status: Active
 
 ---
 
-## Step 2
+# Purpose
 
-Read
+This document explains how an AI should begin working on any project.
+
+Jarvis must understand the project before generating or modifying code.
+
+---
+
+# Step 1 — Discover the Project
+
+Read:
 
 PROJECT_MANIFEST.md
 
 Purpose:
 
-Understand project structure.
+- Identify the project.
+- Locate the project root.
+- Discover project documentation.
+- Discover architecture documents.
+- Discover engineering documents.
+- Discover coding standards.
+- Discover startup documents.
 
-Understand existing modules.
-
-Understand responsibilities.
+The manifest is the single entry point to the project.
 
 ---
 
-## Step 3
+# Step 2 — Understand the Architecture
 
-Read
+Read every architecture document listed in the manifest.
 
-PROJECT_RULES.md
+Typical examples:
+
+- JARVIS_ARCHITECTURE_VISION.md
+- ARCHITECTURE_DECISIONS.md
+- NON_GOALS.md
+- PROJECT_OVERVIEW.md
 
 Purpose:
 
-Understand project-specific constraints.
+- Understand the long-term vision.
+- Understand architectural principles.
+- Understand design decisions.
+
+Never implement code before understanding the architecture.
 
 ---
 
-## Step 4
+# Step 3 — Read Engineering Documentation
 
-Read
+Read engineering documents listed in the manifest.
+
+Typical examples:
+
+- ENGINEERING_GUIDE.md
+- EP specifications
+
+Purpose:
+
+- Understand the current Engineering Package.
+- Understand completed work.
+- Understand future work.
+
+---
+
+# Step 4 — Read Coding Standards
+
+Read:
 
 AI_GENERATION_STANDARD.md
 
 Purpose:
 
-Understand coding standards.
-
-Follow all generation rules.
-
----
-
-## Step 5
-
-Read
-
-NEXT_TASK.md
-
-Purpose:
-
-Determine the next implementation task.
+- Understand coding rules.
+- Follow project conventions.
+- Respect architectural constraints.
 
 ---
 
-## Development Order
+# Step 5 — Build the Project Context
 
-Architecture
+The Universal Context Engine should:
 
-↓
+- locate the project
+- read PROJECT_MANIFEST.md
+- load required documents
+- respect prompt budgets
+- build the project context
 
-Project Structure
+Future components may extend the context using:
 
-↓
-
-Project Rules
-
-↓
-
-Coding Rules
-
-↓
-
-Current Task
+- Project Index
+- Retrieval Engine
+- Embedding Engine
+- RAG Engine
 
 ---
 
-Never redesign the architecture without checking
+# Recommended Reading Order
 
-JARVIS_ARCHITECTURE_VISION.md
+PROJECT_MANIFEST.md
 
-If implementation conflicts with the architecture vision,
+↓
 
-prefer the architecture.
+Architecture Documents
+
+↓
+
+Engineering Documents
+
+↓
+
+Coding Standards
+
+↓
+
+Current Engineering Package
+
+↓
+
+Source Code
+
+---
+
+# Golden Rule
+
+Architecture always has priority over implementation.
+
+If implementation conflicts with the architecture, follow the architecture.
+
+Never redesign completed modules without an explicit Engineering Package.
+
+---
+
+End of document.

@@ -1,21 +1,25 @@
 # PROJECT_MANIFEST.md
 
-This file is the single source of truth for `ContextLoader`
-(`src/core/ai/context_loader.py`, EP-018.4). It is the only
-project-specific filename `ContextLoader` ever hardcodes: everything
-else it knows about this project comes from the sections below.
+This document is the single source of truth for project discovery.
 
-Each `#` heading below is a fixed, project-independent category that
-`ContextLoader` understands. Scalar fields hold one line of text;
-document categories hold a list of file paths (relative to this
-file's directory) or directory references (a path ending in `/`,
-whose files are all included, minus `# Ignore Directories`).
+Jarvis components must discover the project structure exclusively through this manifest.
 
-To adapt this file to a different project (Language Learning, CRM,
-ERP, Invoice Automation, a Spring Boot service, a React app, ...),
-only the content under each heading changes. `ContextLoader`'s code
-never changes.
+This includes, but is not limited to:
 
+- Universal Context Engine
+- Project Index
+- Retrieval Engine
+- Knowledge Base
+- Memory Manager
+- Future AI components
+
+The manifest describes the project's identity, documentation, configuration, architecture and knowledge sources.
+
+Project-specific filenames, document locations and directory structures must never be hardcoded anywhere else in the project.
+
+To adapt Jarvis to another project (CRM, ERP, Spring Boot, React, Python, Language Learning, etc.), only this manifest needs to be updated.
+
+The implementation of project discovery remains unchanged.
 
 # Project Name
 
@@ -26,7 +30,7 @@ Jarvis
 0.1.0-alpha
 
 # Repository Root
-
+.
 
 # Project Type
 
@@ -78,34 +82,41 @@ Jarvis is a modular AI operating system designed to orchestrate multiple AI prov
 
 # Configuration Files
 
-- config/config.yaml
-- config/logging.yaml
-- config/commands.yaml
-
+- path: config/config.yaml
+- path: config/logging.yaml
+- path: config/commands.yaml
 
 # Coding Standards
 
-- AI_GENERATION_STANDARD.md
+- path: AI_GENERATION_STANDARD.md
 
 
 # Architecture Documents
 
-- docs/architecture/JARVIS_ARCHITECTURE_VISION.md
+- path: docs/architecture/PROJECT_OVERVIEW.md
+
+- path: docs/architecture/JARVIS_ARCHITECTURE_VISION.md
+
+- path: docs/architecture/ARCHITECTURE_DECISIONS.md
+
+- path: docs/architecture/NON_GOALS.md
 
 
 # Roadmaps
 
-- docs/architecture/JARVIS_ROADMAP.md
+- path: docs/architecture/JARVIS_ROADMAP.md
 
 
 # Active Processes
 
-- AI Core build-out, currently in the Context Engine (EP-018 series)
+The currently active Engineering Package is tracked by the engineering workflow and project documentation.
+
+This section is intentionally independent of any specific EP to avoid modifying the manifest during normal project development.
 
 
 # Knowledge Files
 
-- knowledge/
+- path: knowledge/
 
 
 # Ignore Directories

@@ -6,6 +6,36 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.0-ep021
+
+Released: 2026-07-30
+
+### Added
+
+- Embedding Engine
+- EmbeddingProvider interface
+- Embedding Manager
+- Embedding Service
+- Embedding Module
+- Local embedding provider (deterministic, offline)
+- Cloud embedding provider (configuration-driven placeholder)
+- CLI integration
+- Embedding tests
+
+### Improved
+
+- Provider-independent architecture pattern extended beyond chat completion
+
+### Fixed
+
+-
+
+### Compatibility
+
+Backward compatible with EP-020. Does not modify the Retrieval Engine.
+
+---
+
 ## v0.1.0-ep020
 
 Released: 2026-07-30

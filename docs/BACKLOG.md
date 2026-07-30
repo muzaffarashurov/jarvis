@@ -10,20 +10,22 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-021 — Memory Manager
+### EP-022 — RAG Engine
 
 Planned objectives:
 
-- Implement persistent memory storage
-- Store AI conversations
-- Store retrieved knowledge
-- Expose unified Memory API
-- Integrate with Retrieval Engine (EP-020)
+- Compose retrieved context (EP-020) with generated embeddings (EP-021)
+- Build retrieval-augmented prompts
+- Integrate with the AI Provider Framework (EP-014/EP-015) for completion
 - Keep provider-independent architecture
 
 Status:
 
 Planned
+
+Note: this entry previously read "EP-021 — Memory Manager". EP-021 was
+implemented as the Embedding Engine, matching Phase 2 of
+JARVIS_ROADMAP.md. Memory Manager remains planned as EP-023 (Phase 3).
 
 ---
 

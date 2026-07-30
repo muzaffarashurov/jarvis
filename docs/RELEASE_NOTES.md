@@ -75,4 +75,25 @@ No breaking changes.
 
 ---
 
+# EP-021 — Embedding Engine
+
+Status: Released
+
+Highlights:
+
+- Added a provider-independent Embedding Engine
+- Transforms text into embedding vectors only -- no retrieval, no RAG, no chat completion
+- Local embedding provider: fully offline, deterministic, no third-party dependency
+- Cloud embedding provider: configuration-driven, ready for a future real integration
+- CLI integration: embedding status / providers / use / embed / dimension
+- Switching providers takes effect immediately, no restart required
+
+Compatibility:
+
+Fully compatible with EP-020. Does not modify the Retrieval Engine.
+
+No breaking changes.
+
+---
+
 End of document.

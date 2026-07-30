@@ -17,6 +17,9 @@ from src.core.ai.provider_manager import ProviderManager
 from src.core.ai.provider_registry import ProviderRegistry as AIProviderRegistry
 from src.core.command_router import CommandRouter
 from src.core.config import Config, ConfigError
+from src.core.embedding.engine import EmbeddingEngine
+from src.core.embedding.manager import EmbeddingManager
+from src.core.embedding.provider import EmbeddingConfigurationError, EmbeddingError
 from src.core.events import EventBus
 from src.core.execution.engine import ExecutionEngine
 from src.core.execution.executors.file_executor import FileExecutor
@@ -42,6 +45,7 @@ from src.core.telegram.telegram_client import TelegramClient
 from src.core.telegram.telegram_router import TelegramRouter
 from src.modules.ai_module import AIModule
 from src.modules.conversation_module import ConversationModule
+from src.modules.embedding_module import EmbeddingModule
 from src.modules.fast_response_module import FastResponseModule
 from src.modules.index_module import IndexModule
 from src.modules.invoice_module import InvoiceModule
@@ -51,6 +55,7 @@ from src.modules.process_module import ProcessModule
 from src.modules.scheduler_module import SchedulerModule
 from src.modules.telegram_module import TelegramModule
 from src.services.ai_service import AIService
+from src.services.embedding_service import EmbeddingService
 from src.services.fast_response_service import FastResponseService
 from src.services.index_service import IndexService
 from src.services.invoice_service import InvoiceService
@@ -108,6 +113,7 @@ class Bootstrap:
         self._shell: InteractiveShell | None = None
         self._memory_service: MemoryService | None = None
         self._index_service: IndexService | None = None
+        self._embedding_service: EmbeddingService | None = None
         colorama_init(autoreset=True)
 
     def run(self) -> Orchestrator:
@@ -266,6 +272,46 @@ class Bootstrap:
             context_manager=context_manager,
         )
         router.register(AIModule(ai_service))
+
+        # EP-021: Provider-Independent Embedding Engine. Depends only on
+        # Config -- no dependency on RetrievalEngine (EP-020) or any
+        # AI chat provider (EP-014/015/015.1); the Embedding Engine
+        # transforms text into vectors only. EmbeddingManager owns
+        # provider selection, configuration loading ('embedding.*')
+        # and provider lifecycle; EmbeddingEngine owns batching,
+        # vector validation and error handling.
+        #
+        # Chosen failure mode: invalid 'embedding.*' configuration
+        # (e.g. a malformed dimension, or a 'default_provider' that
+        # does not match any registered provider) disables the
+        # Embedding subsystem for this run rather than crashing the
+        # whole application -- consistent with how every other
+        # optional subsystem in this file degrades (e.g. 'ai.enabled:
+        # false' does not prevent Jarvis from starting). The exact
+        # reason is always logged so an operator can fix
+        # config/config.yaml and restart to re-enable it.
+        try:
+            embedding_manager = EmbeddingManager(config=config)
+            embedding_batch_size = config.get("embedding.batch_size", 16)
+            if isinstance(embedding_batch_size, bool) or not isinstance(
+                embedding_batch_size, int
+            ) or embedding_batch_size <= 0:
+                raise EmbeddingConfigurationError(
+                    "Invalid value for 'embedding.batch_size': expected a positive "
+                    f"integer, got {embedding_batch_size!r}."
+                )
+            embedding_engine = EmbeddingEngine(
+                manager=embedding_manager, batch_size=embedding_batch_size
+            )
+            embedding_service = EmbeddingService(manager=embedding_manager, engine=embedding_engine)
+            self._embedding_service = embedding_service
+            router.register(EmbeddingModule(embedding_service))
+        except EmbeddingError as exc:
+            logger.error(
+                f"Embedding Engine disabled: invalid 'embedding.*' configuration ({exc}). "
+                "Fix config/config.yaml and restart to re-enable it."
+            )
+            self._embedding_service = None
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
@@ -636,3 +682,13 @@ class Bootstrap:
             completed.
         """
         return self._index_service
+
+    @property
+    def embedding_service(self) -> EmbeddingService | None:
+        """Return the EmbeddingService built for EP-021, if available.
+
+        Returns:
+            The EmbeddingService instance, or None if `run()` has not
+            completed.
+        """
+        return self._embedding_service

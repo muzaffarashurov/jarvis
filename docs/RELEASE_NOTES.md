@@ -54,4 +54,25 @@ Future releases will be documented here.
 
 ---
 
+# EP-020 — Retrieval Engine
+
+Status: Released
+
+Highlights:
+
+- Added Retrieval Engine
+- Semantic retrieval API
+- Integration with Project Index Engine
+- Document search by relevance
+- Modular retrieval architecture
+- Provider-independent implementation
+
+Compatibility:
+
+Fully compatible with EP-019.
+
+No breaking changes.
+
+---
+
 End of document.

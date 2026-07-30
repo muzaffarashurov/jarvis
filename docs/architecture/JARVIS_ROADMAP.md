@@ -93,21 +93,14 @@ Completed sub-packages:
 - EP-018.4 Document Budget
 - EP-018.5 Unified Prompt Budget
 - EP-018.6 Conversation Budget
+- EP-019 Project Index Engine
+- EP-020 Retrieval Engine
 
 ---
 
 ## Current
 
-EP-019 Project Index Engine
-
-Planned implementation:
-
-- EP-019.1 Repository Scanner
-- EP-019.2 File Index
-- EP-019.3 Chunk Generator
-- EP-019.4 Metadata Builder
-- EP-019.5 Incremental Index
-- EP-019.6 Testing & Validation
+EP-021 Memory Manager
 
 ---
 
@@ -145,19 +138,19 @@ EP-013 AI Infrastructure
 
 ## Phase 2 — AI Core
 
-EP-014 AI Provider Manager
+✓ EP-014 AI Provider Manager
 
-EP-015 AI Provider Integration
+✓ EP-015 AI Provider Integration
 
-EP-016 Conversation Engine
+✓ EP-016 Conversation Engine
 
-EP-017 Prompt Engine
+✓ EP-017 Prompt Engine
 
-EP-018 Universal Context Engine
+✓ EP-018 Universal Context Engine
 
-EP-019 Project Index Engine
+✓ EP-019 Project Index Engine
 
-EP-020 Retrieval Engine
+✓ EP-020 Retrieval Engine
 
 EP-021 Embedding Engine
 

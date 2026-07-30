@@ -6,6 +6,35 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.0-ep020
+
+Released: 2026-07-30
+
+### Added
+
+- Retrieval Engine
+- Retrieval Service
+- Retrieval Module
+- Search API
+- CLI integration
+- Retrieval tests
+
+### Improved
+
+- AI infrastructure
+- Project navigation
+- Knowledge retrieval pipeline
+
+### Fixed
+
+- Internal integration issues between EP-019 and EP-020
+
+### Compatibility
+
+Backward compatible with EP-019.
+
+---
+
 # [Unreleased]
 
 ## Added

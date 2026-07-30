@@ -6,6 +6,27 @@ Status: Active
 
 ---
 
+# Current Backlog
+
+## Next Engineering Package
+
+### EP-021 — Memory Manager
+
+Planned objectives:
+
+- Implement persistent memory storage
+- Store AI conversations
+- Store retrieved knowledge
+- Expose unified Memory API
+- Integrate with Retrieval Engine (EP-020)
+- Keep provider-independent architecture
+
+Status:
+
+Planned
+
+---
+
 # Purpose
 
 This document contains ideas, improvements, feature requests and future work that are not yet assigned to an Engineering Package.

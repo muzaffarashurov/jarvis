@@ -10,22 +10,30 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-022 — RAG Engine
+### EP-023 — Memory Manager
 
 Planned objectives:
 
-- Compose retrieved context (EP-020) with generated embeddings (EP-021)
-- Build retrieval-augmented prompts
-- Integrate with the AI Provider Framework (EP-014/EP-015) for completion
-- Keep provider-independent architecture
+- Persistent, structured storage of conversational/task memory
+- Read/write API consumed by the future AI Agent Framework
+- Provider-independent, no direct dependency on any AI provider
+- Keep clear separation from EP-022's RAG Engine (retrieval-time
+  context assembly) and EP-019's ProjectIndex (static repository
+  content)
 
 Status:
 
 Planned
 
-Note: this entry previously read "EP-021 — Memory Manager". EP-021 was
-implemented as the Embedding Engine, matching Phase 2 of
-JARVIS_ROADMAP.md. Memory Manager remains planned as EP-023 (Phase 3).
+Note: EP-022 — RAG Engine is now complete (see CHANGELOG.md /
+docs/RELEASE_NOTES.md). It combines ProjectIndexer (EP-019),
+RetrievalEngine (EP-020) and the Embedding Engine (EP-021) into a
+provider-independent context-generation pipeline; it does not call any
+AI provider and performs no chat completion — that integration
+(RAG-assembled context feeding an AI Provider Framework completion
+call) is deliberately out of scope for EP-022 and remains future work,
+tracked under "AI" below. Memory Manager is next, matching Phase 3 of
+JARVIS_ROADMAP.md.
 
 ---
 
@@ -59,6 +67,8 @@ Priority may change.
 - Support hybrid search
 - Support code embeddings
 - Improve provider selection
+- Feed EP-022's assembled RAG context into the AI Provider Framework
+  for chat completion (deliberately out of scope for EP-022 itself)
 
 ---
 

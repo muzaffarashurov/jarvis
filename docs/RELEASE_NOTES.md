@@ -96,4 +96,33 @@ No breaking changes.
 
 ---
 
+# EP-022 — RAG Engine
+
+Status: Released
+
+Highlights:
+
+- Added a provider-independent RAG (Retrieval-Augmented Generation) Engine
+- Combines the Project Index Engine (EP-019), the Retrieval Engine (EP-020) and
+  the Embedding Engine (EP-021) into a single, reusable context-generation pipeline
+- Given a query: obtains its embedding, retrieves and ranks relevant chunks, then
+  assembles the highest-ranked chunks (full text, not just a preview) into a single
+  context block
+- Returns a structured result: the ranked matches used, the assembled context text,
+  and which embedding provider produced the query embedding
+- Does not call any AI provider and performs no chat completion -- context assembly
+  only; feeding this context into a chat completion call is future work
+- CLI integration: rag status / query / context / provider / use
+- Switching the embedding provider used for RAG takes effect immediately, no restart
+  required
+
+Compatibility:
+
+Fully compatible with EP-019, EP-020 and EP-021. Does not modify the Project Index
+Engine, the Retrieval Engine, or the Embedding Engine.
+
+No breaking changes.
+
+---
+
 End of document.

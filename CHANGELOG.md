@@ -6,6 +6,47 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.0-ep022
+
+Released: 2026-07-31
+
+### Added
+
+- RAG Engine (src/core/rag/rag_engine.py)
+- RAG Manager (src/core/rag/rag_manager.py)
+- RagProviderInfo / RagContextItem / RagResult domain models
+- RAG Service
+- RAG Module
+- CLI integration: rag help / status / query / context / provider / use
+- EP-022 test suite (tests/EP022/test_rag_engine.py)
+
+### Changed
+
+- src/bootstrap.py: wires RagManager/RagService/RagModule into the command
+  router, mirroring the Embedding Engine's degrade-gracefully-on-invalid-config
+  pattern
+- config/config.yaml: added a 'rag' configuration section (enabled, top_k,
+  max_context_characters)
+- src/modules/test_module.py: registers the EP-022 test suite so 'test EP022'
+  and 'test all' pick it up
+
+### Improved
+
+- Retrieval (EP-020) and embedding (EP-021) are now composed into a single,
+  reusable context-generation pipeline consumable by future EPs
+
+### Fixed
+
+-
+
+### Compatibility
+
+Backward compatible with EP-019, EP-020 and EP-021. Does not modify the
+Project Index Engine, the Retrieval Engine, or the Embedding Engine. The RAG
+Engine calls no AI provider and performs no chat completion.
+
+---
+
 ## v0.1.0-ep021
 
 Released: 2026-07-30

@@ -211,3 +211,17 @@ embedding:
       api_key: ""
       model: "text-embedding-cloud-v1"
       dimension: 1536
+
+rag:
+  # EP-022 RAG Engine. Provider-independent context-generation
+  # pipeline only -- combines ProjectIndexer (EP-019), RetrievalEngine
+  # (EP-020) and the Embedding Engine (EP-021); never calls an AI
+  # provider or performs chat completion (see src/core/rag/rag_engine.py).
+  # "top_k" is the default maximum number of chunks assembled into
+  # context per query; "max_context_characters" caps the assembled
+  # context's total size. Both can be overridden per call via
+  # 'rag query "<text>"'/'rag context "<text>"' in a future CLI
+  # extension, but are not exposed as CLI arguments in this EP.
+  enabled: true
+  top_k: 5
+  max_context_characters: 4000

@@ -37,6 +37,7 @@ from src.core.plugins.plugin_loader import PluginLoader
 from src.core.plugins.plugin_registry import PluginRegistry
 from src.core.processes.process import Process, RestartPolicy
 from src.core.processes.process_registry import ProcessRegistry as ProcessCatalogRegistry
+from src.core.rag.rag_manager import RagManager, RagManagerError
 from src.core.scheduler.job import Job, Schedule, ScheduleType
 from src.core.scheduler.job_registry import JobRegistry
 from src.core.scheduler.scheduler import Scheduler
@@ -52,6 +53,7 @@ from src.modules.invoice_module import InvoiceModule
 from src.modules.memory_module import MemoryModule
 from src.modules.plugin_module import PluginModule
 from src.modules.process_module import ProcessModule
+from src.modules.rag_module import RagModule
 from src.modules.scheduler_module import SchedulerModule
 from src.modules.telegram_module import TelegramModule
 from src.services.ai_service import AIService
@@ -62,6 +64,7 @@ from src.services.invoice_service import InvoiceService
 from src.services.memory_service import MemoryService
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
+from src.services.rag_service import RagService
 from src.services.scheduler_service import SchedulerService
 from src.services.telegram_service import TelegramService
 from src.skills.system.skill import SystemModule
@@ -114,6 +117,7 @@ class Bootstrap:
         self._memory_service: MemoryService | None = None
         self._index_service: IndexService | None = None
         self._embedding_service: EmbeddingService | None = None
+        self._rag_service: RagService | None = None
         colorama_init(autoreset=True)
 
     def run(self) -> Orchestrator:
@@ -312,6 +316,43 @@ class Bootstrap:
                 "Fix config/config.yaml and restart to re-enable it."
             )
             self._embedding_service = None
+
+        # EP-022: Provider-Independent RAG Engine. Combines
+        # ProjectIndexer (EP-019), RetrievalEngine (EP-020, built
+        # internally by RagManager over the current ProjectIndex) and
+        # EmbeddingEngine/EmbeddingManager (EP-021) into a reusable
+        # context-generation pipeline. Never calls an AI provider --
+        # no import of src.core.ai.* anywhere in src/core/rag.
+        #
+        # Requires a working Embedding Engine (see the try/except
+        # above): if 'embedding.*' configuration was invalid and
+        # EmbeddingService could not be built, the RAG Engine is
+        # disabled for this run too, for the same reason -- consistent
+        # with how every other optional subsystem in this file
+        # degrades rather than crashing the whole application.
+        if self._embedding_service is not None:
+            try:
+                rag_manager = RagManager(
+                    indexer=project_indexer,
+                    embedding_manager=embedding_manager,
+                    embedding_engine=embedding_engine,
+                    config=config,
+                )
+                rag_service = RagService(manager=rag_manager)
+                self._rag_service = rag_service
+                router.register(RagModule(rag_service))
+            except RagManagerError as exc:
+                logger.error(
+                    f"RAG Engine disabled: invalid 'rag.*' configuration ({exc}). "
+                    "Fix config/config.yaml and restart to re-enable it."
+                )
+                self._rag_service = None
+        else:
+            logger.warning(
+                "RAG Engine disabled: the Embedding Engine is unavailable this run "
+                "(see the preceding log entry)."
+            )
+            self._rag_service = None
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
@@ -692,3 +733,14 @@ class Bootstrap:
             completed.
         """
         return self._embedding_service
+
+    @property
+    def rag_service(self) -> RagService | None:
+        """Return the RagService built for EP-022, if available.
+
+        Returns:
+            The RagService instance, or None if `run()` has not
+            completed (or the RAG Engine was disabled this run -- see
+            `_build_command_router`'s EP-022 wiring).
+        """
+        return self._rag_service

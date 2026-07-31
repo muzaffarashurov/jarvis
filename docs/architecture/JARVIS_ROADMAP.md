@@ -96,12 +96,13 @@ Completed sub-packages:
 - EP-019 Project Index Engine
 - EP-020 Retrieval Engine
 - EP-021 Embedding Engine
+- EP-022 RAG Engine
 
 ---
 
 ## Current
 
-EP-022 RAG Engine
+EP-023 Memory Manager
 
 ---
 
@@ -155,7 +156,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-021 Embedding Engine
 
-EP-022 RAG Engine
+✓ EP-022 RAG Engine
 
 ---
 

@@ -125,4 +125,36 @@ No breaking changes.
 
 ---
 
+# EP-023 — Memory Manager
+
+Status: Released
+
+Highlights:
+
+- Added a Memory Manager: an orchestration layer over registered memory
+  providers, built on top of the existing (EP-013) Memory & Context Manager
+  rather than a second memory subsystem
+- Register, enable, disable and switch between memory providers, and
+  inspect their status, through a single unified API
+- The built-in "memory" provider wraps the existing MemoryStore, so every
+  entry set/retrieved through the Memory Manager is the same data already
+  managed by `memory get` / `memory set` / `memory list`
+- CLI integration: memory providers / memory use <provider>, alongside the
+  existing memory status / doctor / get / set / delete / clear / list /
+  export / import / help
+- Invalid provider configuration disables the Memory subsystem for that run
+  (logged) instead of crashing the rest of Jarvis on startup
+- Only the abstraction and the MemoryStore adapter are implemented -- no
+  Knowledge Base, Long-Term Memory, Semantic Search, or External provider
+  yet; those remain future work (EP-024 onward)
+
+Compatibility:
+
+Fully backward compatible with EP-013. Every existing `MemoryService` method
+and every existing `memory` CLI command behaves exactly as before.
+
+No breaking changes.
+
+---
+
 End of document.

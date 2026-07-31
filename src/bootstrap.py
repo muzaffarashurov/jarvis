@@ -29,6 +29,7 @@ from src.core.execution.executors.url_executor import UrlExecutor
 from src.core.execution.process_registry import ProcessRegistry
 from src.core.indexing import IndexStorage, JsonIndexStorage, MemoryIndexStorage, ProjectIndexer
 from src.core.logger import Logger
+from src.core.memory.memory_provider import MemoryProviderError
 from src.core.memory.memory_store import MemoryStore
 from src.core.orchestrator import Orchestrator
 from src.core.plugins.plugin_context import PluginContext
@@ -186,10 +187,25 @@ class Bootstrap:
         # no dependency on any LLM or other business-logic module, so it
         # is wired before everything else and is available for Invoice,
         # FastResponse, Process, Plugin, Scheduler and Telegram to reuse.
-        memory_store = MemoryStore()
-        memory_service = MemoryService(config=config, store=memory_store)
-        self._memory_service = memory_service
-        router.register(MemoryModule(memory_service))
+        #
+        # EP-023: MemoryService now also builds a MemoryManager
+        # internally (registering `memory_store` as the "memory"
+        # provider per 'memory.default_provider'). An invalid
+        # 'memory.default_provider' disables the Memory subsystem for
+        # this run rather than crashing the whole application --
+        # consistent with how every other optional subsystem in this
+        # file degrades (see the Embedding/RAG try/except below).
+        try:
+            memory_store = MemoryStore()
+            memory_service = MemoryService(config=config, store=memory_store)
+            self._memory_service = memory_service
+            router.register(MemoryModule(memory_service))
+        except MemoryProviderError as exc:
+            logger.error(
+                f"Memory subsystem disabled: invalid 'memory.*' configuration ({exc}). "
+                "Fix config/config.yaml and restart to re-enable it."
+            )
+            self._memory_service = None
 
         # EP-019: Project Index Engine integration. Depends only on
         # Config (to resolve 'indexing.*') and ProjectIndexer itself

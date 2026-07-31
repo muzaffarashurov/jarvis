@@ -10,6 +10,7 @@ import tests.EP001.test_foundation
 import tests.EP002.test_shell
 import tests.EP003.test_execution_engine
 import tests.EP022.test_rag_engine
+import tests.EP023.test_memory_manager
 
 
 class TestModule(CommandModule):

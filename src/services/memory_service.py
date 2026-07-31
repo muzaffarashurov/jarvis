@@ -20,6 +20,16 @@ src/core/memory/memory_persistence.py) so this file stays within
 AI_GENERATION_STANDARD.md's file-size limit; MemoryService still owns
 every CLI-facing decision (whether the subsystem is enabled, TTL
 defaults, max_entries enforcement, CommandResult formatting).
+
+EP-023 extends this service with the Memory Manager's orchestration
+responsibilities (register/enable/disable/switch providers, expose
+provider status) by composing a `MemoryManager` (EP-023) that wraps
+this same `MemoryStore` as the built-in "memory" provider via
+`MemoryStoreProvider`. This introduces no second memory subsystem:
+`MemoryManager` owns no storage of its own and delegates every
+operation back to the one `MemoryStore` this service already manages.
+Every EP-013 method, CLI command and public signature below is
+unchanged.
 """
 
 from __future__ import annotations
@@ -35,10 +45,13 @@ from loguru import logger
 from src.core.command_router import CommandResult
 from src.core.config import Config
 from src.core.memory.context import DEFAULT_NAMESPACE, MemoryEntry, utc_now
+from src.core.memory.memory_manager import ManagerStatus, MemoryManager
 from src.core.memory.memory_persistence import MemoryPersistence
+from src.core.memory.memory_provider import MemoryProviderError, MemoryStoreProvider
 from src.core.memory.memory_store import MemoryStore
 
 DEFAULT_EXPORT_FILE: str = "data/output/memory_export.json"
+DEFAULT_PROVIDER_NAME: str = "memory"
 
 
 @dataclass(frozen=True)
@@ -137,19 +150,39 @@ class MemoryService:
     mutating operation is rejected. Otherwise MemoryPersistence.start()
     decides, from 'memory.persistent' / 'memory.auto_save', whether to
     load 'memory.storage_file' and run the auto-save loop.
+
+    EP-023: also composes a `MemoryManager`, which registers this same
+    `store` as the built-in "memory" provider (via
+    `MemoryStoreProvider`) and owns provider registration, enable/
+    disable, active-provider switching and status. The manager holds
+    no storage of its own -- it is pure orchestration on top of the
+    one MemoryStore this service already owns, so there is still
+    exactly one memory subsystem.
     """
 
-    def __init__(self, config: Config, store: MemoryStore) -> None:
+    def __init__(
+        self, config: Config, store: MemoryStore, manager: MemoryManager | None = None
+    ) -> None:
         """Initialize the MemoryService and, per configuration, start persistence.
 
         Args:
             config: Loaded application configuration, used to resolve
                 'memory.*' settings.
             store: The MemoryStore used to persist and retrieve entries.
+            manager: The EP-023 MemoryManager to use for provider
+                orchestration. If None, a default MemoryManager is
+                built, registering `store` as the built-in "memory"
+                provider and activating it per
+                'memory.default_provider' (defaults to "memory").
+
+        Raises:
+            MemoryProviderError: If `manager` is None and
+                'memory.default_provider' is not a non-empty string.
         """
         self._config = config
         self._store = store
         self._persistence = MemoryPersistence(config=config, store=store)
+        self._manager = manager if manager is not None else self._build_default_manager(config, store)
 
         if self._is_enabled():
             self._persistence.start()
@@ -414,6 +447,35 @@ class MemoryService:
         success, message = self._persistence.save()
         return CommandResult(success=success, message=message)
 
+    # ---------- EP-023: Memory Manager orchestration ----------
+
+    def providers_status(self) -> ManagerStatus:
+        """Return the EP-023 status snapshot of every registered memory provider."""
+        return self._manager.status()
+
+    def current_provider(self) -> str | None:
+        """Return the name of the currently active memory provider (EP-023)."""
+        return self._manager.active_provider_name()
+
+    def use_provider(self, name: str) -> CommandResult:
+        """Switch the active memory provider (EP-023).
+
+        Args:
+            name: The provider to activate.
+
+        Returns:
+            A CommandResult describing the outcome.
+        """
+        disabled = self._ensure_enabled()
+        if disabled is not None:
+            return disabled
+
+        try:
+            self._manager.use(name)
+        except MemoryProviderError as exc:
+            return CommandResult(success=False, message=str(exc))
+        return CommandResult(success=True, message=f"Active memory provider: '{name}'.")
+
     # ---------- Internal helpers: configuration ----------
 
     def _is_enabled(self) -> bool:
@@ -445,6 +507,38 @@ class MemoryService:
             return None
         logger.error("Memory operation rejected: Memory subsystem disabled.")
         return CommandResult(success=False, message="Memory subsystem disabled.")
+
+    # ---------- Internal helpers: EP-023 Memory Manager ----------
+
+    @staticmethod
+    def _build_default_manager(config: Config, store: MemoryStore) -> MemoryManager:
+        """Build the default MemoryManager, registering `store` as the "memory" provider.
+
+        Args:
+            config: Used to resolve 'memory.default_provider'.
+            store: The same MemoryStore this MemoryService owns;
+                wrapped (not copied) via MemoryStoreProvider so the
+                manager introduces no second memory subsystem.
+
+        Returns:
+            A MemoryManager with `store` registered under
+            'memory.default_provider' (defaults to "memory") and
+            activated.
+
+        Raises:
+            MemoryProviderError: If 'memory.default_provider' is not
+                a non-empty string.
+        """
+        default_provider = config.get("memory.default_provider", DEFAULT_PROVIDER_NAME)
+        if not isinstance(default_provider, str) or not default_provider:
+            raise MemoryProviderError(
+                "Invalid value for 'memory.default_provider': expected a non-empty "
+                f"string, got {default_provider!r}."
+            )
+
+        manager = MemoryManager(default_provider=default_provider)
+        manager.register(MemoryStoreProvider(store=store, name=DEFAULT_PROVIDER_NAME))
+        return manager
 
     # ---------- Internal helpers: doctor validation ----------
 

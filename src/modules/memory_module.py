@@ -6,6 +6,12 @@ handlers, following the same pattern as SchedulerModule/WorkflowModule.
 All storage and business logic lives in MemoryStore/MemoryService;
 this module only parses CLI arguments and formats CommandResult
 objects for the shell.
+
+EP-023 adds two commands to this same namespace -- "providers" (list
+registered memory providers and their enabled/active status) and
+"use" (switch the active provider) -- both thin wrappers over
+MemoryService's new MemoryManager-backed methods. Every EP-013 command
+above is unchanged.
 """
 
 from __future__ import annotations
@@ -14,6 +20,7 @@ from typing import Callable
 
 from src.core.command_router import CommandResult
 from src.core.memory.context import MemoryEntry
+from src.core.memory.memory_manager import ManagerStatus
 from src.services.memory_service import MemoryDoctorReport, MemoryService, MemoryStatus
 
 HELP_TEXT: str = (
@@ -27,6 +34,8 @@ HELP_TEXT: str = (
     "memory list\n"
     "memory export [path]\n"
     "memory import [path]\n"
+    "memory providers\n"
+    "memory use <provider>\n"
     "memory help"
 )
 
@@ -54,6 +63,8 @@ class MemoryModule:
             "list": self._list,
             "export": self._export,
             "import": self._import,
+            "providers": self._providers,
+            "use": self._use,
             "help": self._help,
         }
 
@@ -173,6 +184,25 @@ class MemoryModule:
         """Import memory from a JSON file."""
         path = arguments[0] if arguments else None
         return self._service.import_(path)
+
+    def _providers(self, arguments: list[str]) -> CommandResult:
+        """List registered memory providers and their enabled/active status (EP-023)."""
+        status: ManagerStatus = self._service.providers_status()
+        if not status.providers:
+            return CommandResult(success=True, message="Memory Providers\n\n(none registered)")
+
+        lines = ["Memory Providers"]
+        for provider in status.providers:
+            marker = "*" if provider.active else " "
+            state = "enabled" if provider.enabled else "disabled"
+            lines.append(f"{marker} {provider.name} ({state})")
+        return CommandResult(success=True, message="\n\n".join(lines))
+
+    def _use(self, arguments: list[str]) -> CommandResult:
+        """Switch the active memory provider (EP-023)."""
+        if not arguments:
+            return CommandResult(success=False, message="Usage: memory use <provider>")
+        return self._service.use_provider(arguments[0])
 
     @staticmethod
     def _mark(value: bool) -> str:

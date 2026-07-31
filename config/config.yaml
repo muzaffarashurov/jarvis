@@ -28,6 +28,11 @@ memory:
   auto_save_interval: 60
   max_entries: 10000
   default_ttl: null
+  # EP-023 Memory Manager. Name of the MemoryProvider activated at
+  # startup; must match a provider name registered with MemoryManager.
+  # The only provider registered today is "memory" (MemoryStoreProvider,
+  # wrapping the MemoryStore above).
+  default_provider: "memory"
 
 orchestrator:
   skills_enabled: []

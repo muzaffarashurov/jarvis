@@ -6,6 +6,68 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.0-ep023
+
+Released: 2026-07-31
+
+### Added
+
+- MemoryProvider interface (src/core/memory/memory_provider.py):
+  store/load/delete/clear/exists/list contract every memory provider must
+  implement
+- MemoryStoreProvider (src/core/memory/memory_provider.py): adapter wrapping
+  the existing (EP-013) MemoryStore as the built-in "memory" provider,
+  introducing no new storage logic
+- MemoryManager (src/core/memory/memory_manager.py): orchestration layer --
+  register/unregister providers, enable/disable, switch the active
+  provider, expose status, and delegate the unified memory API to whichever
+  provider is active
+- src/core/memory/__init__.py: package-level exports for both EP-013 and
+  EP-023 public symbols
+- CLI integration: memory providers / memory use <provider>
+- EP-023 test suite (tests/EP023/test_memory_manager.py)
+
+### Changed
+
+- src/services/memory_service.py: added an optional `manager` constructor
+  parameter (MemoryManager | None = None, default preserves prior
+  behavior); composes a MemoryManager that registers the same MemoryStore
+  as the "memory" provider; added `providers_status()`, `current_provider()`
+  and `use_provider()`. Every existing EP-013 method and signature is
+  unchanged.
+- src/modules/memory_module.py: added "providers" and "use" CLI actions and
+  updated help text. Every existing EP-013 command is unchanged.
+- config/config.yaml: added 'memory.default_provider' ("memory") to the
+  existing 'memory' section
+- src/bootstrap.py: wrapped the existing Memory subsystem wiring in a
+  try/except for MemoryProviderError, so invalid 'memory.default_provider'
+  configuration disables the Memory subsystem for that run (logged) instead
+  of crashing startup, mirroring the Embedding/RAG degrade-gracefully
+  pattern. No change to startup order or to any other subsystem's wiring.
+- src/modules/test_module.py: registers the EP-023 test suite so
+  'test EP023' and 'test all' pick it up
+
+### Improved
+
+- Memory now has a single, provider-agnostic API surface
+  (register/enable/disable/switch/status) that future providers
+  (Knowledge Base, Long-Term Memory, External, etc.) can register against
+  without any caller needing to change
+
+### Fixed
+
+-
+
+### Compatibility
+
+Fully backward compatible with EP-013. No existing MemoryService method,
+MemoryStore behavior, or `memory` CLI command was renamed, removed, or had
+its signature/behavior changed. Introduces no second memory subsystem --
+MemoryManager owns no storage state of its own and delegates every
+operation to the same MemoryStore EP-013 already manages.
+
+---
+
 ## v0.1.0-ep022
 
 Released: 2026-07-31

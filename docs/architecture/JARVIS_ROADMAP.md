@@ -97,12 +97,13 @@ Completed sub-packages:
 - EP-020 Retrieval Engine
 - EP-021 Embedding Engine
 - EP-022 RAG Engine
+- EP-023 Memory Manager
 
 ---
 
 ## Current
 
-EP-023 Memory Manager
+EP-024 Knowledge Base
 
 ---
 
@@ -162,7 +163,7 @@ EP-013 AI Infrastructure
 
 ## Phase 3 — Memory
 
-EP-023 Memory Manager
+✓ EP-023 Memory Manager
 
 EP-024 Knowledge Base
 

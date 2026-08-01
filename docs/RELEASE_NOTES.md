@@ -157,4 +157,35 @@ No breaking changes.
 
 ---
 
+# EP-024 — Knowledge Base
+
+Status: Released
+
+Highlights:
+
+- Added a Knowledge Base: a new, independent subsystem for storing and
+  organizing structured project knowledge into named collections
+- Manage structured knowledge records: store, load, update, delete, and
+  clear -- scoped to a single collection or across all of them
+- Inspect collection statistics (record counts per collection) and
+  provider status through a single unified API, mirroring the
+  provider/manager pattern already used by the Memory Manager (EP-023)
+- CLI integration: knowledge status / collections / list / info / clear /
+  help
+- Invalid provider configuration disables the Knowledge subsystem for
+  that run (logged) instead of crashing the rest of Jarvis on startup
+- Knowledge Base performs no reasoning and has no dependency on Memory,
+  Embedding, Retrieval, RAG, Long-Term Memory, Semantic Search, Context
+  Compression, Planning, Reflection, Agent Memory, or Vector Storage --
+  those remain future work (EP-025 onward)
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior changed.
+
+No breaking changes.
+
+---
+
 End of document.

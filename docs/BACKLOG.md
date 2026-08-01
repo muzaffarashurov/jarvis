@@ -10,35 +10,37 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-024 — Knowledge Base
+### EP-025 — Long-Term Memory
 
 Planned objectives:
 
-- Persistent, structured storage of conversational/task knowledge,
-  building on EP-023's Memory Manager (provider registration/
-  switching) rather than duplicating it
+- Durable, queryable long-term memory for the future AI Agent Framework,
+  building on EP-023's Memory Manager (provider registration/switching)
+  and EP-024's Knowledge Base (structured records/collections) rather
+  than duplicating either
 - Read/write API consumed by the future AI Agent Framework
 - Provider-independent, no direct dependency on any AI provider
 - Keep clear separation from EP-022's RAG Engine (retrieval-time
-  context assembly) and EP-019's ProjectIndex (static repository
-  content)
+  context assembly), EP-024's Knowledge Base (static structured
+  records), and EP-019's ProjectIndex (static repository content)
 
 Status:
 
 Planned
 
-Note: EP-023 — Memory Manager is now complete (see CHANGELOG.md /
-docs/RELEASE_NOTES.md). It is an orchestration layer over
-`MemoryProvider` implementations -- registration, enable/disable,
-active-provider switching, unified store/load/delete/clear/exists/list
-API -- built on top of the existing (EP-013) MemoryStore rather than a
-second memory subsystem. It implements no persistent structured
-storage of its own beyond that: the "memory" provider it registers by
-default simply wraps EP-013's in-process MemoryStore. Persistent,
-structured, queryable storage for the AI Agent Framework -- along with
-KnowledgeBaseProvider, LongTermMemoryProvider and ExternalProvider --
-remains future work, tracked as EP-024 (Knowledge Base) and EP-025
-(Long-Term Memory) below, matching Phase 3 of JARVIS_ROADMAP.md.
+Note: EP-024 — Knowledge Base is now complete (see CHANGELOG.md /
+docs/RELEASE_NOTES.md). It is a new, independent package
+(`src/core/knowledge/`) that manages structured project-knowledge
+records organized into named collections, structurally mirroring
+EP-023's provider/manager pattern (KnowledgeProvider /
+KnowledgeCollectionProvider / KnowledgeManager) but with its own
+storage engine (KnowledgeCollection) -- it does not wrap or extend
+MemoryStore/MemoryManager, and it performs no reasoning, embeddings,
+retrieval, or RAG. Long-Term Memory, Semantic Search, Context
+Compression, and any External knowledge provider remain future work,
+tracked as EP-025 (Long-Term Memory), EP-026 (Semantic Search) and
+EP-027 (Context Compression) below, matching Phase 3 of
+JARVIS_ROADMAP.md.
 
 ---
 

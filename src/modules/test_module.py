@@ -11,6 +11,7 @@ import tests.EP002.test_shell
 import tests.EP003.test_execution_engine
 import tests.EP022.test_rag_engine
 import tests.EP023.test_memory_manager
+import tests.EP024.test_knowledge_base
 
 
 class TestModule(CommandModule):

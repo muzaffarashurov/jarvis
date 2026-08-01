@@ -6,7 +6,70 @@ The format is inspired by Keep a Changelog.
 
 ---
 
-## v0.1.0-ep023
+## v0.1.0-ep024
+
+Released: 2026-08-01
+
+### Added
+
+- Knowledge Base subsystem (src/core/knowledge/), a new independent package:
+  - KnowledgeRecord (knowledge_record.py): plain data model for a single
+    structured knowledge record (key, content, collection, metadata,
+    timestamps)
+  - KnowledgeCollection (knowledge_collection.py): thread-safe,
+    collection-organized storage engine -- store/load/update/delete/clear/
+    list plus per-collection statistics
+  - KnowledgeProvider interface and KnowledgeCollectionProvider adapter
+    (knowledge_provider.py), mirroring EP-023's MemoryProvider pattern
+  - KnowledgeManager (knowledge_manager.py): orchestration layer --
+    register/unregister providers, enable/disable, switch the active
+    provider, expose status, and delegate the unified knowledge API to
+    whichever provider is active
+  - src/core/knowledge/__init__.py: package-level public exports
+- KnowledgeService (src/services/knowledge_service.py): config-driven
+  ('knowledge.enabled', 'knowledge.default_provider') business logic,
+  building a default KnowledgeManager around a KnowledgeCollectionProvider
+  named "local"
+- KnowledgeModule (src/modules/knowledge_module.py): "knowledge" CLI
+  namespace -- status / collections / list / info / clear / help
+- config/config.yaml: new 'knowledge' section ('enabled', 'default_provider')
+- EP-024 test suite (tests/EP024/test_knowledge_base.py)
+
+### Changed
+
+- src/bootstrap.py: registers KnowledgeService/KnowledgeModule, wrapped in
+  a try/except for KnowledgeProviderError so invalid
+  'knowledge.default_provider' configuration disables the Knowledge
+  subsystem for that run (logged) instead of crashing startup, mirroring
+  the Memory/Embedding/RAG degrade-gracefully pattern. No change to
+  startup order or to any other subsystem's wiring.
+- src/modules/test_module.py: registers the EP-024 test suite so
+  'test EP024' and 'test all' pick it up
+
+### Improved
+
+- Structured project knowledge (docs, facts, reference records) now has a
+  dedicated home, decoupled from EP-023's Memory Manager, EP-021's
+  Embedding, and EP-022's RAG Engine, so those subsystems can evolve
+  independently of how knowledge is organized into collections
+
+### Fixed
+
+-
+
+### Compatibility
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its signature/
+behavior changed. Introduces no duplicate memory/embedding/retrieval
+subsystem -- Knowledge Base performs no reasoning, has no dependency on
+Embedding, Retrieval, RAG, Long-Term Memory, Semantic Search, Context
+Compression, Planner, Reflection, Agent Framework, Browser Automation, or
+Vector Database, and KnowledgeManager owns no storage state of its own.
+
+---
+
+
 
 Released: 2026-07-31
 

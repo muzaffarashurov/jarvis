@@ -34,6 +34,17 @@ memory:
   # wrapping the MemoryStore above).
   default_provider: "memory"
 
+knowledge:
+  # EP-024 Knowledge Base. Structured project-knowledge records,
+  # organized into named collections -- no memory, embeddings,
+  # retrieval, or RAG (see src/core/knowledge/knowledge_manager.py).
+  # 'default_provider' must match the name of the KnowledgeProvider
+  # activated at startup. The only provider registered today is
+  # "local" (KnowledgeCollectionProvider, wrapping a fresh, in-process
+  # KnowledgeCollection).
+  enabled: true
+  default_provider: "local"
+
 orchestrator:
   skills_enabled: []
 

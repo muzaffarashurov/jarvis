@@ -28,6 +28,7 @@ from src.core.execution.executors.python_executor import PythonExecutor
 from src.core.execution.executors.url_executor import UrlExecutor
 from src.core.execution.process_registry import ProcessRegistry
 from src.core.indexing import IndexStorage, JsonIndexStorage, MemoryIndexStorage, ProjectIndexer
+from src.core.knowledge.knowledge_provider import KnowledgeProviderError
 from src.core.logger import Logger
 from src.core.memory.memory_provider import MemoryProviderError
 from src.core.memory.memory_store import MemoryStore
@@ -51,6 +52,7 @@ from src.modules.embedding_module import EmbeddingModule
 from src.modules.fast_response_module import FastResponseModule
 from src.modules.index_module import IndexModule
 from src.modules.invoice_module import InvoiceModule
+from src.modules.knowledge_module import KnowledgeModule
 from src.modules.memory_module import MemoryModule
 from src.modules.plugin_module import PluginModule
 from src.modules.process_module import ProcessModule
@@ -62,6 +64,7 @@ from src.services.embedding_service import EmbeddingService
 from src.services.fast_response_service import FastResponseService
 from src.services.index_service import IndexService
 from src.services.invoice_service import InvoiceService
+from src.services.knowledge_service import KnowledgeService
 from src.services.memory_service import MemoryService
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
@@ -116,6 +119,7 @@ class Bootstrap:
         self._command_router: CommandRouter | None = None
         self._shell: InteractiveShell | None = None
         self._memory_service: MemoryService | None = None
+        self._knowledge_service: KnowledgeService | None = None
         self._index_service: IndexService | None = None
         self._embedding_service: EmbeddingService | None = None
         self._rag_service: RagService | None = None
@@ -206,6 +210,29 @@ class Bootstrap:
                 "Fix config/config.yaml and restart to re-enable it."
             )
             self._memory_service = None
+
+        # EP-024: Knowledge Base. Depends only on Config -- no
+        # dependency on MemoryStore/MemoryManager (EP-013/EP-023),
+        # ProjectIndexer (EP-019), Embedding (EP-021), or RAG (EP-022).
+        # KnowledgeService builds a KnowledgeManager internally,
+        # registering a fresh KnowledgeCollection wrapped in a
+        # KnowledgeCollectionProvider as the default provider per
+        # 'knowledge.default_provider'. An invalid
+        # 'knowledge.default_provider' disables the Knowledge
+        # subsystem for this run rather than crashing the whole
+        # application -- consistent with how every other optional
+        # subsystem in this file degrades (see the Memory/Embedding/
+        # RAG try/except blocks).
+        try:
+            knowledge_service = KnowledgeService(config=config)
+            self._knowledge_service = knowledge_service
+            router.register(KnowledgeModule(knowledge_service))
+        except KnowledgeProviderError as exc:
+            logger.error(
+                f"Knowledge subsystem disabled: invalid 'knowledge.*' configuration "
+                f"({exc}). Fix config/config.yaml and restart to re-enable it."
+            )
+            self._knowledge_service = None
 
         # EP-019: Project Index Engine integration. Depends only on
         # Config (to resolve 'indexing.*') and ProjectIndexer itself
@@ -729,6 +756,17 @@ class Bootstrap:
             completed.
         """
         return self._memory_service
+
+    @property
+    def knowledge_service(self) -> KnowledgeService | None:
+        """Return the KnowledgeService built for EP-024, if available.
+
+        Returns:
+            The KnowledgeService instance, or None if `run()` has not
+            completed (or the Knowledge subsystem was disabled this
+            run -- see `_build_command_router`'s EP-024 wiring).
+        """
+        return self._knowledge_service
 
     @property
     def index_service(self) -> IndexService | None:

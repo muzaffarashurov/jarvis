@@ -98,12 +98,13 @@ Completed sub-packages:
 - EP-021 Embedding Engine
 - EP-022 RAG Engine
 - EP-023 Memory Manager
+- EP-024 Knowledge Base
 
 ---
 
 ## Current
 
-EP-024 Knowledge Base
+EP-025 Long-Term Memory
 
 ---
 
@@ -165,7 +166,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-023 Memory Manager
 
-EP-024 Knowledge Base
+✓ EP-024 Knowledge Base
 
 EP-025 Long-Term Memory
 

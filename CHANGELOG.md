@@ -6,6 +6,90 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.0-ep025
+
+Released: 2026-08-01
+
+### Added
+
+- Long-Term Memory subsystem (src/core/long_term_memory/), a new
+  independent package:
+  - LongTermRecord (long_term_record.py): plain data model for a single
+    long-lived memory (id, content, metadata, status, timestamps,
+    archived_at)
+  - LongTermProvider interface (long_term_provider.py): unified
+    store/get/update/archive/delete/clear/list/stats contract for
+    every long-term-memory provider
+  - KnowledgeBackedLongTermProvider (long_term_provider.py): the default
+    provider, persisting memories through EP-024's KnowledgeService
+    public API inside a dedicated "long_term_memory" collection --
+    introduces no new storage engine
+  - LongTermMemoryProvider (long_term_provider.py): adapts Long-Term
+    Memory to EP-023's MemoryProvider interface so it can be registered
+    with the Memory Manager
+  - LongTermMemoryManager (long_term_manager.py): orchestration layer --
+    register/unregister providers, enable/disable, switch the active
+    provider, expose status, and delegate the unified long-term-memory
+    API to whichever provider is active
+  - src/core/long_term_memory/__init__.py: package-level public exports
+- LongTermMemoryService (src/services/long_term_memory_service.py):
+  config-driven ('long_term_memory.enabled',
+  'long_term_memory.default_provider') business logic, building a
+  default LongTermMemoryManager around a KnowledgeBackedLongTermProvider
+  named "knowledge", and best-effort registering a LongTermMemoryProvider
+  with EP-023's Memory Manager when available
+- LongTermMemoryModule (src/modules/long_term_memory_module.py): "ltm"
+  CLI namespace -- status / list / info / archive / clear / statistics
+  / help
+- config/config.yaml: new 'long_term_memory' section ('enabled',
+  'default_provider')
+- EP-025 test suite (tests/EP025/test_long_term_memory.py)
+
+### Changed
+
+- src/services/memory_service.py: added `register_provider(provider,
+  enabled=True)`, a thin pass-through to `MemoryManager.register` --
+  the public extension point EP-025 uses to register its
+  LongTermMemoryProvider without reaching into MemoryService's
+  internals. Every existing MemoryService method, CLI command, and
+  public signature is unchanged.
+- src/bootstrap.py: registers LongTermMemoryService/LongTermMemoryModule
+  after Memory and Knowledge Base, wrapped in a try/except for
+  LongTermProviderError so invalid 'long_term_memory.default_provider'
+  configuration disables the Long-Term Memory subsystem for that run
+  (logged) instead of crashing startup. Because Long-Term Memory's
+  persistence is a hard dependency on Knowledge Base, it also disables
+  itself gracefully (logged) if Knowledge Base is unavailable this run.
+  No change to startup order or wiring for any other subsystem.
+- src/modules/test_module.py: registers the EP-025 test suite so
+  'test EP025' and 'test all' pick it up
+
+### Improved
+
+- Important memories can now be persisted long-term and moved through
+  an active/archived lifecycle, decoupled from EP-023's short-lived
+  Memory Manager store and EP-024's general-purpose Knowledge Base
+  collections, while reusing both through their public APIs instead of
+  introducing a third storage engine
+
+### Fixed
+
+-
+
+### Compatibility
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its signature/
+behavior changed, aside from the additive `MemoryService.register_provider`
+method. Introduces no duplicate memory/knowledge/embedding/retrieval
+subsystem -- Long-Term Memory performs no ranking, similarity search,
+embeddings, or AI reasoning, has no dependency on Semantic Search,
+Context Compression, Reflection, Planner, Agent Framework, Browser
+Automation, Vector Database, Embedding, Retrieval, RAG, or any future
+EP, and LongTermMemoryManager owns no storage state of its own.
+
+---
+
 ## v0.1.0-ep024
 
 Released: 2026-08-01

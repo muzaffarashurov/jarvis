@@ -47,7 +47,7 @@ from src.core.config import Config
 from src.core.memory.context import DEFAULT_NAMESPACE, MemoryEntry, utc_now
 from src.core.memory.memory_manager import ManagerStatus, MemoryManager
 from src.core.memory.memory_persistence import MemoryPersistence
-from src.core.memory.memory_provider import MemoryProviderError, MemoryStoreProvider
+from src.core.memory.memory_provider import MemoryProvider, MemoryProviderError, MemoryStoreProvider
 from src.core.memory.memory_store import MemoryStore
 
 DEFAULT_EXPORT_FILE: str = "data/output/memory_export.json"
@@ -475,6 +475,23 @@ class MemoryService:
         except MemoryProviderError as exc:
             return CommandResult(success=False, message=str(exc))
         return CommandResult(success=True, message=f"Active memory provider: '{name}'.")
+
+    def register_provider(self, provider: MemoryProvider, enabled: bool = True) -> None:
+        """Register an additional memory provider (EP-023 extension point).
+
+        Lets other subsystems extend the Memory Manager's provider
+        registry entirely through MemoryService's public API -- e.g.
+        EP-025's Long-Term Memory registers a `LongTermMemoryProvider`
+        here so it becomes visible to `memory providers` / `memory use
+        <provider>` -- without any caller reaching into `self._manager`
+        directly. Introduces no new storage or orchestration logic:
+        this is a thin pass-through to `MemoryManager.register`.
+
+        Args:
+            provider: The MemoryProvider to register.
+            enabled: Whether the provider starts enabled.
+        """
+        self._manager.register(provider, enabled=enabled)
 
     # ---------- Internal helpers: configuration ----------
 

@@ -30,6 +30,7 @@ from src.core.execution.process_registry import ProcessRegistry
 from src.core.indexing import IndexStorage, JsonIndexStorage, MemoryIndexStorage, ProjectIndexer
 from src.core.knowledge.knowledge_provider import KnowledgeProviderError
 from src.core.logger import Logger
+from src.core.long_term_memory.long_term_provider import LongTermProviderError
 from src.core.memory.memory_provider import MemoryProviderError
 from src.core.memory.memory_store import MemoryStore
 from src.core.orchestrator import Orchestrator
@@ -53,6 +54,7 @@ from src.modules.fast_response_module import FastResponseModule
 from src.modules.index_module import IndexModule
 from src.modules.invoice_module import InvoiceModule
 from src.modules.knowledge_module import KnowledgeModule
+from src.modules.long_term_memory_module import LongTermMemoryModule
 from src.modules.memory_module import MemoryModule
 from src.modules.plugin_module import PluginModule
 from src.modules.process_module import ProcessModule
@@ -65,6 +67,7 @@ from src.services.fast_response_service import FastResponseService
 from src.services.index_service import IndexService
 from src.services.invoice_service import InvoiceService
 from src.services.knowledge_service import KnowledgeService
+from src.services.long_term_memory_service import LongTermMemoryService
 from src.services.memory_service import MemoryService
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
@@ -120,6 +123,7 @@ class Bootstrap:
         self._shell: InteractiveShell | None = None
         self._memory_service: MemoryService | None = None
         self._knowledge_service: KnowledgeService | None = None
+        self._long_term_memory_service: LongTermMemoryService | None = None
         self._index_service: IndexService | None = None
         self._embedding_service: EmbeddingService | None = None
         self._rag_service: RagService | None = None
@@ -233,6 +237,41 @@ class Bootstrap:
                 f"({exc}). Fix config/config.yaml and restart to re-enable it."
             )
             self._knowledge_service = None
+
+        # EP-025: Long-Term Memory. Persistence is delegated entirely
+        # to EP-024's KnowledgeService (a dedicated "long_term_memory"
+        # collection) -- Knowledge Base is a hard dependency, so if it
+        # is unavailable this run (see the EP-024 block above),
+        # Long-Term Memory disables itself too rather than building a
+        # second storage engine. If Memory is available, this also
+        # registers a LongTermMemoryProvider with MemoryService
+        # (`memory providers`/`memory use long_term`), extending
+        # EP-023's Memory Manager per EP-025's brief -- entirely
+        # through MemoryService's public `register_provider` API, and
+        # best-effort (a failure there never disables Long-Term Memory
+        # itself; see LongTermMemoryService._try_register_with_memory_manager).
+        if self._knowledge_service is None:
+            logger.error(
+                "Long-term memory subsystem disabled: Knowledge Base (EP-024) is "
+                "unavailable this run."
+            )
+            self._long_term_memory_service = None
+        else:
+            try:
+                long_term_memory_service = LongTermMemoryService(
+                    config=config,
+                    knowledge_service=self._knowledge_service,
+                    memory_service=self._memory_service,
+                )
+                self._long_term_memory_service = long_term_memory_service
+                router.register(LongTermMemoryModule(long_term_memory_service))
+            except LongTermProviderError as exc:
+                logger.error(
+                    f"Long-term memory subsystem disabled: invalid "
+                    f"'long_term_memory.*' configuration ({exc}). Fix "
+                    "config/config.yaml and restart to re-enable it."
+                )
+                self._long_term_memory_service = None
 
         # EP-019: Project Index Engine integration. Depends only on
         # Config (to resolve 'indexing.*') and ProjectIndexer itself
@@ -767,6 +806,18 @@ class Bootstrap:
             run -- see `_build_command_router`'s EP-024 wiring).
         """
         return self._knowledge_service
+
+    @property
+    def long_term_memory_service(self) -> LongTermMemoryService | None:
+        """Return the LongTermMemoryService built for EP-025, if available.
+
+        Returns:
+            The LongTermMemoryService instance, or None if `run()` has
+            not completed (or the Long-Term Memory subsystem was
+            disabled this run -- see `_build_command_router`'s EP-025
+            wiring).
+        """
+        return self._long_term_memory_service
 
     @property
     def index_service(self) -> IndexService | None:

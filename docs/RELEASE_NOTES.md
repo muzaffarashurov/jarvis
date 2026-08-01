@@ -188,4 +188,41 @@ No breaking changes.
 
 ---
 
+# EP-025 — Long-Term Memory
+
+Status: Released
+
+Highlights:
+
+- Added Long-Term Memory: persistent storage and lifecycle management
+  (active / archived) for important, long-lived memories
+- Manage memories: store, retrieve, update, archive, and permanently
+  delete -- individually or all at once
+- Inspect aggregate statistics (total / active / archived) and provider
+  status through a single unified API, mirroring the provider/manager
+  pattern already used by the Memory Manager (EP-023) and Knowledge Base
+  (EP-024)
+- CLI integration: ltm status / list / info / archive / clear /
+  statistics / help
+- Persists through Knowledge Base (EP-024) rather than a new storage
+  engine, and extends the Memory Manager (EP-023) with a "long_term"
+  provider so it is visible to `memory providers` / `memory use
+  long_term`
+- Invalid configuration disables Long-Term Memory for that run (logged)
+  instead of crashing the rest of Jarvis on startup; it also disables
+  itself gracefully if Knowledge Base is unavailable
+- Long-Term Memory performs no ranking, similarity search, embeddings,
+  or AI reasoning -- Semantic Search and Context Compression remain
+  future work (EP-026, EP-027)
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed, aside from the additive `MemoryService.register_provider` method.
+
+No breaking changes.
+
+---
+
 End of document.

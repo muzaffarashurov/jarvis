@@ -45,6 +45,20 @@ knowledge:
   enabled: true
   default_provider: "local"
 
+long_term_memory:
+  # EP-025 Long-Term Memory. Persistent storage and lifecycle
+  # management (active/archived) of long-lived memories -- no
+  # ranking, similarity search, embeddings, or reasoning (see
+  # src/core/long_term_memory/long_term_manager.py). Persists through
+  # EP-024's Knowledge Base (a dedicated "long_term_memory"
+  # collection), introducing no second storage engine.
+  # 'default_provider' must match the name of the LongTermProvider
+  # activated at startup. The only provider registered today is
+  # "knowledge" (KnowledgeBackedLongTermProvider, wrapping the
+  # KnowledgeService above).
+  enabled: true
+  default_provider: "knowledge"
+
 orchestrator:
   skills_enabled: []
 

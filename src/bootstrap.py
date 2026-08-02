@@ -44,6 +44,9 @@ from src.core.rag.rag_manager import RagManager, RagManagerError
 from src.core.scheduler.job import Job, Schedule, ScheduleType
 from src.core.scheduler.job_registry import JobRegistry
 from src.core.scheduler.scheduler import Scheduler
+from src.core.semantic.semantic_engine import SemanticEngine
+from src.core.semantic.semantic_manager import SemanticManager
+from src.core.semantic.semantic_provider import SemanticError
 from src.core.shell import InteractiveShell
 from src.core.telegram.telegram_client import TelegramClient
 from src.core.telegram.telegram_router import TelegramRouter
@@ -60,6 +63,7 @@ from src.modules.plugin_module import PluginModule
 from src.modules.process_module import ProcessModule
 from src.modules.rag_module import RagModule
 from src.modules.scheduler_module import SchedulerModule
+from src.modules.semantic_module import SemanticModule
 from src.modules.telegram_module import TelegramModule
 from src.services.ai_service import AIService
 from src.services.embedding_service import EmbeddingService
@@ -73,6 +77,7 @@ from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
 from src.services.scheduler_service import SchedulerService
+from src.services.semantic_service import SemanticService
 from src.services.telegram_service import TelegramService
 from src.skills.system.skill import SystemModule
 from src.utils.constants import (
@@ -127,6 +132,7 @@ class Bootstrap:
         self._index_service: IndexService | None = None
         self._embedding_service: EmbeddingService | None = None
         self._rag_service: RagService | None = None
+        self._semantic_service: SemanticService | None = None
         colorama_init(autoreset=True)
 
     def run(self) -> Orchestrator:
@@ -435,6 +441,54 @@ class Bootstrap:
                 "(see the preceding log entry)."
             )
             self._rag_service = None
+
+        # EP-026: Semantic Search. Provider-independent meaning-based
+        # similarity search over Knowledge Base (EP-024) and Long-Term
+        # Memory (EP-025) records, using EmbeddingEngine (EP-021) to
+        # generate vectors. Never calls an AI provider, builds a
+        # prompt, or reasons -- no import of src.core.rag, src.core.ai,
+        # or any future Agent Framework component anywhere in
+        # src/core/semantic. SemanticManager owns provider selection,
+        # configuration loading ('semantic.*') and provider lifecycle;
+        # SemanticEngine owns the query -> candidates -> ranked-results
+        # pipeline, reaching Knowledge Base and Long-Term Memory only
+        # through their public KnowledgeService.list_records() /
+        # LongTermMemoryService.list_memories() APIs.
+        #
+        # Requires a working Embedding Engine (see the EP-021
+        # try/except above): if 'embedding.*' configuration was
+        # invalid and EmbeddingService could not be built, Semantic
+        # Search is disabled for this run too, for the same reason.
+        # Knowledge Base and Long-Term Memory are soft dependencies --
+        # either (or both) being unavailable this run only narrows
+        # what Semantic Search can find; it never disables the
+        # subsystem itself, since a search with zero candidates is a
+        # valid (empty) result, not an error.
+        if self._embedding_service is not None:
+            try:
+                semantic_manager = SemanticManager(config=config)
+                semantic_engine = SemanticEngine(
+                    manager=semantic_manager,
+                    embedding_engine=embedding_engine,
+                    embedding_manager=embedding_manager,
+                    knowledge_service=self._knowledge_service,
+                    long_term_memory_service=self._long_term_memory_service,
+                )
+                semantic_service = SemanticService(manager=semantic_manager, engine=semantic_engine)
+                self._semantic_service = semantic_service
+                router.register(SemanticModule(semantic_service))
+            except SemanticError as exc:
+                logger.error(
+                    f"Semantic Search disabled: invalid 'semantic.*' configuration "
+                    f"({exc}). Fix config/config.yaml and restart to re-enable it."
+                )
+                self._semantic_service = None
+        else:
+            logger.warning(
+                "Semantic Search disabled: the Embedding Engine is unavailable this "
+                "run (see the preceding log entry)."
+            )
+            self._semantic_service = None
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
@@ -849,3 +903,14 @@ class Bootstrap:
             `_build_command_router`'s EP-022 wiring).
         """
         return self._rag_service
+
+    @property
+    def semantic_service(self) -> SemanticService | None:
+        """Return the SemanticService built for EP-026, if available.
+
+        Returns:
+            The SemanticService instance, or None if `run()` has not
+            completed (or the Semantic Search subsystem was disabled
+            this run -- see `_build_command_router`'s EP-026 wiring).
+        """
+        return self._semantic_service

@@ -225,4 +225,50 @@ No breaking changes.
 
 ---
 
+# EP-026 — Semantic Search
+
+Status: Released
+
+Highlights:
+
+- Added Semantic Search: meaning-based similarity search over
+  Knowledge Base (EP-024) and Long-Term Memory (EP-025) records
+- Generates vectors through the existing Embedding Engine (EP-021) --
+  no new embedding pipeline
+- Scores and ranks matches through a pluggable provider, mirroring the
+  provider/manager pattern already used by the Memory Manager
+  (EP-023), Knowledge Base (EP-024), and Long-Term Memory (EP-025);
+  ships with one built-in provider ("semantic", cosine similarity)
+- CLI integration: semantic status / providers / use / search /
+  threshold / help
+- Invalid configuration disables Semantic Search for that run (logged)
+  instead of crashing the rest of Jarvis on startup; it also disables
+  itself gracefully if the Embedding Engine is unavailable
+- Semantic Search performs no answer generation, AI provider calls,
+  prompt construction, context compression, planning, reflection, or
+  reasoning -- Context Compression and an Agent Framework remain
+  future work (EP-027 onward)
+
+Known limitation:
+
+The Embedding Engine's only offline, always-available provider
+("local") derives vectors from a SHA-256 hash of the whole input text,
+not a real language model. It reliably finds exact or near-exact
+duplicate text, but cannot recognize that two *differently worded*
+sentences mean the same thing -- non-identical text scores as
+statistically uncorrelated noise regardless of how related it
+actually is. 'semantic status' and the logs will show a warning
+whenever this provider is active. For genuine meaning-based matching,
+configure a real embedding provider via 'embedding.default_provider'.
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed.
+
+No breaking changes.
+
+---
+
 End of document.

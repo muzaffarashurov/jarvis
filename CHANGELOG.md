@@ -6,6 +6,124 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.0-ep026
+
+Released: 2026-08-02
+
+### Added
+
+- Semantic Search subsystem (src/core/semantic/), a new independent
+  package:
+  - SemanticCandidate / SemanticResult (semantic_result.py): plain
+    data model for one searchable record (source, identifier, text,
+    vector, metadata) and one ranked match (source, identifier, text,
+    score, metadata)
+  - SemanticProvider interface (semantic_provider.py): unified
+    search()/rank()/status() contract for every semantic search
+    provider
+  - DefaultSemanticProvider (semantic_provider.py): the built-in
+    provider, registered under the name "semantic" -- brute-force
+    cosine similarity over already-embedded candidates, no external
+    index, no network access, no AI reasoning
+  - SemanticManager (semantic_manager.py): orchestration layer --
+    register/select semantic providers, enable/disable the subsystem,
+    expose status, and own the default `top_k` /
+    `similarity_threshold` search parameters read from
+    'semantic.*' configuration
+  - SemanticEngine (semantic_engine.py): the query -> candidates ->
+    ranked-results pipeline -- generates a query vector via EP-021's
+    EmbeddingEngine, gathers and embeds candidates from EP-024's
+    KnowledgeService and EP-025's LongTermMemoryService (both public
+    APIs only, both optional), deduplicates any record reachable
+    through both (see Fixed), and delegates scoring/ranking to the
+    active SemanticProvider
+  - Placeholder-embedding-provider detection
+    (`SemanticEngine.embedding_provider_warning()`): EP-021's only
+    offline, always-available embedding provider ("local") hashes
+    each text as a whole via SHA-256, so by the avalanche property any
+    two non-identical texts -- related or not -- score as uncorrelated
+    noise; only byte-identical text is meaningfully matched. When that
+    specific, well-known provider is active (detected via
+    EmbeddingManager's public `provider_name()`, never by touching any
+    private state), a clear warning is surfaced through
+    `SemanticService.status()` and `semantic status` explaining the
+    limitation and how to get genuine semantic search (configure a
+    real embedding provider). 'semantic.similarity_threshold' is used
+    exactly as configured for every provider, always -- this module
+    never adjusts it (an earlier iteration of this feature relaxed the
+    threshold toward 0.0 for the placeholder provider; broader testing
+    proved that only admits a coin-flip ~50% of unrelated candidates
+    as if they were meaningful matches, which is worse than returning
+    nothing, so that adjustment was removed before release)
+  - src/core/semantic/__init__.py: package-level public exports
+- SemanticService (src/services/semantic_service.py): config-driven
+  ('semantic.enabled', 'semantic.default_provider', 'semantic.top_k',
+  'semantic.similarity_threshold') business logic, a thin CLI-facing
+  wrapper around SemanticManager/SemanticEngine
+- SemanticModule (src/modules/semantic_module.py): "semantic" CLI
+  namespace -- help / status / providers / use / search / threshold
+- config/config.yaml: new 'semantic' section ('enabled',
+  'default_provider', 'top_k', 'similarity_threshold')
+- EP-026 test suite (tests/EP026/test_semantic_search.py)
+
+### Changed
+
+- src/bootstrap.py: registers SemanticManager/SemanticEngine/
+  SemanticService/SemanticModule after the RAG Engine, wrapped in a
+  try/except for SemanticError so invalid 'semantic.*' configuration
+  disables the Semantic Search subsystem for that run (logged) instead
+  of crashing startup. Because generating a query/candidate vector is
+  a hard dependency on the Embedding Engine, Semantic Search also
+  disables itself gracefully (logged) if the Embedding Engine is
+  unavailable this run -- mirroring exactly how EP-022's RAG Engine
+  already degrades in the same situation. Knowledge Base and Long-Term
+  Memory are soft dependencies: either being unavailable this run only
+  narrows what Semantic Search can find, it never disables the
+  subsystem itself. EmbeddingManager (already built for the Embedding
+  Engine/RAG Engine) is also passed to SemanticEngine, read-only, for
+  placeholder-provider detection. No change to startup order or wiring
+  for any other subsystem.
+- src/modules/test_module.py: registers the EP-026 test suite so
+  'test EP026' and 'test all' pick it up
+
+### Improved
+
+- Knowledge Base and Long-Term Memory records can now be found by
+  meaning rather than only by exact key/id lookup, reusing EP-021's
+  Embedding Engine and EP-024/EP-025's public read APIs instead of
+  introducing a new storage engine or a new embedding pipeline
+
+### Fixed
+
+- SemanticManager.current_provider_name() incorrectly returned the
+  resolved provider name (e.g. "semantic") even when
+  'semantic.enabled: false' was set from startup, contradicting
+  is_enabled() and get_current() (which already correctly returned
+  False/None). Now consistently returns None in both disablement
+  paths -- config-time and the runtime disable() call.
+- A record reachable through both KnowledgeService.list_records() and
+  LongTermMemoryService.list_memories() -- which happens for every
+  Long-Term Memory record, since EP-025's
+  KnowledgeBackedLongTermProvider persists them inside KnowledgeService's
+  own storage under the record's own id as the key -- was returned
+  twice in search results, once under each source label. Long-Term
+  Memory records are now deduplicated against Knowledge Base results
+  by identifier, keeping the more specific `long_term_memory` label.
+
+### Compatibility
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its signature/
+behavior changed. Introduces no duplicate embedding/knowledge/memory/
+retrieval subsystem -- Semantic Search performs no answer generation,
+AI provider calls, prompt construction, context compression, planning,
+reflection, or reasoning, has no dependency on the RAG Engine, any AI
+Provider, the Prompt Engine, Browser Automation, Tool Calling, the
+Conversation Engine, or any future Agent Framework component, and
+SemanticManager owns no record/vector storage state of its own.
+
+---
+
 ## v0.1.0-ep025
 
 Released: 2026-08-01

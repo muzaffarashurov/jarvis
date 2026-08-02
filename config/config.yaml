@@ -255,3 +255,21 @@ rag:
   enabled: true
   top_k: 5
   max_context_characters: 4000
+  
+semantic:
+  # EP-026 Semantic Search. Provider-independent meaning-based
+  # similarity search over Knowledge Base (EP-024) and Long-Term
+  # Memory (EP-025) records, using vectors produced by the Embedding
+  # Engine (EP-021) -- no AI providers, prompts, RAG, or reasoning
+  # (see src/core/semantic/semantic_manager.py). "default_provider"
+  # must match the name of the SemanticProvider activated at startup.
+  # The only provider registered today is "semantic"
+  # (DefaultSemanticProvider, cosine similarity). "top_k" is the
+  # default maximum number of results per search; "similarity_threshold"
+  # is the default minimum score (0.0-1.0) a result must reach. Both
+  # can be overridden per call via SemanticEngine.search(), but are
+  # not exposed as CLI arguments in this EP.
+  enabled: true
+  default_provider: "semantic"
+  top_k: 5
+  similarity_threshold: 0.70

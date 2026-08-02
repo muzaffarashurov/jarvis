@@ -10,41 +10,45 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-026 — Semantic Search
+### EP-027 — Context Compression
 
 Planned objectives:
 
-- Meaning-based search over Knowledge Base (EP-024) and Long-Term
-  Memory (EP-025) records, building on EP-021's Embedding Engine and
-  EP-022's RAG Engine rather than duplicating either
+- Compress/summarize retrieved context (from EP-022's RAG Engine and/or
+  EP-026's Semantic Search) to fit within an AI provider's prompt
+  budget, building on EP-021's Embedding Engine rather than duplicating
+  it
 - Read API consumed by the future AI Agent Framework
 - Provider-independent, no direct dependency on any AI provider
 - Keep clear separation from EP-022's RAG Engine (retrieval-time
-  context assembly for chat completion), EP-024's Knowledge Base
-  (static structured storage), and EP-025's Long-Term Memory
-  (persistent lifecycle storage) -- Semantic Search adds ranking and
-  similarity, it does not store anything itself
+  context assembly), EP-024's Knowledge Base (static structured
+  storage), EP-025's Long-Term Memory (persistent lifecycle storage),
+  and EP-026's Semantic Search (meaning-based ranking) -- Context
+  Compression only shrinks already-assembled context, it does not
+  retrieve, store, or rank anything itself
 
 Status:
 
 Planned
 
-Note: EP-025 — Long-Term Memory is now complete (see CHANGELOG.md /
+Note: EP-026 — Semantic Search is now complete (see CHANGELOG.md /
 docs/RELEASE_NOTES.md). It is a new, independent package
-(`src/core/long_term_memory/`) that manages the persistent storage and
-active/archived lifecycle of long-lived memories, structurally
-mirroring EP-023's and EP-024's provider/manager pattern
-(LongTermProvider / KnowledgeBackedLongTermProvider /
-LongTermMemoryManager). It introduces no third storage engine:
-persistence is delegated entirely to EP-024's KnowledgeService (a
-dedicated "long_term_memory" collection), reached only through its
-public API. It also extends EP-023's Memory Manager -- a
-`LongTermMemoryProvider` is registered with `MemoryService` (via the
-new, additive `MemoryService.register_provider` method) as a
-"long_term" provider, visible to `memory providers` / `memory use
-long_term`. It performs no ranking, similarity search, embeddings, or
-AI reasoning. Semantic Search and Context Compression remain future
-work, tracked as EP-026 (Semantic Search) and EP-027 (Context
+(`src/core/semantic/`) that performs meaning-based similarity search
+over Knowledge Base (EP-024) and Long-Term Memory (EP-025) records,
+structurally mirroring EP-021/EP-023/EP-024/EP-025's provider/manager
+pattern (SemanticProvider / DefaultSemanticProvider / SemanticManager).
+It introduces no new embedding pipeline: query and candidate vectors
+are generated entirely through EP-021's EmbeddingEngine, reached only
+through its public API, and it reads Knowledge Base / Long-Term Memory
+records only through KnowledgeService.list_records() /
+LongTermMemoryService.list_memories(). It has no dependency on EP-022's
+RAG Engine, any AI provider, or any future Agent Framework component --
+it performs no answer generation, prompt construction, context
+compression, planning, reflection, or reasoning. Note that with
+EP-021's built-in offline "local" (SHA-256 hash) embedding provider,
+only exact/near-exact text matches are meaningful -- see
+docs/RELEASE_NOTES.md's "Known limitation" for EP-026. Context
+Compression remains future work, tracked as EP-027 (Context
 Compression) below, matching Phase 3 of JARVIS_ROADMAP.md.
 
 ---

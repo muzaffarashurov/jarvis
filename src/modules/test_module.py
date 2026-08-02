@@ -9,10 +9,15 @@ from src.testing.runner import TestRunner
 import tests.EP001.test_foundation
 import tests.EP002.test_shell
 import tests.EP003.test_execution_engine
+import tests.EP018.test_unified_prompt_budget
+import tests.EP019.test_project_index_engine
+import tests.EP020.test_retrieval_engine
+import tests.EP021.test_embedding_engine
 import tests.EP022.test_rag_engine
 import tests.EP023.test_memory_manager
 import tests.EP024.test_knowledge_base
 import tests.EP025.test_long_term_memory
+import tests.EP026.test_semantic_search
 
 
 class TestModule(CommandModule):

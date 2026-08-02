@@ -100,12 +100,13 @@ Completed sub-packages:
 - EP-023 Memory Manager
 - EP-024 Knowledge Base
 - EP-025 Long-Term Memory
+- EP-026 Semantic Search
 
 ---
 
 ## Current
 
-EP-026 Semantic Search
+EP-027 Context Compression
 
 ---
 
@@ -171,7 +172,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-025 Long-Term Memory
 
-EP-026 Semantic Search
+✓ EP-026 Semantic Search
 
 EP-027 Context Compression
 

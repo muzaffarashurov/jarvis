@@ -82,11 +82,34 @@ class _ChdirGuard:
         os.chdir(self._original)
 
 
+_CONFIG_CACHE: dict[str, Config] = {}
+
+
 def _write_config(directory: Path, config_yaml: str) -> Config:
-    """Write a minimal, self-contained config.yaml and load it."""
+    """Return a Config for `config_yaml`, parsing it at most once per distinct text.
+
+    Many test methods request byte-identical configuration text across
+    dozens of independent temporary directories; re-writing and
+    re-parsing identical YAML from scratch every time is pure overhead
+    -- profiled at roughly two-thirds of this suite's total runtime
+    (see the EP-025/EP-026/EP-027 performance investigation). Caching
+    by the exact YAML text keeps every test's observed `Config.get()`
+    behavior byte-for-byte identical (the returned `Config` is never
+    mutated after `load()`) while eliminating the redundant disk write
+    and re-parse. Callers that need a real config.yaml physically
+    present in a specific directory (e.g. a real `Bootstrap(...)`
+    run) use `_write_full_bootstrap_config()` instead, which is never
+    cached.
+    """
+    cached = _CONFIG_CACHE.get(config_yaml)
+    if cached is not None:
+        return cached
+
     config_path = directory / "config.yaml"
     config_path.write_text(config_yaml, encoding="utf-8")
-    return Config(config_path).load()
+    config = Config(config_path).load()
+    _CONFIG_CACHE[config_yaml] = config
+    return config
 
 
 _KNOWLEDGE_ONLY_YAML = (
@@ -123,7 +146,7 @@ _INVALID_PROVIDER_LTM_YAML = (
 )
 
 # Full, offline-safe config.yaml covering every section Bootstrap._build_command_router
-# reads, so a real Bootstrap.run() can be exercised end to end in a temporary
+# reads, so a real Bootstrap.initialize() can be exercised end to end in a temporary
 # project root without any network access or long-lived background threads.
 _FULL_BOOTSTRAP_CONFIG_YAML = (
     "app:\n"
@@ -1065,7 +1088,7 @@ class LongTermMemoryTest(BaseTest):
             _write_full_bootstrap_config(project_root)
             with _ChdirGuard(project_root):
                 bootstrap = Bootstrap(project_root=project_root)
-                orchestrator = bootstrap.run()
+                orchestrator = bootstrap.initialize()
                 try:
                     self.assert_not_none(bootstrap.long_term_memory_service)
                     self.assert_equal(
@@ -1102,7 +1125,7 @@ class LongTermMemoryTest(BaseTest):
             _write_full_bootstrap_config(project_root, ltm_default_provider="")
             with _ChdirGuard(project_root):
                 bootstrap = Bootstrap(project_root=project_root)
-                orchestrator = bootstrap.run()
+                orchestrator = bootstrap.initialize()
                 try:
                     self.assert_true(bootstrap.long_term_memory_service is None)
                     router = bootstrap.command_router
@@ -1120,7 +1143,7 @@ class LongTermMemoryTest(BaseTest):
             _write_full_bootstrap_config(project_root, knowledge_default_provider="")
             with _ChdirGuard(project_root):
                 bootstrap = Bootstrap(project_root=project_root)
-                orchestrator = bootstrap.run()
+                orchestrator = bootstrap.initialize()
                 try:
                     self.assert_true(bootstrap.knowledge_service is None)
                     self.assert_true(bootstrap.long_term_memory_service is None)

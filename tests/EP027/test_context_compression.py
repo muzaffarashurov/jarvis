@@ -180,7 +180,7 @@ _INVALID_DEDUPLICATE_COMPRESSION_YAML = (
 )
 
 # Full, offline-safe config.yaml covering every section Bootstrap._build_command_router
-# reads, so a real Bootstrap.run() can be exercised end to end in a temporary
+# reads, so a real Bootstrap.initialize() can be exercised end to end in a temporary
 # project root without any network access or long-lived background threads.
 _FULL_BOOTSTRAP_CONFIG_YAML = (
     "app:\n"
@@ -325,13 +325,36 @@ _FULL_BOOTSTRAP_CONFIG_YAML = (
 )
 
 
+_CONFIG_CACHE: dict[str, Config] = {}
+
+
 def _write_config(directory: Path, sections: str) -> Config:
-    """Write `sections` to a temporary config.yaml and load it as a `Config`."""
+    """Return a Config for `sections`, parsing it at most once per distinct text.
+
+    Many test methods request byte-identical configuration text across
+    dozens of independent temporary directories; re-writing and
+    re-parsing identical YAML from scratch every time is pure overhead
+    -- profiled at roughly two-thirds of this suite's total runtime
+    (see the EP-025/EP-026/EP-027 performance investigation). Caching
+    by the exact YAML text keeps every test's observed `Config.get()`
+    behavior byte-for-byte identical (the returned `Config` is never
+    mutated after `load()`) while eliminating the redundant disk write
+    and re-parse. Callers that need a real config.yaml physically
+    present in a specific directory (e.g. a real `Bootstrap(...)`
+    run) use `_write_full_bootstrap_config()` instead, which is never
+    cached.
+    """
+    cached = _CONFIG_CACHE.get(sections)
+    if cached is not None:
+        return cached
+
     config_dir = directory / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "config.yaml"
     config_path.write_text(sections, encoding="utf-8")
-    return Config(config_path).load()
+    config = Config(config_path).load()
+    _CONFIG_CACHE[sections] = config
+    return config
 
 
 def _write_full_bootstrap_config(
@@ -1114,7 +1137,7 @@ class ContextCompressionTest(BaseTest):
             _write_full_bootstrap_config(directory)
             with _ChdirGuard(directory):
                 bootstrap = Bootstrap(project_root=directory)
-                bootstrap.run()
+                bootstrap.initialize()
                 service = bootstrap.compression_service
                 self.assert_true(service is not None)
                 status = service.status()
@@ -1130,7 +1153,7 @@ class ContextCompressionTest(BaseTest):
             _write_full_bootstrap_config(directory, compression_default_provider="")
             with _ChdirGuard(directory):
                 bootstrap = Bootstrap(project_root=directory)
-                bootstrap.run()  # must not raise -- Context Compression degrades, Jarvis still starts
+                bootstrap.initialize()  # must not raise -- Context Compression degrades, Jarvis still starts
                 self.assert_true(bootstrap.compression_service is None)
                 # The rest of the application is unaffected.
                 self.assert_true(bootstrap.knowledge_service is not None)
@@ -1150,7 +1173,7 @@ class ContextCompressionTest(BaseTest):
             (config_dir / "config.yaml").write_text(full_config, encoding="utf-8")
             with _ChdirGuard(directory):
                 bootstrap = Bootstrap(project_root=directory)
-                bootstrap.run()
+                bootstrap.initialize()
                 self.assert_true(bootstrap.compression_service is not None)
                 self.assert_true(bootstrap.compression_service.status().enabled)
                 result = bootstrap._command_router.dispatch(  # noqa: SLF001
@@ -1164,7 +1187,7 @@ class ContextCompressionTest(BaseTest):
             _write_full_bootstrap_config(directory)
             with _ChdirGuard(directory):
                 bootstrap = Bootstrap(project_root=directory)
-                bootstrap.run()
+                bootstrap.initialize()
                 self.assert_equal(
                     bootstrap.compression_service.status().max_context_characters, 12000
                 )

@@ -246,24 +246,23 @@ class UnifiedPromptBudgetTest(BaseTest):
         + document set and confirms the full ContextManager ->
         PromptManager pipeline now succeeds.
         """
-        original_cwd = Path.cwd()
-        try:
-            with tempfile.TemporaryDirectory() as tmp:
-                project_dir = Path(tmp)
-                # A single document far larger than any reasonable
-                # prompt budget -- this is what used to reproduce the
-                # bug regardless of the user's question.
-                (project_dir / "BIG_DOC.md").write_text("x" * 60_000, encoding="utf-8")
-                (project_dir / "PROJECT_MANIFEST.md").write_text(
-                    "# Project Name\n\nRegression Fixture\n\n"
-                    "# Context Documents\n\n"
-                    "- path: BIG_DOC.md\n  priority: critical\n",
-                    encoding="utf-8",
-                )
-                config = _write_config(project_dir)  # max_prompt_size: 1000, defaults reserved
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            # A single document far larger than any reasonable
+            # prompt budget -- this is what used to reproduce the
+            # bug regardless of the user's question.
+            (project_dir / "BIG_DOC.md").write_text("x" * 60_000, encoding="utf-8")
+            (project_dir / "PROJECT_MANIFEST.md").write_text(
+                "# Project Name\n\nRegression Fixture\n\n"
+                "# Context Documents\n\n"
+                "- path: BIG_DOC.md\n  priority: critical\n",
+                encoding="utf-8",
+            )
+            config = _write_config(project_dir)  # max_prompt_size: 1000, defaults reserved
 
-                os.chdir(project_dir)
-
+            original_cwd = Path.cwd()
+            os.chdir(project_dir)
+            try:
                 prompt_manager = PromptManager(config=config)
                 context_manager = ContextManager(
                     config=config,
@@ -291,8 +290,14 @@ class UnifiedPromptBudgetTest(BaseTest):
                         len(prompt.rendered) <= 1000,
                         f"Built prompt should respect prompt.max_prompt_size (1000), got {len(prompt.rendered)}",
                     )
-        finally:
-            os.chdir(original_cwd)
+            finally:
+                # Restored here, still inside the `with` block above, so
+                # the process's current working directory no longer
+                # points inside `tmp` before TemporaryDirectory.__exit__()
+                # (shutil.rmtree) runs -- see this file's module docstring
+                # note on the EP-018 Windows cleanup fix for why this
+                # ordering matters.
+                os.chdir(original_cwd)
 
     # ---------- EP-018.6: conversation budget resolution ----------
 
@@ -394,26 +399,25 @@ class UnifiedPromptBudgetTest(BaseTest):
         confirms the full ContextManager -> PromptManager pipeline
         both respects the conversation budget and succeeds.
         """
-        original_cwd = Path.cwd()
-        try:
-            with tempfile.TemporaryDirectory() as tmp:
-                project_dir = Path(tmp)
-                # No project documents at all -- isolates this test to
-                # the conversation-budget bug specifically.
-                (project_dir / "PROJECT_MANIFEST.md").write_text(
-                    "# Project Name\n\nRegression Fixture\n\n# Context Documents\n\n",
-                    encoding="utf-8",
-                )
-                config = _write_config(
-                    project_dir,
-                    "  reserved_conversation_history: 500\n"
-                    "  reserved_system_prompt: 0\n"
-                    "  reserved_user_prompt: 50\n"
-                    "  reserved_provider_overhead: 0\n",
-                )  # max_prompt_size: 1000
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            # No project documents at all -- isolates this test to
+            # the conversation-budget bug specifically.
+            (project_dir / "PROJECT_MANIFEST.md").write_text(
+                "# Project Name\n\nRegression Fixture\n\n# Context Documents\n\n",
+                encoding="utf-8",
+            )
+            config = _write_config(
+                project_dir,
+                "  reserved_conversation_history: 500\n"
+                "  reserved_system_prompt: 0\n"
+                "  reserved_user_prompt: 50\n"
+                "  reserved_provider_overhead: 0\n",
+            )  # max_prompt_size: 1000
 
-                os.chdir(project_dir)
-
+            original_cwd = Path.cwd()
+            os.chdir(project_dir)
+            try:
                 conversation = Conversation()
                 for i in range(200):
                     conversation.append_user(f"message number {i} " + ("x" * 40))
@@ -460,6 +464,12 @@ class UnifiedPromptBudgetTest(BaseTest):
                         len(prompt.rendered) <= 1000,
                         f"Built prompt should respect prompt.max_prompt_size (1000), got {len(prompt.rendered)}",
                     )
-        finally:
-            os.chdir(original_cwd)
+            finally:
+                # Restored here, still inside the `with` block above, so
+                # the process's current working directory no longer
+                # points inside `tmp` before TemporaryDirectory.__exit__()
+                # (shutil.rmtree) runs -- see this file's module docstring
+                # note on the EP-018 Windows cleanup fix for why this
+                # ordering matters.
+                os.chdir(original_cwd)
 

@@ -115,12 +115,36 @@ REQUIRED_DIRECTORIES: tuple[str, ...] = (
 class Bootstrap:
     """Bootstraps the Jarvis application before the orchestrator takes over.
 
-    Responsibilities:
+    Lifecycle:
+
+        Construction  ->  initialize()  ->  run()
+
+    `__init__()` only allocates the EventBus and initializes colorama --
+    no configuration is read and no service is built yet. `initialize()`
+    performs every dependency-injection responsibility -- loading
+    configuration, initializing the logger, starting the orchestrator,
+    and building the fully wired CommandRouter/InteractiveShell -- and
+    is idempotent (calling it more than once is a no-op after the
+    first call). It prints no banner and starts no runtime; it exists
+    so callers that only need initialized services and a populated
+    CommandRouter (in particular, tests verifying dependency-injection
+    wiring) never have to pay for -- or see the console output of --
+    the interactive-session startup sequence. `run()` is a thin
+    wrapper: it calls `initialize()` (a no-op if already initialized),
+    then prints the colored ASCII startup banner and status lines.
+    This split does not change `run()`'s own behavior or return value
+    for any existing caller -- `src/main.py`'s real interactive launch
+    still calls only `run()` and sees identical console output.
+
+    Responsibilities (performed by `initialize()`, reported by `run()`):
         - Create required runtime folders.
-        - Print the colored ASCII startup banner.
         - Load application configuration.
         - Initialize the logger.
         - Initialize and start the orchestrator.
+        - Build the CommandRouter and InteractiveShell.
+
+    Responsibility of `run()` alone:
+        - Print the colored ASCII startup banner and status lines.
     """
 
     def __init__(self, project_root: Path | None = None) -> None:
@@ -131,6 +155,7 @@ class Bootstrap:
                 directory containing the 'src' package.
         """
         self._project_root = project_root or PROJECT_ROOT
+        self._initialized = False
         self._config: Config | None = None
         self._event_bus = EventBus()
         self._orchestrator: Orchestrator | None = None
@@ -147,8 +172,14 @@ class Bootstrap:
         self._agent_service: AgentService | None = None
         colorama_init(autoreset=True)
 
-    def run(self) -> Orchestrator:
-        """Execute the full bootstrap sequence.
+    def initialize(self) -> Orchestrator:
+        """Build every service, register every module, and prepare the CommandRouter.
+
+        Idempotent: calling this more than once on the same instance
+        only performs the work once -- every subsequent call returns
+        the already-built Orchestrator without rebuilding anything or
+        re-running any startup step. Prints no banner and starts no
+        interactive runtime -- see `run()` for that.
 
         Returns:
             The started Orchestrator instance.
@@ -157,22 +188,46 @@ class Bootstrap:
             ConfigError: If configuration cannot be loaded.
             OSError: If required directories cannot be created.
         """
+        if self._initialized:
+            return self._orchestrator
+
         self._create_required_directories()
-        self._print_banner()
 
-        print("Loading configuration...")
         self._config = self._load_configuration()
-
         self._initialize_logger()
-        print("Logger initialized...")
 
-        print("Loading skills...")
         self._orchestrator = Orchestrator(config=self._config, event_bus=self._event_bus)
         self._orchestrator.start()
 
         self._command_router = self._build_command_router(self._orchestrator, self._config)
         self._shell = InteractiveShell(router=self._command_router)
 
+        self._initialized = True
+        return self._orchestrator
+
+    def run(self) -> Orchestrator:
+        """Initialize (if needed) and announce the start of an interactive session.
+
+        Calls `initialize()` -- a no-op if this instance was already
+        initialized -- then prints the colored ASCII startup banner
+        and status lines. Every existing caller of `run()` (in
+        particular `src/main.py`) sees identical behavior and console
+        output to before this method was split from `initialize()`.
+
+        Returns:
+            The started Orchestrator instance.
+
+        Raises:
+            ConfigError: If configuration cannot be loaded.
+            OSError: If required directories cannot be created.
+        """
+        self._print_banner()
+        print("Loading configuration...")
+
+        self.initialize()
+
+        print("Logger initialized...")
+        print("Loading skills...")
         print("Ready.")
         print()
         print("Jarvis is running.")

@@ -46,6 +46,10 @@ class TestRunner:
 
         for suite_class in TestRegistry.all():
 
+            suite_name = suite_class.NAME
+
+            print(f"Running {suite_name}")
+
             suite = suite_class()
 
             started = time.perf_counter()
@@ -53,6 +57,8 @@ class TestRunner:
             result = suite.run()
 
             result.duration = time.perf_counter() - started
+
+            print(f"Finished {suite_name} (elapsed {result.duration:.3f} sec)")
 
             results.append(result)
 

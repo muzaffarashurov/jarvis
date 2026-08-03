@@ -104,7 +104,7 @@ _INVALID_PROVIDER_CONFIG_YAML = (
 )
 
 # Full, offline-safe config.yaml covering every section Bootstrap._build_command_router
-# reads, so a real Bootstrap.run() can be exercised end to end in a temporary
+# reads, so a real Bootstrap.initialize() can be exercised end to end in a temporary
 # project root without any network access or long-lived background threads.
 _FULL_BOOTSTRAP_CONFIG_YAML = (
     "app:\n"
@@ -917,7 +917,7 @@ class KnowledgeBaseTest(BaseTest):
             _write_full_bootstrap_config(project_root, default_provider="local")
             with _ChdirGuard(project_root):
                 bootstrap = Bootstrap(project_root=project_root)
-                orchestrator = bootstrap.run()
+                orchestrator = bootstrap.initialize()
                 try:
                     self.assert_not_none(bootstrap.knowledge_service)
                     self.assert_equal(
@@ -937,7 +937,7 @@ class KnowledgeBaseTest(BaseTest):
             _write_full_bootstrap_config(project_root, default_provider="")
             with _ChdirGuard(project_root):
                 bootstrap = Bootstrap(project_root=project_root)
-                orchestrator = bootstrap.run()
+                orchestrator = bootstrap.initialize()
                 try:
                     self.assert_true(bootstrap.knowledge_service is None)
                     router = bootstrap.command_router

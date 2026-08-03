@@ -10,46 +10,38 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-027 — Context Compression
+### EP-028 — Agent Framework
 
 Planned objectives:
 
-- Compress/summarize retrieved context (from EP-022's RAG Engine and/or
-  EP-026's Semantic Search) to fit within an AI provider's prompt
-  budget, building on EP-021's Embedding Engine rather than duplicating
-  it
-- Read API consumed by the future AI Agent Framework
-- Provider-independent, no direct dependency on any AI provider
-- Keep clear separation from EP-022's RAG Engine (retrieval-time
-  context assembly), EP-024's Knowledge Base (static structured
-  storage), EP-025's Long-Term Memory (persistent lifecycle storage),
-  and EP-026's Semantic Search (meaning-based ranking) -- Context
-  Compression only shrinks already-assembled context, it does not
-  retrieve, store, or rank anything itself
+- Tracked in docs/architecture/JARVIS_ROADMAP.md, Phase 4 (Agent
+  Framework), alongside EP-029 Planning Engine, EP-030 Execution
+  Engine, EP-031 Tool Engine, and EP-032 Multi-Agent Collaboration.
+  Not yet scoped in detail.
 
 Status:
 
 Planned
 
-Note: EP-026 — Semantic Search is now complete (see CHANGELOG.md /
+Note: EP-027 — Context Compression is now complete (see CHANGELOG.md /
 docs/RELEASE_NOTES.md). It is a new, independent package
-(`src/core/semantic/`) that performs meaning-based similarity search
-over Knowledge Base (EP-024) and Long-Term Memory (EP-025) records,
-structurally mirroring EP-021/EP-023/EP-024/EP-025's provider/manager
-pattern (SemanticProvider / DefaultSemanticProvider / SemanticManager).
-It introduces no new embedding pipeline: query and candidate vectors
-are generated entirely through EP-021's EmbeddingEngine, reached only
-through its public API, and it reads Knowledge Base / Long-Term Memory
-records only through KnowledgeService.list_records() /
-LongTermMemoryService.list_memories(). It has no dependency on EP-022's
-RAG Engine, any AI provider, or any future Agent Framework component --
-it performs no answer generation, prompt construction, context
-compression, planning, reflection, or reasoning. Note that with
-EP-021's built-in offline "local" (SHA-256 hash) embedding provider,
-only exact/near-exact text matches are meaningful -- see
-docs/RELEASE_NOTES.md's "Known limitation" for EP-026. Context
-Compression remains future work, tracked as EP-027 (Context
-Compression) below, matching Phase 3 of JARVIS_ROADMAP.md.
+(`src/core/context_compression/`) that shrinks already-assembled
+context (raw text, or EP-026 Semantic Search results) down to a
+configured character/chunk budget, structurally mirroring
+EP-021/EP-023/EP-024/EP-025/EP-026's provider/manager pattern
+(CompressionProvider / DefaultCompressionProvider / CompressionManager).
+It performs only deterministic, arithmetic operations -- deduplication
+(whole-chunk and paragraph-level), ordering/metadata preservation, and
+max-chunk/max-character enforcement -- never AI reasoning,
+summarization, or text rewriting (only truncation to fit a character
+budget). It has no hard dependency on Semantic Search, the Embedding
+Engine, Knowledge Base, or Long-Term Memory: compressing raw
+text/chunks works standalone; only the optional `compress_query()`
+convenience reaches EP-026's SemanticEngine, through its public
+`search()` method only. It has no dependency on any AI provider, the
+Prompt Engine, the RAG Engine, the Conversation Engine, or any future
+Agent Framework component. An Agent Framework (Phase 4 of
+JARVIS_ROADMAP.md) remains future work, tracked as EP-028 above.
 
 ---
 

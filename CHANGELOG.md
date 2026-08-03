@@ -6,7 +6,93 @@ The format is inspired by Keep a Changelog.
 
 ---
 
-## v0.1.0-ep026
+## v0.1.0-ep027
+
+Released: 2026-08-03
+
+### Added
+
+- Context Compression subsystem (src/core/context_compression/), a new
+  independent package:
+  - ContextChunk / CompressionResult (compression_result.py): plain
+    data model for one unit of input context (text, index, metadata)
+    and the outcome of compressing an ordered chunk sequence (chunks,
+    original/compressed chunk and character counts, estimated tokens,
+    deduplicated-chunk count, truncated flag)
+  - CompressionProvider interface (compression_provider.py): unified
+    compress()/estimate_tokens()/status() contract for every
+    context-compression provider
+  - DefaultCompressionProvider (compression_provider.py): the built-in
+    provider, registered under the name "compression" -- deterministic,
+    purely-arithmetic deduplication (whole-chunk, then paragraph-level
+    across chunks) followed by max-chunk and max-character enforcement,
+    with ordering and metadata preserved throughout; token count is
+    estimated with a documented, fixed characters-per-token heuristic,
+    never a real tokenizer or network call. No AI reasoning, no
+    summarization, no rewriting of surviving text (only truncation, to
+    fit a character budget)
+  - CompressionManager (compression_manager.py): orchestration layer --
+    register/select compression providers, enable/disable the
+    subsystem, and own the default `max_context_characters` /
+    `max_chunks` / `deduplicate` parameters read from
+    'context_compression.*' configuration
+  - CompressionEngine (compression_engine.py): the
+    text/chunks -> compressed-result pipeline -- splits raw text into
+    paragraph chunks, or accepts pre-built chunks (e.g. one per EP-026
+    `SemanticResult`), and delegates deduplication/ordering/limit
+    enforcement to the active CompressionProvider. Also exposes
+    `compress_query()`, an optional integration point that runs a query
+    through EP-026's SemanticEngine (public `search()` method and
+    `SemanticResult` fields only) and compresses the results in one
+    call -- entirely optional; `compress_text()`/`compress_chunks()`/
+    `compress_semantic_results()` work with no Semantic Search
+    dependency at all
+  - src/core/context_compression/__init__.py: package-level public
+    exports
+- CompressionService (src/services/context_compression_service.py):
+  config-driven ('context_compression.enabled',
+  'context_compression.default_provider',
+  'context_compression.max_context_characters',
+  'context_compression.max_chunks', 'context_compression.deduplicate')
+  business logic, a thin CLI-facing wrapper around
+  CompressionManager/CompressionEngine
+- ContextCompressionModule (src/modules/context_compression_module.py):
+  "compression" CLI namespace -- help / status / providers / use /
+  analyze / compress / limits
+- config/config.yaml: new 'context_compression' section ('enabled',
+  'default_provider', 'max_context_characters', 'max_chunks',
+  'deduplicate')
+- EP-027 test suite (tests/EP027/test_context_compression.py)
+
+### Changed
+
+- src/bootstrap.py: registers CompressionManager/CompressionEngine/
+  CompressionService/ContextCompressionModule after Semantic Search,
+  wrapped in a try/except for ContextCompressionError so invalid
+  'context_compression.*' configuration disables the Context
+  Compression subsystem for that run (logged) instead of crashing
+  startup. Context Compression has no hard dependency on Semantic
+  Search, the Embedding Engine, Knowledge Base, or Long-Term Memory --
+  `compress_text()`/`compress_chunks()` work on raw text/chunks alone,
+  so the subsystem is wired unconditionally; only the optional
+  `compress_query()` path is affected if Semantic Search is
+  unavailable this run. The SemanticEngine instance built for EP-026
+  (when available) is captured locally and passed to CompressionEngine,
+  read-only, through its public `search()` method only. No change to
+  startup order or wiring for any other subsystem.
+- src/modules/test_module.py: registers the EP-027 test suite so
+  'test EP027' and 'test all' pick it up
+
+### Improved
+
+- Context assembled from EP-026 Semantic Search (or from any raw text)
+  can now be deduplicated and capped to a maximum size before it is
+  used elsewhere, reusing EP-026's public `SemanticResult` model
+  instead of introducing a new retrieval pipeline or new storage.
+
+---
+
+
 
 Released: 2026-08-02
 

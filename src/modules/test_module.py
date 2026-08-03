@@ -18,6 +18,7 @@ import tests.EP023.test_memory_manager
 import tests.EP024.test_knowledge_base
 import tests.EP025.test_long_term_memory
 import tests.EP026.test_semantic_search
+import tests.EP027.test_context_compression
 
 
 class TestModule(CommandModule):

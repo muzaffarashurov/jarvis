@@ -273,23 +273,3 @@ semantic:
   default_provider: "semantic"
   top_k: 5
   similarity_threshold: 0.70
-
-context_compression:
-  # EP-027 Context Compression. Shrinks already-assembled context (raw
-  # text, or the results of EP-026 Semantic Search) to fit within a
-  # maximum size -- no AI reasoning, no summarization, no LLM calls
-  # (see src/core/context_compression/compression_manager.py).
-  # "default_provider" must match the name of the CompressionProvider
-  # activated at startup. The only provider registered today is
-  # "compression" (DefaultCompressionProvider, deduplication + limit
-  # enforcement). "max_context_characters" caps the compressed
-  # context's total size; "max_chunks" caps the number of chunks kept;
-  # "deduplicate" toggles duplicate chunk/paragraph removal. All three
-  # can be overridden per call via CompressionManager's setters, but
-  # are not exposed as CLI arguments in this EP (except indirectly
-  # through 'compression limits').
-  enabled: true
-  default_provider: "compression"
-  max_context_characters: 12000
-  max_chunks: 20
-  deduplicate: true

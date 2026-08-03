@@ -271,4 +271,48 @@ No breaking changes.
 
 ---
 
+# EP-027 — Context Compression
+
+Status: Released
+
+Highlights:
+
+- Added Context Compression: shrinks already-assembled context (raw
+  text, or the results of Semantic Search EP-026) down to a configured
+  size before it is used elsewhere
+- Removes duplicated chunks and duplicated paragraphs, preserves chunk
+  ordering and metadata, and enforces a maximum chunk count and a
+  maximum total character count
+- Deterministic and purely arithmetic throughout -- no AI reasoning, no
+  summarization, no rewriting of surviving text, and no calls to any
+  AI provider or LLM. Token counts are estimated with a fixed,
+  documented characters-per-token heuristic, not a real tokenizer
+- Delegates the actual compression work to a pluggable provider,
+  mirroring the provider/manager pattern already used by the Memory
+  Manager (EP-023), Knowledge Base (EP-024), Long-Term Memory (EP-025),
+  and Semantic Search (EP-026); ships with one built-in provider
+  ("compression", deduplication + limit enforcement)
+- CLI integration: compression status / providers / use / analyze /
+  compress / limits / help
+- Invalid configuration disables Context Compression for that run
+  (logged) instead of crashing the rest of Jarvis on startup. Unlike
+  Semantic Search, Context Compression has no hard dependency on the
+  Embedding Engine, Knowledge Base, or Long-Term Memory -- compressing
+  raw text/chunks works even when none of them are available; only the
+  optional "compress a live semantic search" convenience needs
+  Semantic Search itself
+- Context Compression performs no answer generation, AI provider
+  calls, prompt construction, retrieval, planning, reflection, or
+  reasoning -- an Agent Framework remains future work
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed.
+
+No breaking changes.
+
+---
+
 End of document.

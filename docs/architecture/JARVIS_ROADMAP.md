@@ -101,12 +101,13 @@ Completed sub-packages:
 - EP-024 Knowledge Base
 - EP-025 Long-Term Memory
 - EP-026 Semantic Search
+- EP-027 Context Compression
 
 ---
 
 ## Current
 
-EP-027 Context Compression
+EP-028 Agent Framework
 
 ---
 
@@ -174,7 +175,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-026 Semantic Search
 
-EP-027 Context Compression
+✓ EP-027 Context Compression
 
 ---
 

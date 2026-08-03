@@ -17,6 +17,9 @@ from src.core.ai.provider_manager import ProviderManager
 from src.core.ai.provider_registry import ProviderRegistry as AIProviderRegistry
 from src.core.command_router import CommandRouter
 from src.core.config import Config, ConfigError
+from src.core.context_compression.compression_engine import CompressionEngine
+from src.core.context_compression.compression_manager import CompressionManager
+from src.core.context_compression.compression_provider import ContextCompressionError
 from src.core.embedding.engine import EmbeddingEngine
 from src.core.embedding.manager import EmbeddingManager
 from src.core.embedding.provider import EmbeddingConfigurationError, EmbeddingError
@@ -51,6 +54,7 @@ from src.core.shell import InteractiveShell
 from src.core.telegram.telegram_client import TelegramClient
 from src.core.telegram.telegram_router import TelegramRouter
 from src.modules.ai_module import AIModule
+from src.modules.context_compression_module import ContextCompressionModule
 from src.modules.conversation_module import ConversationModule
 from src.modules.embedding_module import EmbeddingModule
 from src.modules.fast_response_module import FastResponseModule
@@ -66,6 +70,7 @@ from src.modules.scheduler_module import SchedulerModule
 from src.modules.semantic_module import SemanticModule
 from src.modules.telegram_module import TelegramModule
 from src.services.ai_service import AIService
+from src.services.context_compression_service import CompressionService
 from src.services.embedding_service import EmbeddingService
 from src.services.fast_response_service import FastResponseService
 from src.services.index_service import IndexService
@@ -133,6 +138,7 @@ class Bootstrap:
         self._embedding_service: EmbeddingService | None = None
         self._rag_service: RagService | None = None
         self._semantic_service: SemanticService | None = None
+        self._compression_service: CompressionService | None = None
         colorama_init(autoreset=True)
 
     def run(self) -> Orchestrator:
@@ -464,6 +470,14 @@ class Bootstrap:
         # what Semantic Search can find; it never disables the
         # subsystem itself, since a search with zero candidates is a
         # valid (empty) result, not an error.
+        #
+        # `semantic_engine_for_compression` is captured here (rather
+        # than reading `self._semantic_service` back) so EP-027's
+        # Context Compression can optionally reuse the same
+        # SemanticEngine instance through its public `search()` method
+        # only -- see the EP-027 wiring immediately below. It stays
+        # None whenever Semantic Search itself is unavailable this run.
+        semantic_engine_for_compression: SemanticEngine | None = None
         if self._embedding_service is not None:
             try:
                 semantic_manager = SemanticManager(config=config)
@@ -477,6 +491,7 @@ class Bootstrap:
                 semantic_service = SemanticService(manager=semantic_manager, engine=semantic_engine)
                 self._semantic_service = semantic_service
                 router.register(SemanticModule(semantic_service))
+                semantic_engine_for_compression = semantic_engine
             except SemanticError as exc:
                 logger.error(
                     f"Semantic Search disabled: invalid 'semantic.*' configuration "
@@ -489,6 +504,46 @@ class Bootstrap:
                 "run (see the preceding log entry)."
             )
             self._semantic_service = None
+
+        # EP-027: Context Compression. Provider-independent shrinking
+        # of already-assembled context (raw text, or EP-026
+        # SemanticResult instances) down to a configured
+        # character/chunk budget -- no AI reasoning, no summarization,
+        # no LLM calls, no prompt construction (see
+        # src/core/context_compression/__init__.py). CompressionManager
+        # owns provider selection, configuration loading
+        # ('context_compression.*') and provider lifecycle;
+        # CompressionEngine owns the context -> chunks ->
+        # compressed-result pipeline, reaching Semantic Search only
+        # through SemanticEngine's public `search()` method (optional
+        # -- used only by `compression`'s future callers via
+        # `compress_query()`, never by the CLI commands wired here).
+        #
+        # Context Compression has no hard dependency on Semantic
+        # Search, the Embedding Engine, Knowledge Base, or Long-Term
+        # Memory: `compress_text()`/`compress_chunks()` work on raw
+        # text/chunks alone. Semantic Search being unavailable this run
+        # only means `compress_query()` cannot be used -- it never
+        # disables the subsystem itself, matching the soft-dependency
+        # precedent set by EP-026 for Knowledge Base/Long-Term Memory.
+        try:
+            compression_manager = CompressionManager(config=config)
+            compression_engine = CompressionEngine(
+                manager=compression_manager,
+                semantic_engine=semantic_engine_for_compression,
+            )
+            compression_service = CompressionService(
+                manager=compression_manager, engine=compression_engine
+            )
+            self._compression_service = compression_service
+            router.register(ContextCompressionModule(compression_service))
+        except ContextCompressionError as exc:
+            logger.error(
+                f"Context Compression disabled: invalid 'context_compression.*' "
+                f"configuration ({exc}). Fix config/config.yaml and restart to "
+                "re-enable it."
+            )
+            self._compression_service = None
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
@@ -914,3 +969,15 @@ class Bootstrap:
             this run -- see `_build_command_router`'s EP-026 wiring).
         """
         return self._semantic_service
+
+    @property
+    def compression_service(self) -> CompressionService | None:
+        """Return the CompressionService built for EP-027, if available.
+
+        Returns:
+            The CompressionService instance, or None if `run()` has
+            not completed (or the Context Compression subsystem was
+            disabled this run -- see `_build_command_router`'s EP-027
+            wiring).
+        """
+        return self._compression_service

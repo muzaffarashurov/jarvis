@@ -15,6 +15,9 @@ from src.core.ai.prompt_manager import PromptManager
 from src.core.ai.provider_factory import ProviderFactory
 from src.core.ai.provider_manager import ProviderManager
 from src.core.ai.provider_registry import ProviderRegistry as AIProviderRegistry
+from src.core.agent.agent_engine import AgentEngine
+from src.core.agent.agent_manager import AgentManager
+from src.core.agent.agent_provider import AgentFrameworkError
 from src.core.command_router import CommandRouter
 from src.core.config import Config, ConfigError
 from src.core.context_compression.compression_engine import CompressionEngine
@@ -54,6 +57,7 @@ from src.core.shell import InteractiveShell
 from src.core.telegram.telegram_client import TelegramClient
 from src.core.telegram.telegram_router import TelegramRouter
 from src.modules.ai_module import AIModule
+from src.modules.agent_module import AgentModule
 from src.modules.context_compression_module import ContextCompressionModule
 from src.modules.conversation_module import ConversationModule
 from src.modules.embedding_module import EmbeddingModule
@@ -69,6 +73,7 @@ from src.modules.rag_module import RagModule
 from src.modules.scheduler_module import SchedulerModule
 from src.modules.semantic_module import SemanticModule
 from src.modules.telegram_module import TelegramModule
+from src.services.agent_service import AgentService
 from src.services.ai_service import AIService
 from src.services.context_compression_service import CompressionService
 from src.services.embedding_service import EmbeddingService
@@ -139,6 +144,7 @@ class Bootstrap:
         self._rag_service: RagService | None = None
         self._semantic_service: SemanticService | None = None
         self._compression_service: CompressionService | None = None
+        self._agent_service: AgentService | None = None
         colorama_init(autoreset=True)
 
     def run(self) -> Orchestrator:
@@ -544,6 +550,66 @@ class Bootstrap:
                 "re-enable it."
             )
             self._compression_service = None
+
+        # EP-028: Agent Framework. The central orchestration layer
+        # coordinating already-implemented Engineering Packages --
+        # agent lifecycle, a subsystem registry, and request
+        # acknowledgment only (see src/core/agent/__init__.py). No
+        # planning, reasoning, tool execution, prompt construction, or
+        # AI provider call is performed here or anywhere in this
+        # package. AgentManager owns agent registration, active-agent
+        # selection, configuration loading ('agent.*') and the
+        # resolved 'agent.startup_mode'; AgentEngine forwards every
+        # lifecycle/subsystem-registry/request call to the currently
+        # selected AgentProvider (built-in: "jarvis").
+        #
+        # Every subsystem service already built above (Embedding, RAG,
+        # Memory, Knowledge Base, Long-Term Memory, Semantic Search,
+        # Context Compression) is registered here, by name, with a
+        # live status-check callable bound to that service's own
+        # public `status().enabled` -- read-only, no private access.
+        # A subsystem unavailable this run (its service is None) is
+        # simply skipped -- exactly like every soft dependency
+        # elsewhere in this method, it narrows what the Agent
+        # Framework can currently see, it never disables the Agent
+        # Framework subsystem itself. One subsystem's registration
+        # failing (e.g. a duplicate name) is logged and skipped rather
+        # than aborting the whole Agent Framework build.
+        try:
+            agent_manager = AgentManager(config=config)
+            agent_engine = AgentEngine(manager=agent_manager)
+            agent_service = AgentService(manager=agent_manager, engine=agent_engine)
+            self._agent_service = agent_service
+            router.register(AgentModule(agent_service))
+
+            available_subsystems: list[tuple[str, object | None]] = [
+                ("embedding", self._embedding_service),
+                ("rag", self._rag_service),
+                ("memory", self._memory_service),
+                ("knowledge", self._knowledge_service),
+                ("long_term_memory", self._long_term_memory_service),
+                ("semantic", self._semantic_service),
+                ("compression", self._compression_service),
+            ]
+            for subsystem_name, subsystem_service in available_subsystems:
+                if subsystem_service is None:
+                    continue
+                try:
+                    agent_engine.register_subsystem(
+                        subsystem_name,
+                        status_check=lambda service=subsystem_service: service.status().enabled,
+                    )
+                except AgentFrameworkError as exc:
+                    logger.warning(
+                        f"Agent Framework could not register subsystem "
+                        f"'{subsystem_name}': {exc}"
+                    )
+        except AgentFrameworkError as exc:
+            logger.error(
+                f"Agent Framework disabled: invalid 'agent.*' configuration "
+                f"({exc}). Fix config/config.yaml and restart to re-enable it."
+            )
+            self._agent_service = None
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
@@ -981,3 +1047,14 @@ class Bootstrap:
             wiring).
         """
         return self._compression_service
+
+    @property
+    def agent_service(self) -> AgentService | None:
+        """Return the AgentService built for EP-028, if available.
+
+        Returns:
+            The AgentService instance, or None if `run()` has not
+            completed (or the Agent Framework subsystem was disabled
+            this run -- see `_build_command_router`'s EP-028 wiring).
+        """
+        return self._agent_service

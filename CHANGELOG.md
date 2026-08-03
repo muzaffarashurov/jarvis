@@ -6,7 +6,88 @@ The format is inspired by Keep a Changelog.
 
 ---
 
-## v0.1.0-ep027
+## v0.1.0-ep028
+
+Released: 2026-08-03
+
+### Added
+
+- Agent Framework (src/core/agent/), a new independent package -- the
+  central orchestration layer coordinating already-implemented
+  Engineering Packages, with no planning, reasoning, task
+  decomposition, tool execution, prompt construction, or AI provider
+  call anywhere in the package:
+  - AgentState (agent_state.py): lifecycle enum every agent reports
+    through and transitions via (UNINITIALIZED, READY, RUNNING,
+    SHUTDOWN, ERROR)
+  - SubsystemInfo / AgentExecutionResult / AgentCancelResult
+    (agent_result.py): plain data model for a registered subsystem's
+    diagnostic snapshot, the outcome of accepting a request, and the
+    outcome of attempting to cancel one
+  - AgentProvider interface (agent_provider.py): unified
+    initialize()/shutdown()/reset()/status()/execute()/cancel()/
+    register_subsystem()/unregister_subsystem()/list_subsystems()
+    contract every agent implementation must satisfy
+  - DefaultAgentProvider (agent_provider.py): the built-in agent,
+    registered under the name "jarvis" -- maintains lifecycle state and
+    a name -> availability-check subsystem registry, and synchronously
+    accepts and acknowledges every `execute()` call
+    (`AgentExecutionResult.dispatched` is always False: there is no
+    Planner yet to dispatch to). `cancel()` always reports nothing left
+    to cancel for a known request id, since every request already
+    completed synchronously
+  - AgentManager (agent_manager.py): orchestration layer --
+    register/select agents, enable/disable the subsystem, and resolve
+    'agent.startup_mode' ("idle": leave the selected agent
+    UNINITIALIZED until an explicit `agent initialize`; "auto":
+    initialize it immediately once AgentEngine is constructed) from
+    'agent.*' configuration
+  - AgentEngine (agent_engine.py): the provider-independent pipeline
+    forwarding every lifecycle/subsystem-registry/request call to the
+    currently selected AgentProvider
+  - src/core/agent/__init__.py: package-level public exports
+- AgentService (src/services/agent_service.py): config-driven
+  ('agent.enabled', 'agent.default_agent', 'agent.startup_mode')
+  business logic, a thin CLI-facing wrapper around
+  AgentManager/AgentEngine. Also exposes `execute()`/`cancel()` for
+  future programmatic callers (e.g. a future Planner), not wired to
+  any CLI command in this EP
+- AgentModule (src/modules/agent_module.py): "agent" CLI namespace --
+  help / status / subsystems / register / unregister / reset /
+  initialize / shutdown
+- config/config.yaml: new 'agent' section ('enabled', 'default_agent',
+  'startup_mode')
+- EP-028 test suite (tests/EP028/test_agent_framework.py)
+
+### Changed
+
+- src/bootstrap.py: registers AgentManager/AgentEngine/AgentService/
+  AgentModule after Context Compression, wrapped in a try/except for
+  AgentFrameworkError so invalid 'agent.*' configuration disables the
+  Agent Framework subsystem for that run (logged) instead of crashing
+  startup. Every subsystem service already built earlier in this
+  method (Embedding, RAG, Memory, Knowledge Base, Long-Term Memory,
+  Semantic Search, Context Compression) that is available this run is
+  registered with the Agent Framework's subsystem registry, by name,
+  bound to that service's own public `status().enabled` -- read-only,
+  no private access. A subsystem unavailable this run is simply
+  skipped, matching every other soft dependency already present in
+  this method; one subsystem's registration failing is logged and
+  skipped rather than aborting the whole Agent Framework build. No
+  change to startup order or wiring for any other subsystem.
+- src/modules/test_module.py: registers the EP-028 test suite so
+  'test EP028' and 'test all' pick it up
+
+### Improved
+
+- Every completed Engineering Package's enabled/disabled status is now
+  visible in one place ('agent subsystems'), without any new status
+  storage -- each subsystem's own `status().enabled` is read live, on
+  demand.
+
+---
+
+
 
 Released: 2026-08-03
 

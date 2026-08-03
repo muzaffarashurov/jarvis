@@ -315,4 +315,50 @@ No breaking changes.
 
 ---
 
+# EP-028 — Agent Framework
+
+Status: Released
+
+Highlights:
+
+- Added the Agent Framework: the central orchestration layer that
+  coordinates every already-implemented Engineering Package (Embedding
+  Engine, RAG Engine, Memory Manager, Knowledge Base, Long-Term Memory,
+  Semantic Search, Context Compression) behind one lifecycle and one
+  subsystem registry
+- Agent lifecycle: initialize / shutdown / reset, with a current status
+  (UNINITIALIZED / READY / RUNNING / SHUTDOWN / ERROR)
+- Subsystem registry: every available subsystem is automatically
+  registered at startup and its live enabled/disabled status can be
+  inspected in one place with `agent subsystems`; subsystems can also
+  be registered/unregistered by name
+- Accepts and acknowledges requests, but performs no planning,
+  reasoning, task decomposition, tool execution, prompt construction,
+  or AI provider call of any kind -- this release is orchestration
+  scaffolding only. A future Planner (EP-029 onward) is what will
+  actually reason about and dispatch a request; every request accepted
+  in this release says so explicitly
+- Delegates the actual agent behavior to a pluggable agent
+  implementation, mirroring the provider/manager pattern already used
+  by Semantic Search (EP-026) and Context Compression (EP-027); ships
+  with one built-in agent ("jarvis")
+- CLI integration: agent status / subsystems / register / unregister /
+  reset / initialize / shutdown / help
+- Invalid configuration disables the Agent Framework for that run
+  (logged) instead of crashing the rest of Jarvis on startup. The
+  Agent Framework has no hard dependency on any other subsystem --
+  every already-built service is registered opportunistically, and a
+  subsystem missing this run is simply absent from `agent subsystems`,
+  never a startup failure
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed.
+
+No breaking changes.
+
+---
+
 End of document.

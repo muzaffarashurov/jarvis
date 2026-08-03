@@ -10,38 +10,46 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-028 — Agent Framework
+### EP-029 — Planning Engine
 
 Planned objectives:
 
 - Tracked in docs/architecture/JARVIS_ROADMAP.md, Phase 4 (Agent
-  Framework), alongside EP-029 Planning Engine, EP-030 Execution
-  Engine, EP-031 Tool Engine, and EP-032 Multi-Agent Collaboration.
-  Not yet scoped in detail.
+  Framework), alongside EP-030 Execution Engine, EP-031 Tool Engine,
+  and EP-032 Multi-Agent Collaboration. Not yet scoped in detail. Will
+  be the first component to make real use of EP-028's Agent Framework
+  orchestration scaffolding -- specifically its `execute()` /
+  `AgentExecutionResult.dispatched` extension point, left at False by
+  every EP-028 request until a real Planner exists to dispatch to.
 
 Status:
 
 Planned
 
-Note: EP-027 — Context Compression is now complete (see CHANGELOG.md /
+Note: EP-028 — Agent Framework is now complete (see CHANGELOG.md /
 docs/RELEASE_NOTES.md). It is a new, independent package
-(`src/core/context_compression/`) that shrinks already-assembled
-context (raw text, or EP-026 Semantic Search results) down to a
-configured character/chunk budget, structurally mirroring
-EP-021/EP-023/EP-024/EP-025/EP-026's provider/manager pattern
-(CompressionProvider / DefaultCompressionProvider / CompressionManager).
-It performs only deterministic, arithmetic operations -- deduplication
-(whole-chunk and paragraph-level), ordering/metadata preservation, and
-max-chunk/max-character enforcement -- never AI reasoning,
-summarization, or text rewriting (only truncation to fit a character
-budget). It has no hard dependency on Semantic Search, the Embedding
-Engine, Knowledge Base, or Long-Term Memory: compressing raw
-text/chunks works standalone; only the optional `compress_query()`
-convenience reaches EP-026's SemanticEngine, through its public
-`search()` method only. It has no dependency on any AI provider, the
-Prompt Engine, the RAG Engine, the Conversation Engine, or any future
-Agent Framework component. An Agent Framework (Phase 4 of
-JARVIS_ROADMAP.md) remains future work, tracked as EP-028 above.
+(`src/core/agent/`) that orchestrates already-implemented Engineering
+Packages -- agent lifecycle (initialize/shutdown/reset/status), a
+subsystem registry (register_subsystem/unregister_subsystem/
+list_subsystems), and request acknowledgment (execute/cancel) --
+structurally mirroring EP-026/EP-027's provider/manager pattern
+(AgentProvider / DefaultAgentProvider / AgentManager). It performs no
+planning, reasoning, task decomposition, tool execution, prompt
+construction, or AI provider call: every `execute()` call is
+synchronously accepted and acknowledged only
+(`AgentExecutionResult.dispatched` is always False), and `cancel()`
+always reports nothing left to cancel, since there is no asynchronous
+task to interrupt. It reaches every subsystem (Embedding Engine, RAG
+Engine, Memory Manager, Knowledge Base, Long-Term Memory, Semantic
+Search, Context Compression) only through a single, caller-supplied
+status-check callable bound to that subsystem's own public
+`status().enabled` -- never its internals. It has no dependency on any
+AI provider, the Prompt Engine, the Conversation Engine, or any of the
+eight future orchestration components named in its own task brief
+(Planner, Reasoning Engine, Reflection Engine, Workflow Engine, Task
+Scheduler, Tool Executor, Conversation Engine integration, Multi-Agent
+Coordinator). A Planning Engine (Phase 4 of JARVIS_ROADMAP.md) remains
+future work, tracked as EP-029 above.
 
 ---
 

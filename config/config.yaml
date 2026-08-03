@@ -293,3 +293,18 @@ context_compression:
   max_context_characters: 12000
   max_chunks: 20
   deduplicate: true
+
+agent:
+  # EP-028 Agent Framework. The central orchestration layer
+  # coordinating already-implemented Engineering Packages -- agent
+  # lifecycle, a subsystem registry, and request acknowledgment only.
+  # No planning, reasoning, tool execution, or AI provider calls (see
+  # src/core/agent/__init__.py). "default_agent" must match the name
+  # of the AgentProvider activated at startup. The only agent
+  # registered today is "jarvis" (DefaultAgentProvider). "startup_mode"
+  # controls whether the selected agent is initialized automatically
+  # at Bootstrap time ("auto") or left UNINITIALIZED until an explicit
+  # 'agent initialize' call ("idle").
+  enabled: true
+  default_agent: "jarvis"
+  startup_mode: "idle"

@@ -361,4 +361,50 @@ No breaking changes.
 
 ---
 
+# EP-029 — Planning Engine
+
+Status: Released
+
+Highlights:
+
+- Added the Planning Engine: turns a request into a concrete, ordered
+  Plan of steps, each naming the completed Engineering Package that
+  would carry it out (e.g. Knowledge Base, Semantic Search, Context
+  Compression)
+- Fully deterministic: request text is matched against a fixed table
+  of keyword rules -- no AI reasoning, no AI provider call, no network
+  access. The same request always produces the same plan
+- When the Agent Framework (EP-028) is available, every plan is
+  automatically cross-checked against the subsystems actually
+  registered and enabled at runtime, so a step can be seen to be
+  currently unavailable before anything is attempted
+- A request matching no known subsystem still produces a plan -- a
+  single, explicit "acknowledged, nothing to decompose" step, never an
+  error
+- Delegates the actual decomposition to a pluggable planning strategy,
+  mirroring the provider/manager pattern already used by Semantic
+  Search (EP-026), Context Compression (EP-027), and the Agent
+  Framework (EP-028); ships with one built-in provider ("planning")
+- CLI integration: planning status / providers / use / plan / limits /
+  help
+- A Plan is a proposal only -- nothing in this release executes a
+  step, calls a tool, or talks to an AI provider. Turning a Plan into
+  actual work is left to a future Execution Engine
+- Invalid configuration disables the Planning Engine for that run
+  (logged) instead of crashing the rest of Jarvis on startup. The
+  Planning Engine has no hard dependency on the Agent Framework or any
+  other subsystem -- `planning plan` still works standalone, reporting
+  every step as available, if the Agent Framework is unavailable this
+  run
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed.
+
+No breaking changes.
+
+---
+
 End of document.

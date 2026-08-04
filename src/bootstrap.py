@@ -23,6 +23,9 @@ from src.core.config import Config, ConfigError
 from src.core.context_compression.compression_engine import CompressionEngine
 from src.core.context_compression.compression_manager import CompressionManager
 from src.core.context_compression.compression_provider import ContextCompressionError
+from src.core.planning.planning_engine import PlanningEngine
+from src.core.planning.planning_manager import PlanningManager
+from src.core.planning.planning_provider import PlanningError
 from src.core.embedding.engine import EmbeddingEngine
 from src.core.embedding.manager import EmbeddingManager
 from src.core.embedding.provider import EmbeddingConfigurationError, EmbeddingError
@@ -59,6 +62,7 @@ from src.core.telegram.telegram_router import TelegramRouter
 from src.modules.ai_module import AIModule
 from src.modules.agent_module import AgentModule
 from src.modules.context_compression_module import ContextCompressionModule
+from src.modules.planning_module import PlanningModule
 from src.modules.conversation_module import ConversationModule
 from src.modules.embedding_module import EmbeddingModule
 from src.modules.fast_response_module import FastResponseModule
@@ -83,6 +87,7 @@ from src.services.invoice_service import InvoiceService
 from src.services.knowledge_service import KnowledgeService
 from src.services.long_term_memory_service import LongTermMemoryService
 from src.services.memory_service import MemoryService
+from src.services.planning_service import PlanningService
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -170,6 +175,7 @@ class Bootstrap:
         self._semantic_service: SemanticService | None = None
         self._compression_service: CompressionService | None = None
         self._agent_service: AgentService | None = None
+        self._planning_service: PlanningService | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -630,12 +636,20 @@ class Bootstrap:
         # Framework subsystem itself. One subsystem's registration
         # failing (e.g. a duplicate name) is logged and skipped rather
         # than aborting the whole Agent Framework build.
+        # `agent_engine_for_planning` is captured here (rather than
+        # reading `self._agent_service` back) so EP-029's Planning
+        # Engine can optionally reuse the same AgentEngine instance
+        # through its public `list_subsystems()` method only -- see
+        # the EP-029 wiring immediately below. It stays None whenever
+        # the Agent Framework itself is unavailable this run.
+        agent_engine_for_planning: AgentEngine | None = None
         try:
             agent_manager = AgentManager(config=config)
             agent_engine = AgentEngine(manager=agent_manager)
             agent_service = AgentService(manager=agent_manager, engine=agent_engine)
             self._agent_service = agent_service
             router.register(AgentModule(agent_service))
+            agent_engine_for_planning = agent_engine
 
             available_subsystems: list[tuple[str, object | None]] = [
                 ("embedding", self._embedding_service),
@@ -665,6 +679,40 @@ class Bootstrap:
                 f"({exc}). Fix config/config.yaml and restart to re-enable it."
             )
             self._agent_service = None
+
+        # EP-029: Planning Engine. Decomposes a request into an ordered
+        # Plan of steps referencing already-implemented Engineering
+        # Packages by name -- deterministic, fixed keyword rules only
+        # (see src/core/planning/__init__.py). No AI reasoning, no AI
+        # provider call, no prompt construction, and no task execution
+        # is performed here or anywhere in this package.
+        # PlanningManager owns provider registration, active-provider
+        # selection, configuration loading ('planning.*') and the
+        # default `max_steps` limit; PlanningEngine builds a Plan via
+        # the active PlanningProvider and, when the Agent Framework is
+        # available this run, reconciles each step's availability
+        # against `AgentEngine.list_subsystems()` (public API only).
+        #
+        # Planning Engine has no hard dependency on the Agent
+        # Framework: `plan()` works standalone with every step reported
+        # available. Agent Framework being unavailable this run only
+        # narrows what Planning Engine can see (per-step availability
+        # is left unreconciled); it never disables the Planning Engine
+        # subsystem itself.
+        try:
+            planning_manager = PlanningManager(config=config)
+            planning_engine = PlanningEngine(
+                manager=planning_manager, agent_engine=agent_engine_for_planning
+            )
+            planning_service = PlanningService(manager=planning_manager, engine=planning_engine)
+            self._planning_service = planning_service
+            router.register(PlanningModule(planning_service))
+        except PlanningError as exc:
+            logger.error(
+                f"Planning Engine disabled: invalid 'planning.*' configuration "
+                f"({exc}). Fix config/config.yaml and restart to re-enable it."
+            )
+            self._planning_service = None
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
@@ -1113,3 +1161,15 @@ class Bootstrap:
             this run -- see `_build_command_router`'s EP-028 wiring).
         """
         return self._agent_service
+
+    @property
+    def planning_service(self) -> PlanningService | None:
+        """Return the PlanningService built for EP-029, if available.
+
+        Returns:
+            The PlanningService instance, or None if `run()`/`initialize()`
+            has not completed (or the Planning Engine subsystem was
+            disabled this run -- see `_build_command_router`'s EP-029
+            wiring).
+        """
+        return self._planning_service

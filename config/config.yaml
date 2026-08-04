@@ -308,3 +308,16 @@ agent:
   enabled: true
   default_agent: "jarvis"
   startup_mode: "idle"
+  
+planning:
+  # EP-029 Planning Engine. Decomposes a request into an ordered Plan
+  # of steps referencing already-implemented Engineering Packages by
+  # name -- deterministic, fixed keyword rules only, no AI reasoning,
+  # no AI provider calls, no task execution (see
+  # src/core/planning/__init__.py). "default_provider" must match the
+  # name of the PlanningProvider activated at startup. The only
+  # provider registered today is "planning" (DefaultPlanningProvider).
+  # "max_steps" caps the number of steps a single Plan may contain.
+  enabled: true
+  default_provider: "planning"
+  max_steps: 10

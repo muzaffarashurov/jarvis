@@ -6,7 +6,82 @@ The format is inspired by Keep a Changelog.
 
 ---
 
-## v0.1.0-ep028
+## v0.1.0-ep029
+
+Released: 2026-08-04
+
+### Added
+
+- Planning Engine (src/core/planning/), a new independent package --
+  decomposes a request into an ordered Plan of steps referencing
+  already-implemented Engineering Packages by name, with no AI
+  reasoning, no AI provider call, no prompt construction, and no task
+  execution anywhere in the package:
+  - PlanStep / Plan (planning_result.py): plain data model for a
+    single ordered step and the outcome of decomposing a whole request
+  - PlanningProvider interface (planning_provider.py): unified
+    `plan(request, max_steps) -> Plan` contract every planning
+    strategy must implement
+  - DefaultPlanningProvider (planning_provider.py): the built-in
+    provider, registered under the name "planning" -- deterministic,
+    fixed keyword -> (subsystem, action, description) rule table,
+    applied via case-insensitive substring matching only. Emits at
+    most one step per matched subsystem (first matching keyword wins),
+    preserves rule order, enforces `max_steps`, and falls back to a
+    single `acknowledge_request` step (no subsystem) when nothing
+    matches. Every step is returned with `available=True`; this
+    provider never queries a live subsystem registry
+  - PlanningManager (planning_manager.py): orchestration layer --
+    register/select planning providers, enable/disable the subsystem,
+    and resolve the default `max_steps` limit from 'planning.*'
+    configuration
+  - PlanningEngine (planning_engine.py): the provider-independent
+    request -> Plan pipeline. Optionally accepts an EP-028
+    `AgentEngine` and, when supplied, reconciles each step's
+    `available` flag against that agent's live subsystem registry via
+    its public `list_subsystems()` method only -- the first component
+    to make real use of EP-028's Agent Framework subsystem registry
+  - src/core/planning/__init__.py: package-level public exports
+- PlanningService (src/services/planning_service.py): config-driven
+  ('planning.enabled', 'planning.default_provider', 'planning.max_steps')
+  business logic, a thin CLI-facing wrapper around
+  PlanningManager/PlanningEngine
+- PlanningModule (src/modules/planning_module.py): "planning" CLI
+  namespace -- help / status / providers / use / plan / limits
+- config/config.yaml: new 'planning' section ('enabled',
+  'default_provider', 'max_steps')
+- EP-029 test suite (tests/EP029/test_planning_engine.py)
+
+### Changed
+
+- src/bootstrap.py: registers PlanningManager/PlanningEngine/
+  PlanningService/PlanningModule after the Agent Framework, wrapped in
+  a try/except for PlanningError so invalid 'planning.*' configuration
+  disables the Planning Engine subsystem for that run (logged) instead
+  of crashing startup. The AgentEngine built for EP-028 (when
+  available) is captured locally and passed to PlanningEngine,
+  read-only, through its public `list_subsystems()` method only.
+  Planning Engine has no hard dependency on the Agent Framework:
+  `plan()` works standalone (every step reported available) even when
+  the Agent Framework is unavailable this run; that only narrows what
+  Planning Engine can see, it never disables the Planning Engine
+  subsystem itself. No change to startup order or wiring for any other
+  subsystem.
+- src/modules/test_module.py: registers the EP-029 test suite so
+  'test EP029' and 'test all' pick it up
+
+### Improved
+
+- A request can now be decomposed into a concrete, inspectable
+  sequence of subsystem-referencing steps -- and, when the Agent
+  Framework is available, each step's real-world feasibility can be
+  checked against the subsystems actually registered and enabled at
+  runtime -- without any new reasoning, retrieval, or storage
+  component being introduced.
+
+---
+
+
 
 Released: 2026-08-03
 

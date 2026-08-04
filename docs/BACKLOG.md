@@ -10,46 +10,42 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-029 — Planning Engine
+### EP-030 — Execution Engine
 
 Planned objectives:
 
 - Tracked in docs/architecture/JARVIS_ROADMAP.md, Phase 4 (Agent
-  Framework), alongside EP-030 Execution Engine, EP-031 Tool Engine,
-  and EP-032 Multi-Agent Collaboration. Not yet scoped in detail. Will
-  be the first component to make real use of EP-028's Agent Framework
-  orchestration scaffolding -- specifically its `execute()` /
-  `AgentExecutionResult.dispatched` extension point, left at False by
-  every EP-028 request until a real Planner exists to dispatch to.
+  Framework), alongside EP-031 Tool Engine and EP-032 Multi-Agent
+  Collaboration. Not yet scoped in detail. Will be the first component
+  to turn an EP-029 `Plan` into actual work -- executing (or
+  dispatching for execution) each `PlanStep` in order, respecting the
+  `available` flag EP-029 already computes per step.
 
 Status:
 
 Planned
 
-Note: EP-028 — Agent Framework is now complete (see CHANGELOG.md /
+Note: EP-029 — Planning Engine is now complete (see CHANGELOG.md /
 docs/RELEASE_NOTES.md). It is a new, independent package
-(`src/core/agent/`) that orchestrates already-implemented Engineering
-Packages -- agent lifecycle (initialize/shutdown/reset/status), a
-subsystem registry (register_subsystem/unregister_subsystem/
-list_subsystems), and request acknowledgment (execute/cancel) --
-structurally mirroring EP-026/EP-027's provider/manager pattern
-(AgentProvider / DefaultAgentProvider / AgentManager). It performs no
-planning, reasoning, task decomposition, tool execution, prompt
-construction, or AI provider call: every `execute()` call is
-synchronously accepted and acknowledged only
-(`AgentExecutionResult.dispatched` is always False), and `cancel()`
-always reports nothing left to cancel, since there is no asynchronous
-task to interrupt. It reaches every subsystem (Embedding Engine, RAG
-Engine, Memory Manager, Knowledge Base, Long-Term Memory, Semantic
-Search, Context Compression) only through a single, caller-supplied
-status-check callable bound to that subsystem's own public
-`status().enabled` -- never its internals. It has no dependency on any
-AI provider, the Prompt Engine, the Conversation Engine, or any of the
-eight future orchestration components named in its own task brief
-(Planner, Reasoning Engine, Reflection Engine, Workflow Engine, Task
-Scheduler, Tool Executor, Conversation Engine integration, Multi-Agent
-Coordinator). A Planning Engine (Phase 4 of JARVIS_ROADMAP.md) remains
-future work, tracked as EP-029 above.
+(`src/core/planning/`) that decomposes a request into an ordered Plan
+of steps referencing already-implemented Engineering Packages by name,
+structurally mirroring EP-026/EP-027/EP-028's provider/manager pattern
+(PlanningProvider / DefaultPlanningProvider / PlanningManager). It
+performs no AI reasoning, no AI provider call, no prompt construction,
+and no task execution: the built-in provider matches the request
+against a fixed, deterministic keyword-rule table (case-insensitive
+substring matching only), emits at most one step per matched
+subsystem, and falls back to a single explicit "nothing matched" step
+rather than ever raising an error for an unrecognized request. It
+reaches EP-028's Agent Framework only through its public
+`AgentEngine.list_subsystems()` method, to optionally reconcile each
+step's `available` flag against the subsystems actually registered and
+enabled at runtime -- never any subsystem's internals, and this
+integration is itself optional (planning works standalone with no
+Agent Framework at all). It has no dependency on any AI provider, the
+Prompt Engine, the Conversation Engine, a Reasoning Engine, a
+Reflection Engine, or a Tool Executor. An Execution Engine (Phase 4 of
+JARVIS_ROADMAP.md) remains future work, tracked as EP-030 above.
 
 ---
 

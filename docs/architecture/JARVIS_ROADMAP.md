@@ -103,12 +103,13 @@ Completed sub-packages:
 - EP-026 Semantic Search
 - EP-027 Context Compression
 - EP-028 Agent Framework
+- EP-029 Planning Engine
 
 ---
 
 ## Current
 
-EP-029 Planning Engine
+EP-030 Execution Engine
 
 ---
 
@@ -184,7 +185,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-028 Agent Framework
 
-EP-029 Planning Engine
+✓ EP-029 Planning Engine
 
 EP-030 Execution Engine
 

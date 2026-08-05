@@ -321,3 +321,18 @@ planning:
   enabled: true
   default_provider: "planning"
   max_steps: 10
+
+plan_execution:
+  # EP-030 Plan Execution Engine. Dispatches an EP-029 Plan's steps, in
+  # order -- deterministic, recognized-action dispatch only, no AI
+  # reasoning, no AI provider calls, and no real subsystem invocation
+  # (see src/core/plan_execution/__init__.py). NOT the same as the
+  # unrelated, pre-existing 'src/core/execution/' package (EP-003's
+  # OS-level target launcher). "default_provider" must match the name
+  # of the PlanExecutionProvider activated at startup. The only
+  # provider registered today is "plan_execution"
+  # (DefaultPlanExecutionProvider). "stop_on_failure" controls whether
+  # the remaining plan is skipped after a step fails.
+  enabled: true
+  default_provider: "plan_execution"
+  stop_on_failure: true

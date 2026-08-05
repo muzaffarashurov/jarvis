@@ -26,6 +26,9 @@ from src.core.context_compression.compression_provider import ContextCompression
 from src.core.planning.planning_engine import PlanningEngine
 from src.core.planning.planning_manager import PlanningManager
 from src.core.planning.planning_provider import PlanningError
+from src.core.plan_execution.plan_execution_engine import PlanExecutionEngine
+from src.core.plan_execution.plan_execution_manager import PlanExecutionManager
+from src.core.plan_execution.plan_execution_provider import PlanExecutionError
 from src.core.embedding.engine import EmbeddingEngine
 from src.core.embedding.manager import EmbeddingManager
 from src.core.embedding.provider import EmbeddingConfigurationError, EmbeddingError
@@ -63,6 +66,7 @@ from src.modules.ai_module import AIModule
 from src.modules.agent_module import AgentModule
 from src.modules.context_compression_module import ContextCompressionModule
 from src.modules.planning_module import PlanningModule
+from src.modules.plan_execution_module import PlanExecutionModule
 from src.modules.conversation_module import ConversationModule
 from src.modules.embedding_module import EmbeddingModule
 from src.modules.fast_response_module import FastResponseModule
@@ -88,6 +92,7 @@ from src.services.knowledge_service import KnowledgeService
 from src.services.long_term_memory_service import LongTermMemoryService
 from src.services.memory_service import MemoryService
 from src.services.planning_service import PlanningService
+from src.services.plan_execution_service import PlanExecutionService
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -176,6 +181,7 @@ class Bootstrap:
         self._compression_service: CompressionService | None = None
         self._agent_service: AgentService | None = None
         self._planning_service: PlanningService | None = None
+        self._plan_execution_service: PlanExecutionService | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -699,6 +705,13 @@ class Bootstrap:
         # narrows what Planning Engine can see (per-step availability
         # is left unreconciled); it never disables the Planning Engine
         # subsystem itself.
+        # `planning_engine_for_plan_execution` is captured here (rather
+        # than reading `self._planning_service` back) so EP-030's Plan
+        # Execution Engine can optionally reuse the same PlanningEngine
+        # instance through its public `plan()` method only -- see the
+        # EP-030 wiring immediately below. It stays None whenever
+        # Planning Engine itself is unavailable this run.
+        planning_engine_for_plan_execution: PlanningEngine | None = None
         try:
             planning_manager = PlanningManager(config=config)
             planning_engine = PlanningEngine(
@@ -707,12 +720,60 @@ class Bootstrap:
             planning_service = PlanningService(manager=planning_manager, engine=planning_engine)
             self._planning_service = planning_service
             router.register(PlanningModule(planning_service))
+            planning_engine_for_plan_execution = planning_engine
         except PlanningError as exc:
             logger.error(
                 f"Planning Engine disabled: invalid 'planning.*' configuration "
                 f"({exc}). Fix config/config.yaml and restart to re-enable it."
             )
             self._planning_service = None
+
+        # EP-030: Plan Execution Engine. Dispatches an EP-029 Plan's
+        # steps, in order -- deterministic, recognized-action dispatch
+        # only (see src/core/plan_execution/__init__.py). No AI
+        # reasoning, no AI provider call, no prompt construction, and
+        # no real subsystem invocation is performed here or anywhere
+        # in this package. NOTE: this is unrelated to the local
+        # `execution_engine` variable used a few lines below for
+        # InvoiceService/ProcessService/etc. -- that is the pre-existing,
+        # unrelated OS-level target launcher from EP-003
+        # (`src/core/execution/`); see the naming-disambiguation note
+        # in `src/core/plan_execution/__init__.py`. Local variable
+        # names here are deliberately prefixed `plan_execution_*` to
+        # avoid any confusion with, or accidental shadowing of, that
+        # variable.
+        #
+        # PlanExecutionManager owns provider registration,
+        # active-provider selection, configuration loading
+        # ('plan_execution.*') and the default `stop_on_failure`
+        # policy; PlanExecutionEngine walks a Plan's steps and
+        # dispatches each available one to the active
+        # PlanExecutionProvider, optionally planning a request itself
+        # first via EP-029's PlanningEngine (public `plan()` method
+        # only).
+        #
+        # Plan Execution Engine has no hard dependency on Planning
+        # Engine: `execute_plan()` works standalone given an
+        # already-built Plan. Planning Engine being unavailable this
+        # run only means `execute_request()` (and so `execution run`)
+        # cannot be used; it never disables the Plan Execution Engine
+        # subsystem itself.
+        try:
+            plan_execution_manager = PlanExecutionManager(config=config)
+            plan_execution_engine = PlanExecutionEngine(
+                manager=plan_execution_manager, planning_engine=planning_engine_for_plan_execution
+            )
+            plan_execution_service = PlanExecutionService(
+                manager=plan_execution_manager, engine=plan_execution_engine
+            )
+            self._plan_execution_service = plan_execution_service
+            router.register(PlanExecutionModule(plan_execution_service))
+        except PlanExecutionError as exc:
+            logger.error(
+                f"Plan Execution Engine disabled: invalid 'plan_execution.*' configuration "
+                f"({exc}). Fix config/config.yaml and restart to re-enable it."
+            )
+            self._plan_execution_service = None
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
@@ -1173,3 +1234,15 @@ class Bootstrap:
             wiring).
         """
         return self._planning_service
+
+    @property
+    def plan_execution_service(self) -> PlanExecutionService | None:
+        """Return the PlanExecutionService built for EP-030, if available.
+
+        Returns:
+            The PlanExecutionService instance, or None if
+            `run()`/`initialize()` has not completed (or the Plan
+            Execution Engine subsystem was disabled this run -- see
+            `_build_command_router`'s EP-030 wiring).
+        """
+        return self._plan_execution_service

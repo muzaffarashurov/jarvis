@@ -143,4 +143,12 @@ Never redesign completed modules without an explicit Engineering Package.
 
 ---
 
+## Engineering
+
+Development process is described in:
+
+docs/architecture/AI_DEVELOPMENT_PLAYBOOK.md
+
+---
+
 End of document.

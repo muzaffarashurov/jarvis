@@ -10,42 +10,42 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-030 — Execution Engine
+### EP-031 — Tool Engine
 
 Planned objectives:
 
 - Tracked in docs/architecture/JARVIS_ROADMAP.md, Phase 4 (Agent
-  Framework), alongside EP-031 Tool Engine and EP-032 Multi-Agent
-  Collaboration. Not yet scoped in detail. Will be the first component
-  to turn an EP-029 `Plan` into actual work -- executing (or
-  dispatching for execution) each `PlanStep` in order, respecting the
-  `available` flag EP-029 already computes per step.
+  Framework), alongside EP-032 Multi-Agent Collaboration. Not yet
+  scoped in detail. Will be the first component to turn an EP-030
+  dispatched `StepResult` into a real external effect -- actually
+  invoking the subsystem action a `PlanStep` names, rather than only
+  recognizing and acknowledging it.
 
 Status:
 
 Planned
 
-Note: EP-029 — Planning Engine is now complete (see CHANGELOG.md /
-docs/RELEASE_NOTES.md). It is a new, independent package
-(`src/core/planning/`) that decomposes a request into an ordered Plan
-of steps referencing already-implemented Engineering Packages by name,
-structurally mirroring EP-026/EP-027/EP-028's provider/manager pattern
-(PlanningProvider / DefaultPlanningProvider / PlanningManager). It
-performs no AI reasoning, no AI provider call, no prompt construction,
-and no task execution: the built-in provider matches the request
-against a fixed, deterministic keyword-rule table (case-insensitive
-substring matching only), emits at most one step per matched
-subsystem, and falls back to a single explicit "nothing matched" step
-rather than ever raising an error for an unrecognized request. It
-reaches EP-028's Agent Framework only through its public
-`AgentEngine.list_subsystems()` method, to optionally reconcile each
-step's `available` flag against the subsystems actually registered and
-enabled at runtime -- never any subsystem's internals, and this
-integration is itself optional (planning works standalone with no
-Agent Framework at all). It has no dependency on any AI provider, the
-Prompt Engine, the Conversation Engine, a Reasoning Engine, a
-Reflection Engine, or a Tool Executor. An Execution Engine (Phase 4 of
-JARVIS_ROADMAP.md) remains future work, tracked as EP-030 above.
+Note: EP-030 — Plan Execution Engine is now complete (see
+CHANGELOG.md / docs/RELEASE_NOTES.md). It is a new, independent
+package (`src/core/plan_execution/`) that dispatches an EP-029 Plan's
+steps, in order, structurally mirroring EP-026/EP-027/EP-028/EP-029's
+provider/manager pattern (PlanExecutionProvider /
+DefaultPlanExecutionProvider / PlanExecutionManager). It performs no
+AI reasoning, no AI provider call, no prompt construction, and no real
+subsystem invocation: the built-in provider recognizes the fixed set
+of actions EP-029's `DefaultPlanningProvider` is known to produce and
+reports success (dispatched, not yet actually carried out) or a
+genuine failure for anything else. It skips any step already reported
+unavailable, and (by default) halts the remaining plan after a step
+fails. It reaches EP-029's Planning Engine only through its public
+`plan()` method, to optionally plan a request before executing it --
+never any subsystem's internals, and this integration is itself
+optional (execution works standalone given an already-built Plan). It
+is deliberately named and namespaced (`plan_execution`, not
+`execution`) to avoid any collision with the pre-existing, unrelated
+`src/core/execution/` package (EP-003's OS-level target launcher). A
+Tool Engine (Phase 4 of JARVIS_ROADMAP.md) remains future work,
+tracked as EP-031 above.
 
 ---
 

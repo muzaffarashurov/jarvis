@@ -29,6 +29,11 @@ from src.core.planning.planning_provider import PlanningError
 from src.core.plan_execution.plan_execution_engine import PlanExecutionEngine
 from src.core.plan_execution.plan_execution_manager import PlanExecutionManager
 from src.core.plan_execution.plan_execution_provider import PlanExecutionError
+from src.core.tool.tool import Tool
+from src.core.tool.tool_engine import ToolEngine
+from src.core.tool.tool_execution_provider import ToolExecutionProvider
+from src.core.tool.tool_manager import ToolManager
+from src.core.tool.tool_provider import ToolError
 from src.core.embedding.engine import EmbeddingEngine
 from src.core.embedding.manager import EmbeddingManager
 from src.core.embedding.provider import EmbeddingConfigurationError, EmbeddingError
@@ -67,6 +72,7 @@ from src.modules.agent_module import AgentModule
 from src.modules.context_compression_module import ContextCompressionModule
 from src.modules.planning_module import PlanningModule
 from src.modules.plan_execution_module import PlanExecutionModule
+from src.modules.tool_module import ToolModule
 from src.modules.conversation_module import ConversationModule
 from src.modules.embedding_module import EmbeddingModule
 from src.modules.fast_response_module import FastResponseModule
@@ -93,6 +99,7 @@ from src.services.long_term_memory_service import LongTermMemoryService
 from src.services.memory_service import MemoryService
 from src.services.planning_service import PlanningService
 from src.services.plan_execution_service import PlanExecutionService
+from src.services.tool_service import ToolService
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -182,6 +189,7 @@ class Bootstrap:
         self._agent_service: AgentService | None = None
         self._planning_service: PlanningService | None = None
         self._plan_execution_service: PlanExecutionService | None = None
+        self._tool_service: ToolService | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -758,6 +766,15 @@ class Bootstrap:
         # run only means `execute_request()` (and so `execution run`)
         # cannot be used; it never disables the Plan Execution Engine
         # subsystem itself.
+        # `plan_execution_manager_for_tool_bridge` is captured here
+        # (rather than reading `self._plan_execution_service` back) so
+        # EP-031's Tool Engine can register its bridge provider
+        # (`ToolExecutionProvider`) with the same live
+        # `PlanExecutionManager` instance, through its existing public
+        # `register_provider()` method only -- see the EP-031 wiring
+        # immediately below. It stays None whenever Plan Execution
+        # Engine itself is unavailable this run.
+        plan_execution_manager_for_tool_bridge: PlanExecutionManager | None = None
         try:
             plan_execution_manager = PlanExecutionManager(config=config)
             plan_execution_engine = PlanExecutionEngine(
@@ -768,12 +785,131 @@ class Bootstrap:
             )
             self._plan_execution_service = plan_execution_service
             router.register(PlanExecutionModule(plan_execution_service))
+            plan_execution_manager_for_tool_bridge = plan_execution_manager
         except PlanExecutionError as exc:
             logger.error(
                 f"Plan Execution Engine disabled: invalid 'plan_execution.*' configuration "
                 f"({exc}). Fix config/config.yaml and restart to re-enable it."
             )
             self._plan_execution_service = None
+
+        # EP-031: Tool Engine. Turns an already-identified
+        # (subsystem, action) reference into a real invocation of an
+        # already-implemented Engineering Package's public API -- no
+        # AI reasoning, no planning, no plan walking, and no dispatch-
+        # order/failure-policy logic is performed here or anywhere in
+        # this package (see src/core/tool/__init__.py). ToolManager
+        # owns provider registration, active-provider selection,
+        # configuration loading ('tool.*') and the tool catalog
+        # (ToolRegistry); ToolEngine is the provider-independent
+        # pipeline that resolves a tool (by id or by
+        # `(subsystem, action)`) and dispatches it to the active
+        # ToolProvider.
+        #
+        # Built-in tools wrap only the already-built subsystem
+        # *Service* instances' parameter-free public methods -- Tool
+        # Engine never instantiates a subsystem service itself
+        # (Dependency Policy). Per this project's Unknown API Policy,
+        # the four EP-029 actions that require a text parameter
+        # PlanStep does not carry (`generate_embedding`,
+        # `retrieve_context`, `semantic_search`, `compress_context`)
+        # are deliberately left unregistered rather than invented --
+        # dispatching one of those produces an honest FAILED result
+        # (see src/core/tool/__init__.py's naming/scope note).
+        #
+        # `ToolExecutionProvider` (the EP-030-anticipated
+        # "Tool-Engine-backed provider") is registered with the same
+        # live PlanExecutionManager captured above, through its
+        # existing public `register_provider()` method only -- no
+        # file under src/core/plan_execution/ is modified. It is
+        # registered but NOT selected as the default plan-execution
+        # provider: 'plan_execution.default_provider' in
+        # config/config.yaml remains "plan_execution" unless an
+        # operator explicitly runs 'execution use tool_engine',
+        # preserving EP-030's exact default behavior.
+        try:
+            tool_manager = ToolManager(config=config)
+
+            built_in_tools: list[Tool] = []
+            if self._memory_service is not None:
+                built_in_tools.append(
+                    Tool(
+                        id="memory_recall",
+                        name="Memory Recall",
+                        description="Retrieve relevant entries from the Memory Manager (EP-023).",
+                        subsystem="memory",
+                        action="retrieve_from_memory",
+                        handler=self._memory_service.list_entries,
+                    )
+                )
+            if self._knowledge_service is not None:
+                built_in_tools.append(
+                    Tool(
+                        id="knowledge_query",
+                        name="Knowledge Base Query",
+                        description="Query the Knowledge Base for relevant records (EP-024).",
+                        subsystem="knowledge",
+                        action="query_knowledge_base",
+                        handler=self._knowledge_service.list_records,
+                    )
+                )
+            if self._long_term_memory_service is not None:
+                built_in_tools.append(
+                    Tool(
+                        id="long_term_memory_query",
+                        name="Long-Term Memory Query",
+                        description="Query Long-Term Memory for persisted records (EP-025).",
+                        subsystem="long_term_memory",
+                        action="query_long_term_memory",
+                        handler=self._long_term_memory_service.list_memories,
+                    )
+                )
+            if self._agent_service is not None:
+                built_in_tools.append(
+                    Tool(
+                        id="agent_coordinate",
+                        name="Agent Subsystem Coordination",
+                        description="Coordinate subsystems via the Agent Framework (EP-028).",
+                        subsystem="agent",
+                        action="coordinate_subsystems",
+                        handler=self._agent_service.list_subsystems,
+                    )
+                )
+            built_in_tools.append(
+                Tool(
+                    id="acknowledge_request",
+                    name="Acknowledge Request",
+                    description="Acknowledge a request with no matched subsystem.",
+                    subsystem=None,
+                    action="acknowledge_request",
+                    handler=lambda: "Request acknowledged. No subsystem action was required.",
+                )
+            )
+
+            for built_in_tool in built_in_tools:
+                try:
+                    tool_manager.register_tool(built_in_tool)
+                except ToolError as exc:
+                    logger.warning(f"Tool Engine could not register tool '{built_in_tool.id}': {exc}")
+
+            tool_engine = ToolEngine(manager=tool_manager)
+            tool_service = ToolService(manager=tool_manager, engine=tool_engine)
+            self._tool_service = tool_service
+            router.register(ToolModule(tool_service))
+
+            if plan_execution_manager_for_tool_bridge is not None:
+                try:
+                    plan_execution_manager_for_tool_bridge.register_provider(
+                        ToolExecutionProvider(tool_engine=tool_engine)
+                    )
+                except PlanExecutionError as exc:
+                    logger.warning(f"Could not register Tool Engine as a plan-execution provider: {exc}")
+        except ToolError as exc:
+            logger.error(
+                f"Tool Engine disabled: invalid 'tool.*' configuration ({exc}). "
+                "Fix config/config.yaml and restart to re-enable it."
+            )
+            self._tool_service = None
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
@@ -1246,3 +1382,15 @@ class Bootstrap:
             `_build_command_router`'s EP-030 wiring).
         """
         return self._plan_execution_service
+
+    @property
+    def tool_service(self) -> ToolService | None:
+        """Return the ToolService built for EP-031, if available.
+
+        Returns:
+            The ToolService instance, or None if `run()`/`initialize()`
+            has not completed (or the Tool Engine subsystem was
+            disabled this run -- see `_build_command_router`'s EP-031
+            wiring).
+        """
+        return self._tool_service

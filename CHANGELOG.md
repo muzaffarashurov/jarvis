@@ -6,6 +6,175 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.0-ep031
+
+Released: 2026-08-05
+
+### Added
+
+- Tool Engine (src/core/tool/), a new independent package -- turns an
+  already-identified `(subsystem, action)` reference into a real
+  invocation of an already-implemented Engineering Package's public
+  API, with no AI reasoning, no planning, no plan walking, and no
+  dispatch-order/failure-policy logic anywhere in the package:
+  - Tool (tool.py): plain catalog-entry data model -- id, name,
+    description, subsystem, action, a pre-bound zero-argument handler
+    closure, and an enabled flag
+  - ToolStatus / ToolResult (tool_result.py): plain data model for the
+    outcome of a single tool invocation
+  - ToolRegistry (tool_registry.py): thread-safe catalog of registered
+    tools -- register/unregister/get/find/find_for_step/list, mirroring
+    PluginRegistry/ProcessRegistry
+  - ToolProvider interface (tool_provider.py): unified
+    `invoke_tool(tool) -> ToolResult` contract every invocation
+    strategy must implement
+  - DefaultToolProvider (tool_provider.py): the built-in provider,
+    registered under the name "tool_engine" -- invokes a Tool's
+    pre-bound handler and translates any raised exception into a
+    failed ToolResult rather than letting it propagate
+  - ToolManager (tool_manager.py): orchestration layer --
+    register/select tool providers, own the ToolRegistry, enable/
+    disable the subsystem, and resolve 'tool.*' configuration
+  - ToolEngine (tool_engine.py): the provider-independent
+    lookup -> real-invocation pipeline -- resolves a tool by id or by
+    a `(subsystem, action)` pair and dispatches it to the active
+    ToolProvider
+  - ToolExecutionProvider (tool_execution_provider.py): the bridge
+    adapter implementing EP-030's `PlanExecutionProvider` ABC -- the
+    "Tool-Engine-backed provider" EP-030's own docstrings anticipated.
+    The only file in the project that imports from both
+    `src.core.tool` and `src.core.plan_execution`
+  - src/core/tool/__init__.py: package-level public exports
+  - Five built-in, real tools wired from src/bootstrap.py: Memory
+    Recall, Knowledge Base Query, Long-Term Memory Query, Agent
+    Subsystem Coordination, and Acknowledge Request -- each a closure
+    over an already-built subsystem Service instance's public,
+    parameter-free method. Four EP-029 actions that require a text
+    parameter neither `PlanStep` nor
+    `PlanExecutionProvider.execute_step()` currently carries
+    (`generate_embedding`, `retrieve_context`, `semantic_search`,
+    `compress_context`) are deliberately left unregistered rather than
+    invented -- see docs/BACKLOG.md
+- ToolService (src/services/tool_service.py): config-driven
+  ('tool.enabled', 'tool.default_provider') business logic, a thin
+  CLI-facing wrapper around ToolManager/ToolEngine
+- ToolModule (src/modules/tool_module.py): "tool" CLI namespace --
+  help / status / providers / list / use / run
+- config/config.yaml: new 'tool' section ('enabled', 'default_provider')
+- EP-031 test suite (tests/EP031/test_tool_engine.py)
+
+### Changed
+
+- src/bootstrap.py: registers ToolManager/ToolEngine/ToolService/
+  ToolModule after the Plan Execution Engine, wrapped in a try/except
+  for ToolError so invalid 'tool.*' configuration disables the Tool
+  Engine subsystem for that run (logged) instead of crashing startup.
+  The live PlanExecutionManager built for EP-030 (when available) is
+  captured locally and, once Tool Engine is built, has a
+  ToolExecutionProvider registered with it through its existing
+  public `register_provider()` method only -- no file under
+  src/core/plan_execution/ is modified, no existing wiring step is
+  reordered or removed, and 'plan_execution.default_provider' is left
+  unchanged ("plan_execution"), so default plan-execution dispatch
+  behavior from EP-030 is byte-for-byte unaffected unless an operator
+  explicitly runs 'execution use tool_engine'
+- src/modules/test_module.py: registers the EP-031 test suite so
+  'test EP031' and 'test all' pick it up
+
+### Improved
+
+- A dispatched `PlanStep` can now, for the five actions with a
+  registered tool, produce a real subsystem effect and report it back
+  through both the "tool" and "execution" CLI namespaces -- without
+  any new AI reasoning, planning, or dispatch-order component being
+  introduced, and without changing any prior release's default
+  behavior.
+
+---
+
+## v0.1.0-ep030
+
+Released: 2026-08-05
+
+### Added
+
+- Plan Execution Engine (src/core/plan_execution/), a new independent
+  package -- the first component to turn an EP-029 `Plan` into
+  dispatched work, with no AI reasoning, no AI provider call, and no
+  real subsystem/tool invocation anywhere in the package (that remains
+  a future Tool Engine's responsibility):
+  - StepStatus / StepResult / PlanExecutionResult
+    (plan_execution_result.py): plain data model for the outcome of
+    dispatching a single step and of executing a whole Plan.
+    Deliberately named `plan_execution` (not `execution`) to avoid
+    colliding with the pre-existing, unrelated `src/core/execution/`
+    package (EP-003's OS-level target launcher)
+  - PlanExecutionProvider interface (plan_execution_provider.py):
+    unified `execute_step(step) -> StepResult` contract every
+    execution strategy must implement
+  - DefaultPlanExecutionProvider (plan_execution_provider.py): the
+    built-in provider, registered under the name "plan_execution" --
+    deterministic, recognized-action dispatch only (the same actions
+    EP-029's DefaultPlanningProvider can emit). Reports a step
+    "completed" once it has been successfully dispatched to a
+    recognized action -- not that any real external effect was
+    produced
+  - PlanExecutionManager (plan_execution_manager.py): orchestration
+    layer -- register/select execution providers, enable/disable the
+    subsystem, and resolve the default `stop_on_failure` policy from
+    'plan_execution.*' configuration. New provider types (e.g. a
+    future Tool-Engine-backed provider) can be added at runtime via
+    `register_provider()` without modifying this class
+  - PlanExecutionEngine (plan_execution_engine.py): the
+    provider-independent Plan -> PlanExecutionResult pipeline --
+    walks a Plan's steps in order, skips any step EP-029 already
+    reported unavailable, dispatches every available step to the
+    active provider, and halts the remaining plan on the first
+    failure when 'stop_on_failure' is enabled. Optionally accepts an
+    EP-029 `PlanningEngine` and, when supplied, exposes
+    `execute_request()` to plan and execute a request in one call
+    through its public `plan()` method only
+  - src/core/plan_execution/__init__.py: package-level public exports
+- PlanExecutionService (src/services/plan_execution_service.py):
+  config-driven ('plan_execution.enabled',
+  'plan_execution.default_provider', 'plan_execution.stop_on_failure')
+  business logic, a thin CLI-facing wrapper around
+  PlanExecutionManager/PlanExecutionEngine
+- PlanExecutionModule (src/modules/plan_execution_module.py):
+  "execution" CLI namespace -- help / status / providers / use / run /
+  stop-on-failure
+- config/config.yaml: new 'plan_execution' section ('enabled',
+  'default_provider', 'stop_on_failure')
+- EP-030 test suite (tests/EP030/test_plan_execution_engine.py)
+
+### Changed
+
+- src/bootstrap.py: registers PlanExecutionManager/PlanExecutionEngine/
+  PlanExecutionService/PlanExecutionModule after the Planning Engine,
+  wrapped in a try/except for PlanExecutionError so invalid
+  'plan_execution.*' configuration disables the Plan Execution Engine
+  subsystem for that run (logged) instead of crashing startup. The
+  PlanningEngine built for EP-029 (when available) is captured locally
+  and passed to PlanExecutionEngine, read-only, through its public
+  `plan()` method only. Plan Execution Engine has no hard dependency
+  on Planning Engine: `execute_plan()` works standalone given an
+  already-built Plan even when Planning Engine is unavailable this
+  run; that only narrows what `execution run` can do, it never
+  disables the Plan Execution Engine subsystem itself. No change to
+  startup order or wiring for any other subsystem
+- src/modules/test_module.py: registers the EP-030 test suite so
+  'test EP030' and 'test all' pick it up
+
+### Improved
+
+- An EP-029 Plan's steps can now actually be dispatched, in order,
+  respecting availability and a configurable failure policy, and the
+  outcome inspected per step or as a whole -- without any new
+  reasoning, retrieval, or real subsystem-invocation component being
+  introduced.
+
+---
+
 ## v0.1.0-ep029
 
 Released: 2026-08-04

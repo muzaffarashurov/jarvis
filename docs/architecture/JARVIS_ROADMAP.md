@@ -104,12 +104,14 @@ Completed sub-packages:
 - EP-027 Context Compression
 - EP-028 Agent Framework
 - EP-029 Planning Engine
+- EP-030 Execution Engine
+- EP-031 Tool Engine
 
 ---
 
 ## Current
 
-EP-030 Execution Engine
+EP-032 Multi-Agent Collaboration
 
 ---
 
@@ -187,9 +189,9 @@ EP-013 AI Infrastructure
 
 ✓ EP-029 Planning Engine
 
-EP-030 Execution Engine
+✓ EP-030 Execution Engine
 
-EP-031 Tool Engine
+✓ EP-031 Tool Engine
 
 EP-032 Multi-Agent Collaboration
 

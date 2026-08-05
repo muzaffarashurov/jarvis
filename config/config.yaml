@@ -336,3 +336,17 @@ plan_execution:
   enabled: true
   default_provider: "plan_execution"
   stop_on_failure: true
+
+tool:
+  # EP-031 Tool Engine. Turns an already-identified (subsystem,
+  # action) reference into a real invocation of an already-implemented
+  # Engineering Package's public API -- no AI reasoning, no planning,
+  # no plan walking (see src/core/tool/__init__.py). "default_provider"
+  # must match the name of the ToolProvider activated at startup. The
+  # only provider registered today is "tool_engine"
+  # (DefaultToolProvider). Registered as an additional plan-execution
+  # provider ("tool_engine") too, but NOT selected by default --
+  # 'plan_execution.default_provider' above stays "plan_execution"
+  # unless an operator explicitly runs 'execution use tool_engine'.
+  enabled: true
+  default_provider: "tool_engine"

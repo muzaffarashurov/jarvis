@@ -22,7 +22,7 @@ import tests.EP027.test_context_compression
 import tests.EP028.test_agent_framework
 import tests.EP029.test_planning_engine
 import tests.EP030.test_plan_execution_engine
-
+import tests.EP031.test_tool_engine
 
 class TestModule(CommandModule):
 

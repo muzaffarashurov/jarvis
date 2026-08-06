@@ -6,6 +6,84 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.0-ep032
+
+Released: 2026-08-06
+
+### Added
+
+- Multi-Agent Collaboration (src/core/collaboration/), a new
+  independent package -- implements the Multi-Agent Coordinator
+  explicitly deferred by EP-028 through EP-030's own docstrings:
+  deterministic broadcast of a single request across every agent
+  currently registered with EP-028's Agent Framework, with each
+  agent's own `AgentExecutionResult` collected into a uniform
+  outcome. No AI reasoning, no negotiation, and no inter-agent
+  messaging anywhere in the package:
+  - AgentOutcomeStatus / AgentOutcome / CollaborationResult
+    (collaboration_result.py): plain data model for the outcome of
+    dispatching to a single agent and of a whole collaborate() call
+  - CollaborationProvider interface (collaboration_provider.py):
+    unified `collaborate(request, metadata, agents) -> CollaborationResult`
+    contract every multi-agent distribution strategy must implement
+  - DefaultCollaborationProvider (collaboration_provider.py): the
+    built-in provider, registered under the name "collaboration" --
+    sorts agents by name, dispatches to every currently READY agent
+    through its own public `execute()`, reports every non-READY agent
+    UNAVAILABLE without calling it, and isolates a single agent's
+    raised `AgentFrameworkError` so it never breaks the other agents'
+    outcomes
+  - CollaborationManager (collaboration_manager.py): orchestration
+    layer -- register/select collaboration providers, enable/disable
+    the subsystem, and resolve 'collaboration.*' configuration. Owns
+    no reference to `AgentManager` or its catalog
+  - CollaborationEngine (collaboration_engine.py): the
+    provider-independent pipeline -- reads the live agent catalog from
+    EP-028's `AgentManager` through its public `list_providers()`
+    method only, and dispatches to the active CollaborationProvider
+  - src/core/collaboration/__init__.py: package-level public exports
+  - EP-032 test suite (tests/EP032/test_collaboration_engine.py)
+- CollaborationService (src/services/collaboration_service.py):
+  config-driven ('collaboration.enabled',
+  'collaboration.default_provider') business logic, a thin CLI-facing
+  wrapper around CollaborationManager/CollaborationEngine
+- CollaborationModule (src/modules/collaboration_module.py):
+  "collaborate" CLI namespace -- help / status / providers / agents /
+  use / run
+- config/config.yaml: new 'collaboration' section ('enabled',
+  'default_provider')
+
+### Changed
+
+- src/bootstrap.py: registers CollaborationManager/CollaborationEngine/
+  CollaborationService/CollaborationModule after the Tool Engine,
+  wrapped in a try/except for CollaborationError so invalid
+  'collaboration.*' configuration disables the Multi-Agent
+  Collaboration subsystem for that run (logged) instead of crashing
+  startup. The live AgentManager built for EP-028 is captured locally
+  (`agent_manager_for_collaboration`) and forwarded to
+  CollaborationEngine through its existing public `list_providers()`
+  method only -- no file under src/core/agent/ is modified, no
+  existing wiring step is reordered or removed. Multi-Agent
+  Collaboration has a hard dependency on a live `AgentManager`
+  existing this run (a genuine `AgentFrameworkError` above skips this
+  subsystem entirely), but not on the Agent Framework being *enabled*
+  -- a disabled Agent Framework still constructs a valid `AgentManager`
+  with its catalog intact, so Multi-Agent Collaboration still wires up
+  and honestly reports every agent UNAVAILABLE
+- src/modules/test_module.py: registers the EP-032 test suite so
+  'test EP032' and 'test all' pick it up
+
+### Improved
+
+- A request can now be broadcast to every currently registered agent
+  in one call and every individual agent's outcome inspected through
+  the "collaborate" CLI namespace -- without any new AI reasoning,
+  negotiation, or inter-agent messaging component being introduced,
+  and without changing any prior release's default behavior
+
+---
+
 ## v0.1.0-ep031
 
 Released: 2026-08-05

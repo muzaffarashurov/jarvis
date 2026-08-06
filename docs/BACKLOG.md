@@ -10,42 +10,50 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-031 — Tool Engine
+### EP-033 — Workflow Engine
 
 Planned objectives:
 
-- Tracked in docs/architecture/JARVIS_ROADMAP.md, Phase 4 (Agent
-  Framework), alongside EP-032 Multi-Agent Collaboration. Not yet
-  scoped in detail. Will be the first component to turn an EP-030
-  dispatched `StepResult` into a real external effect -- actually
-  invoking the subsystem action a `PlanStep` names, rather than only
-  recognizing and acknowledging it.
+- Tracked in docs/architecture/JARVIS_ROADMAP.md, Phase 5 (Workflow
+  Automation), as the first of that phase (alongside EP-034 Scheduler,
+  EP-035 Automation Engine, EP-036 Background Workers, and EP-037
+  Event Bus). Not yet scoped in detail.
 
 Status:
 
 Planned
 
-Note: EP-030 — Plan Execution Engine is now complete (see
+Note: EP-032 — Multi-Agent Collaboration is now complete (see
 CHANGELOG.md / docs/RELEASE_NOTES.md). It is a new, independent
-package (`src/core/plan_execution/`) that dispatches an EP-029 Plan's
-steps, in order, structurally mirroring EP-026/EP-027/EP-028/EP-029's
-provider/manager pattern (PlanExecutionProvider /
-DefaultPlanExecutionProvider / PlanExecutionManager). It performs no
-AI reasoning, no AI provider call, no prompt construction, and no real
-subsystem invocation: the built-in provider recognizes the fixed set
-of actions EP-029's `DefaultPlanningProvider` is known to produce and
-reports success (dispatched, not yet actually carried out) or a
-genuine failure for anything else. It skips any step already reported
-unavailable, and (by default) halts the remaining plan after a step
-fails. It reaches EP-029's Planning Engine only through its public
-`plan()` method, to optionally plan a request before executing it --
-never any subsystem's internals, and this integration is itself
-optional (execution works standalone given an already-built Plan). It
-is deliberately named and namespaced (`plan_execution`, not
-`execution`) to avoid any collision with the pre-existing, unrelated
-`src/core/execution/` package (EP-003's OS-level target launcher). A
-Tool Engine (Phase 4 of JARVIS_ROADMAP.md) remains future work,
-tracked as EP-031 above.
+package (`src/core/collaboration/`) that implements the Multi-Agent
+Coordinator explicitly deferred by EP-028 through EP-030's own
+docstrings: deterministic broadcast of a single request across every
+agent currently registered with EP-028's Agent Framework
+(`AgentManager.list_providers()`), with each agent's own
+`AgentExecutionResult` collected into a uniform outcome. It performs
+no AI reasoning, no negotiation, and no inter-agent messaging, and
+structurally mirrors EP-026/EP-027/EP-028/EP-029/EP-030/EP-031's own
+provider/manager pattern (CollaborationProvider /
+DefaultCollaborationProvider / CollaborationManager /
+CollaborationEngine). It reaches EP-028's Agent Framework only through
+`AgentManager`'s public `list_providers()` method and each
+`AgentProvider`'s own public `agent_name()`/`status()`/`execute()`
+methods -- never any subsystem's internals. It is distinct from
+EP-028's own subsystem registry (`AgentProvider.register_subsystem()`),
+which coordinates *subsystems* a single agent is aware of; EP-032
+coordinates *agents* themselves.
+
+SCOPE NOTE carried over from EP-032: this Engineering Package
+coordinates whole requests across agents (broadcast), not individual
+EP-029 `PlanStep`s across agents. Distributing a single `Plan`'s steps
+across multiple agents would require widening `PlanStep`'s schema with
+an agent assignment -- an EP-029/EP-030 architecture change explicitly
+out of scope for EP-032, per this project's Unknown API Policy. Only
+one real agent ("jarvis", EP-028's `DefaultAgentProvider`) is
+registered in this project today; multi-agent scenarios are exercised
+in EP-032's own test suite through independently registered test
+agents, not through any new built-in agent. A Workflow Engine (Phase 5
+of JARVIS_ROADMAP.md) remains future work, tracked as EP-033 above.
 
 ---
 

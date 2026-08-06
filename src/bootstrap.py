@@ -18,6 +18,9 @@ from src.core.ai.provider_registry import ProviderRegistry as AIProviderRegistry
 from src.core.agent.agent_engine import AgentEngine
 from src.core.agent.agent_manager import AgentManager
 from src.core.agent.agent_provider import AgentFrameworkError
+from src.core.collaboration.collaboration_engine import CollaborationEngine
+from src.core.collaboration.collaboration_manager import CollaborationManager
+from src.core.collaboration.collaboration_provider import CollaborationError
 from src.core.command_router import CommandRouter
 from src.core.config import Config, ConfigError
 from src.core.context_compression.compression_engine import CompressionEngine
@@ -69,6 +72,7 @@ from src.core.telegram.telegram_client import TelegramClient
 from src.core.telegram.telegram_router import TelegramRouter
 from src.modules.ai_module import AIModule
 from src.modules.agent_module import AgentModule
+from src.modules.collaboration_module import CollaborationModule
 from src.modules.context_compression_module import ContextCompressionModule
 from src.modules.planning_module import PlanningModule
 from src.modules.plan_execution_module import PlanExecutionModule
@@ -89,6 +93,7 @@ from src.modules.semantic_module import SemanticModule
 from src.modules.telegram_module import TelegramModule
 from src.services.agent_service import AgentService
 from src.services.ai_service import AIService
+from src.services.collaboration_service import CollaborationService
 from src.services.context_compression_service import CompressionService
 from src.services.embedding_service import EmbeddingService
 from src.services.fast_response_service import FastResponseService
@@ -190,6 +195,7 @@ class Bootstrap:
         self._planning_service: PlanningService | None = None
         self._plan_execution_service: PlanExecutionService | None = None
         self._tool_service: ToolService | None = None
+        self._collaboration_service: CollaborationService | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -656,7 +662,15 @@ class Bootstrap:
         # through its public `list_subsystems()` method only -- see
         # the EP-029 wiring immediately below. It stays None whenever
         # the Agent Framework itself is unavailable this run.
+        # `agent_manager_for_collaboration` is captured here (rather
+        # than reading `self._agent_service` back) so EP-032's
+        # Multi-Agent Collaboration can optionally reuse the same
+        # AgentManager instance through its public `list_providers()`
+        # method only -- see the EP-032 wiring further below. It stays
+        # None whenever the Agent Framework itself is unavailable this
+        # run.
         agent_engine_for_planning: AgentEngine | None = None
+        agent_manager_for_collaboration: AgentManager | None = None
         try:
             agent_manager = AgentManager(config=config)
             agent_engine = AgentEngine(manager=agent_manager)
@@ -664,6 +678,7 @@ class Bootstrap:
             self._agent_service = agent_service
             router.register(AgentModule(agent_service))
             agent_engine_for_planning = agent_engine
+            agent_manager_for_collaboration = agent_manager
 
             available_subsystems: list[tuple[str, object | None]] = [
                 ("embedding", self._embedding_service),
@@ -910,6 +925,60 @@ class Bootstrap:
                 "Fix config/config.yaml and restart to re-enable it."
             )
             self._tool_service = None
+
+        # EP-032: Multi-Agent Collaboration. Implements the Multi-Agent
+        # Coordinator explicitly deferred by EP-028 through EP-030's
+        # own docstrings -- deterministic, broadcast distribution of a
+        # single request across every agent currently registered with
+        # EP-028's Agent Framework, with each agent's own outcome
+        # collected and reported. No AI reasoning, no negotiation, no
+        # inter-agent messaging, and no AI provider call is performed
+        # here or anywhere in this package (see
+        # src/core/collaboration/__init__.py).
+        #
+        # CollaborationManager owns provider registration,
+        # active-provider selection, and configuration loading
+        # ('collaboration.*'); CollaborationEngine reads the live agent
+        # catalog from the same `AgentManager` instance built for
+        # EP-028 above, through its public `list_providers()` method
+        # only, and dispatches to the active CollaborationProvider.
+        #
+        # Multi-Agent Collaboration has a hard dependency on a live
+        # `AgentManager` instance existing this run: without one there
+        # is no agent catalog whatsoever to coordinate. Note this is
+        # distinct from the Agent Framework being merely *disabled*
+        # ('agent.enabled: false') -- a disabled Agent Framework still
+        # constructs a valid `AgentManager` with its catalog intact
+        # (e.g. "jarvis" still registered, just not selected/READY),
+        # so Multi-Agent Collaboration still wires up in that case and
+        # will honestly report every agent UNAVAILABLE. Only a genuine
+        # `AgentFrameworkError` above (invalid 'agent.*' configuration)
+        # leaves `agent_manager_for_collaboration` None and skips this
+        # subsystem entirely (not merely degraded).
+        if agent_manager_for_collaboration is not None:
+            try:
+                collaboration_manager = CollaborationManager(config=config)
+                collaboration_engine = CollaborationEngine(
+                    manager=collaboration_manager, agent_manager=agent_manager_for_collaboration
+                )
+                collaboration_service = CollaborationService(
+                    manager=collaboration_manager, engine=collaboration_engine
+                )
+                self._collaboration_service = collaboration_service
+                router.register(CollaborationModule(collaboration_service))
+            except CollaborationError as exc:
+                logger.error(
+                    f"Multi-Agent Collaboration disabled: invalid 'collaboration.*' "
+                    f"configuration ({exc}). Fix config/config.yaml and restart to "
+                    "re-enable it."
+                )
+                self._collaboration_service = None
+        else:
+            logger.warning(
+                "Multi-Agent Collaboration disabled: the Agent Framework (EP-028) "
+                "is unavailable this run."
+            )
+            self._collaboration_service = None
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
@@ -1394,3 +1463,16 @@ class Bootstrap:
             wiring).
         """
         return self._tool_service
+
+    @property
+    def collaboration_service(self) -> CollaborationService | None:
+        """Return the CollaborationService built for EP-032, if available.
+
+        Returns:
+            The CollaborationService instance, or None if
+            `run()`/`initialize()` has not completed (or the
+            Multi-Agent Collaboration subsystem was disabled this run,
+            or the Agent Framework it depends on was unavailable this
+            run -- see `_build_command_router`'s EP-032 wiring).
+        """
+        return self._collaboration_service

@@ -407,4 +407,46 @@ No breaking changes.
 
 ---
 
+# EP-032 — Multi-Agent Collaboration
+
+Status: Released
+
+Highlights:
+
+- Added Multi-Agent Collaboration: distributes a single request across
+  every agent currently registered with the Agent Framework (EP-028)
+  and reports each agent's own outcome
+- Fully deterministic: the same request is broadcast, unchanged, to
+  every currently READY agent -- no AI reasoning, no negotiation, and
+  no inter-agent messaging of any kind
+- An agent that is not currently READY is reported UNAVAILABLE without
+  ever being called; an agent whose own execution fails or raises is
+  isolated so it never affects any other agent's outcome
+- Delegates the actual distribution strategy to a pluggable
+  collaboration provider, mirroring the provider/manager pattern
+  already used by Semantic Search (EP-026), Context Compression
+  (EP-027), the Agent Framework (EP-028), the Planning Engine
+  (EP-029), the Plan Execution Engine (EP-030), and the Tool Engine
+  (EP-031); ships with one built-in provider ("collaboration")
+- CLI integration: collaborate status / providers / agents / use / run
+  / help
+- This release coordinates whole requests across agents (broadcast),
+  not individual plan steps across agents -- distributing a single
+  Plan's steps across multiple agents remains a future extension
+- Invalid configuration disables Multi-Agent Collaboration for that
+  run (logged) instead of crashing the rest of Jarvis on startup.
+  Multi-Agent Collaboration has a hard dependency on the Agent
+  Framework being available this run: without a registered agent
+  catalog there is nothing to coordinate
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed.
+
+No breaking changes.
+
+---
+
 End of document.

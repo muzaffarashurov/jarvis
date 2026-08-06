@@ -350,3 +350,20 @@ tool:
   # unless an operator explicitly runs 'execution use tool_engine'.
   enabled: true
   default_provider: "tool_engine"
+
+collaboration:
+  # EP-032 Multi-Agent Collaboration. Implements the Multi-Agent
+  # Coordinator explicitly deferred by EP-028 through EP-030 -- reads
+  # the live agent catalog from EP-028's Agent Framework and
+  # deterministically broadcasts a request to every currently
+  # registered agent, collecting each agent's own outcome. No AI
+  # reasoning, no negotiation, no inter-agent messaging (see
+  # src/core/collaboration/__init__.py). "default_provider" must match
+  # the name of the CollaborationProvider activated at startup. The
+  # only provider registered today is "collaboration"
+  # (DefaultCollaborationProvider). Has a hard dependency on the Agent
+  # Framework being available this run -- if 'agent.enabled' is false
+  # (or 'agent.*' configuration is invalid), Multi-Agent Collaboration
+  # is skipped entirely for this run.
+  enabled: true
+  default_provider: "collaboration"

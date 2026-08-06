@@ -106,12 +106,13 @@ Completed sub-packages:
 - EP-029 Planning Engine
 - EP-030 Execution Engine
 - EP-031 Tool Engine
+- EP-032 Multi-Agent Collaboration
 
 ---
 
 ## Current
 
-EP-032 Multi-Agent Collaboration
+EP-033 Workflow Engine
 
 ---
 
@@ -193,7 +194,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-031 Tool Engine
 
-EP-032 Multi-Agent Collaboration
+✓ EP-032 Multi-Agent Collaboration
 
 ---
 

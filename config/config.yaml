@@ -367,3 +367,26 @@ collaboration:
   # is skipped entirely for this run.
   enabled: true
   default_provider: "collaboration"
+
+workflow_engine:
+  # EP-033 Workflow Engine. Runs a named, ordered sequence of
+  # plain-text requests as a single, repeatable unit -- each step is
+  # planned and executed through EP-030's already-existing Plan
+  # Execution Engine, in order, halting on failure per
+  # "stop_on_failure". No AI reasoning, no new planning logic, no
+  # direct real-subsystem/tool invocation (see
+  # src/core/workflow_engine/__init__.py). "default_provider" must
+  # match the name of the WorkflowRunProvider activated at startup.
+  # The only provider registered today is "workflow_engine"
+  # (DefaultWorkflowRunProvider). Deliberately distinct from the
+  # pre-existing, unrelated "workflows" section above (EP-007's
+  # dormant WorkflowService/WorkflowModule) -- see this package's own
+  # naming-collision note. Has a hard dependency on a live Plan
+  # Execution Engine instance existing this run -- only a genuine
+  # 'plan_execution.*' configuration error (not merely
+  # 'plan_execution.enabled: false', which still constructs a valid,
+  # if disabled, Plan Execution Engine) skips Workflow Engine entirely
+  # for this run.
+  enabled: true
+  default_provider: "workflow_engine"
+  stop_on_failure: true

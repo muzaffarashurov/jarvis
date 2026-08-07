@@ -10,50 +10,61 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-033 — Workflow Engine
+### EP-034 — Scheduler
 
 Planned objectives:
 
 - Tracked in docs/architecture/JARVIS_ROADMAP.md, Phase 5 (Workflow
-  Automation), as the first of that phase (alongside EP-034 Scheduler,
-  EP-035 Automation Engine, EP-036 Background Workers, and EP-037
-  Event Bus). Not yet scoped in detail.
+  Automation), as the second of that phase (after EP-033 Workflow
+  Engine; alongside EP-035 Automation Engine, EP-036 Background
+  Workers, and EP-037 Event Bus). Not yet scoped in detail. A
+  'scheduler:' configuration section already exists
+  ('enabled'/'auto_start'/'tick_interval' in config/config.yaml) but
+  is not backed by any EP-034 component yet -- likely the natural
+  starting point once this Engineering Package is scoped.
 
 Status:
 
 Planned
 
-Note: EP-032 — Multi-Agent Collaboration is now complete (see
-CHANGELOG.md / docs/RELEASE_NOTES.md). It is a new, independent
-package (`src/core/collaboration/`) that implements the Multi-Agent
-Coordinator explicitly deferred by EP-028 through EP-030's own
-docstrings: deterministic broadcast of a single request across every
-agent currently registered with EP-028's Agent Framework
-(`AgentManager.list_providers()`), with each agent's own
-`AgentExecutionResult` collected into a uniform outcome. It performs
-no AI reasoning, no negotiation, and no inter-agent messaging, and
-structurally mirrors EP-026/EP-027/EP-028/EP-029/EP-030/EP-031's own
-provider/manager pattern (CollaborationProvider /
-DefaultCollaborationProvider / CollaborationManager /
-CollaborationEngine). It reaches EP-028's Agent Framework only through
-`AgentManager`'s public `list_providers()` method and each
-`AgentProvider`'s own public `agent_name()`/`status()`/`execute()`
-methods -- never any subsystem's internals. It is distinct from
-EP-028's own subsystem registry (`AgentProvider.register_subsystem()`),
-which coordinates *subsystems* a single agent is aware of; EP-032
-coordinates *agents* themselves.
+Note: EP-033 — Workflow Engine is now complete (see CHANGELOG.md /
+docs/RELEASE_NOTES.md). It is a new, independent package
+(`src/core/workflow_engine/`) that runs a named, ordered sequence of
+plain-text requests (a `WorkflowDefinition`) as a single, repeatable
+unit: each `WorkflowRequestStep` is planned and executed through
+EP-030's already-existing `PlanExecutionEngine.execute_request()`
+(which itself already optionally calls EP-029's
+`PlanningEngine.plan()`), in order, halting the remaining workflow on
+failure per 'workflow_engine.stop_on_failure'. It performs no AI
+reasoning, no new planning logic, and no direct real-subsystem/tool
+invocation of its own, and structurally mirrors
+EP-026/EP-027/EP-028/EP-029/EP-030/EP-031/EP-032's own provider/manager
+pattern (WorkflowRunProvider / DefaultWorkflowRunProvider /
+WorkflowEngineManager / WorkflowEngine). It reaches EP-030's Plan
+Execution Engine only through its public `execute_request()` method --
+never any subsystem's internals, and never imports EP-029's
+`PlanningEngine` directly.
 
-SCOPE NOTE carried over from EP-032: this Engineering Package
-coordinates whole requests across agents (broadcast), not individual
-EP-029 `PlanStep`s across agents. Distributing a single `Plan`'s steps
-across multiple agents would require widening `PlanStep`'s schema with
-an agent assignment -- an EP-029/EP-030 architecture change explicitly
-out of scope for EP-032, per this project's Unknown API Policy. Only
-one real agent ("jarvis", EP-028's `DefaultAgentProvider`) is
-registered in this project today; multi-agent scenarios are exercised
-in EP-032's own test suite through independently registered test
-agents, not through any new built-in agent. A Workflow Engine (Phase 5
-of JARVIS_ROADMAP.md) remains future work, tracked as EP-033 above.
+NAMING NOTE: this project already had a completed, dormant
+`Workflow`/`WorkflowService`/`WorkflowModule` component from EP-007
+(`src/core/workflows/`, never wired into Bootstrap, left untouched by
+EP-033). EP-033 is deliberately namespaced apart from it at every
+layer -- package (`workflow_engine`, not `workflows`), domain types
+(`WorkflowDefinition`/`WorkflowRequestStep`, not
+`Workflow`/`WorkflowStep`), registry (`WorkflowDefinitionRegistry`,
+not `WorkflowRegistry`), CLI namespace ("flow", not "workflow"), and
+config key ('workflow_engine.*', not 'workflows.*') -- to avoid any
+collision, present or future. See
+src/core/workflow_engine/__init__.py for the full note.
+
+SCOPE NOTE carried over from EP-033: only one built-in workflow-run
+provider exists today ("workflow_engine"), and the workflow definition
+catalog (`WorkflowDefinitionRegistry`) starts empty at Bootstrap --
+this Engineering Package ships the pipeline and its public
+`register_definition()` API, not any specific built-in business
+workflow, nor a CLI command to author one (only to list/inspect/run
+already-registered ones). A Scheduler (Phase 5 of
+JARVIS_ROADMAP.md) remains future work, tracked as EP-034 above.
 
 ---
 

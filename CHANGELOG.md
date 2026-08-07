@@ -6,6 +6,119 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.1-ep033
+
+Released: 2026-08-07
+
+### Added
+
+- Workflow Engine (src/core/workflow_engine/), a new independent
+  package -- runs a named, ordered sequence of plain-text requests (a
+  `WorkflowDefinition`) as a single, repeatable unit: each
+  `WorkflowRequestStep` is planned and executed through EP-030's
+  already-existing `PlanExecutionEngine.execute_request()` (which
+  itself already optionally calls EP-029's `PlanningEngine.plan()`),
+  in order, halting the remaining workflow on failure per
+  'workflow_engine.stop_on_failure'. No AI reasoning, no new planning
+  logic, and no direct real-subsystem/tool invocation anywhere in the
+  package -- it only sequences calls to already-completed EPs' public
+  APIs:
+  - WorkflowRequestStep / WorkflowDefinition
+    (workflow_definition.py): plain, immutable domain model for a
+    workflow's steps
+  - WorkflowStepOutcomeStatus / WorkflowStepOutcome / WorkflowRunResult
+    (workflow_run_result.py): plain data model for the outcome of a
+    single step and of a whole run, each step outcome wrapping the
+    underlying EP-030 `PlanExecutionResult`
+  - WorkflowRunProvider interface (workflow_run_provider.py): unified
+    `run_step(step, executor) -> WorkflowStepOutcome` contract every
+    workflow-step dispatch strategy must implement -- the `executor`
+    callable is supplied by the engine (bound to
+    `PlanExecutionEngine.execute_request()`), so the provider itself
+    never imports `PlanExecutionEngine`/`PlanningEngine`
+  - DefaultWorkflowRunProvider (workflow_run_provider.py): the
+    built-in provider, registered under the name "workflow_engine" --
+    calls the supplied executor and translates the resulting
+    `PlanExecutionResult` into COMPLETED/FAILED, isolating any raised
+    exception into a FAILED outcome rather than letting it propagate
+  - WorkflowDefinitionRegistry (workflow_definition_registry.py):
+    in-memory catalog of registered workflow definitions
+    (register/unregister/get/list)
+  - WorkflowEngineManager (workflow_engine_manager.py): orchestration
+    layer -- register/select workflow-run providers, own the
+    definition catalog, enable/disable the subsystem, and resolve
+    'workflow_engine.*' configuration including the stop-on-failure
+    policy
+  - WorkflowEngine (workflow_engine.py): the provider-independent
+    pipeline -- walks a definition's steps in order, dispatching each
+    through the active WorkflowRunProvider, and halts the remaining
+    workflow (reporting SKIPPED) after a failure if
+    'workflow_engine.stop_on_failure' is enabled, mirroring EP-030's
+    own halting policy one level up
+  - src/core/workflow_engine/__init__.py: package-level public
+    exports, and the naming-collision decision documented below
+  - EP-033 test suite (tests/EP033/test_workflow_engine.py)
+- WorkflowEngineService (src/services/workflow_engine_service.py):
+  config-driven ('workflow_engine.enabled',
+  'workflow_engine.default_provider', 'workflow_engine.stop_on_failure'),
+  a thin CLI-facing wrapper around WorkflowEngineManager/WorkflowEngine
+- WorkflowEngineModule (src/modules/workflow_engine_module.py):
+  "flow" CLI namespace -- help / status / list / info / use / run
+- config/config.yaml: new 'workflow_engine' section ('enabled',
+  'default_provider', 'stop_on_failure')
+
+### Naming decision
+
+- EP-007 ("Core Improvements") already shipped a completed, dormant
+  `Workflow`/`WorkflowStep`/`WorkflowRegistry`
+  (src/core/workflows/), `WorkflowService`
+  (src/services/workflow_service.py), and `WorkflowModule`
+  (src/modules/workflow_module.py, CLI namespace "workflow", config
+  key 'workflows.*'). `src/bootstrap.py` has never instantiated
+  `WorkflowService` or registered `WorkflowModule` -- that package
+  remains completed, honestly documented (its own docstring records a
+  known architecture gap), and untouched by this release. EP-033 is
+  deliberately namespaced apart from it at every layer -- package
+  (`workflow_engine`, not `workflows`), domain types
+  (`WorkflowDefinition`/`WorkflowRequestStep`, not
+  `Workflow`/`WorkflowStep`), registry (`WorkflowDefinitionRegistry`,
+  not `WorkflowRegistry`), CLI namespace ("flow", not "workflow"), and
+  config key ('workflow_engine.*', not 'workflows.*') -- to avoid any
+  collision, present or future. See
+  src/core/workflow_engine/__init__.py for the full note.
+
+### Changed
+
+- src/bootstrap.py: registers WorkflowEngineManager/WorkflowEngine/
+  WorkflowEngineService/WorkflowEngineModule after Multi-Agent
+  Collaboration, wrapped in a try/except for WorkflowEngineError so
+  invalid 'workflow_engine.*' configuration disables the Workflow
+  Engine subsystem for that run (logged) instead of crashing startup.
+  The live PlanExecutionEngine built for EP-030 is captured locally
+  (`plan_execution_engine_for_workflow`) and forwarded to
+  WorkflowEngine through its existing public `execute_request()`
+  method only -- no file under src/core/plan_execution/ or
+  src/core/planning/ is modified, no existing wiring step is reordered
+  or removed. Workflow Engine has a hard dependency on a live
+  PlanExecutionEngine existing this run (a genuine
+  `PlanExecutionError` above skips this subsystem entirely), but not
+  on the Plan Execution Engine being *enabled* -- mirroring the same
+  distinction already established for Multi-Agent Collaboration's
+  dependency on the Agent Framework
+- src/modules/test_module.py: registers the EP-033 test suite so
+  'test EP033' and 'test all' pick it up
+
+### Improved
+
+- A named, ordered sequence of requests can now be run as one
+  repeatable unit through the "flow" CLI namespace, reusing the
+  existing Planning + Plan Execution pipeline end to end -- without
+  any new AI reasoning, planning logic, or direct subsystem/tool
+  invocation being introduced, and without changing any prior
+  release's default behavior
+
+---
+
 ## v0.1.0-ep032
 
 Released: 2026-08-06

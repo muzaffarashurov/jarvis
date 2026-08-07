@@ -107,12 +107,13 @@ Completed sub-packages:
 - EP-030 Execution Engine
 - EP-031 Tool Engine
 - EP-032 Multi-Agent Collaboration
+- EP-033 Workflow Engine
 
 ---
 
 ## Current
 
-EP-033 Workflow Engine
+EP-034 Scheduler
 
 ---
 
@@ -200,7 +201,7 @@ EP-013 AI Infrastructure
 
 ## Phase 5 — Workflow Automation
 
-EP-033 Workflow Engine
+✓ EP-033 Workflow Engine
 
 EP-034 Scheduler
 

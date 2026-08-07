@@ -37,6 +37,9 @@ from src.core.tool.tool_engine import ToolEngine
 from src.core.tool.tool_execution_provider import ToolExecutionProvider
 from src.core.tool.tool_manager import ToolManager
 from src.core.tool.tool_provider import ToolError
+from src.core.workflow_engine.workflow_engine import WorkflowEngine
+from src.core.workflow_engine.workflow_engine_manager import WorkflowEngineManager
+from src.core.workflow_engine.workflow_run_provider import WorkflowEngineError
 from src.core.embedding.engine import EmbeddingEngine
 from src.core.embedding.manager import EmbeddingManager
 from src.core.embedding.provider import EmbeddingConfigurationError, EmbeddingError
@@ -77,6 +80,7 @@ from src.modules.context_compression_module import ContextCompressionModule
 from src.modules.planning_module import PlanningModule
 from src.modules.plan_execution_module import PlanExecutionModule
 from src.modules.tool_module import ToolModule
+from src.modules.workflow_engine_module import WorkflowEngineModule
 from src.modules.conversation_module import ConversationModule
 from src.modules.embedding_module import EmbeddingModule
 from src.modules.fast_response_module import FastResponseModule
@@ -105,6 +109,7 @@ from src.services.memory_service import MemoryService
 from src.services.planning_service import PlanningService
 from src.services.plan_execution_service import PlanExecutionService
 from src.services.tool_service import ToolService
+from src.services.workflow_engine_service import WorkflowEngineService
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -196,6 +201,7 @@ class Bootstrap:
         self._plan_execution_service: PlanExecutionService | None = None
         self._tool_service: ToolService | None = None
         self._collaboration_service: CollaborationService | None = None
+        self._workflow_engine_service: WorkflowEngineService | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -789,7 +795,15 @@ class Bootstrap:
         # `register_provider()` method only -- see the EP-031 wiring
         # immediately below. It stays None whenever Plan Execution
         # Engine itself is unavailable this run.
+        #
+        # `plan_execution_engine_for_workflow` is captured the same
+        # way so EP-033's Workflow Engine can reuse the same live
+        # `PlanExecutionEngine` instance, through its existing public
+        # `execute_request()` method only -- see the EP-033 wiring
+        # further below. It stays None whenever Plan Execution Engine
+        # itself is unavailable this run.
         plan_execution_manager_for_tool_bridge: PlanExecutionManager | None = None
+        plan_execution_engine_for_workflow: PlanExecutionEngine | None = None
         try:
             plan_execution_manager = PlanExecutionManager(config=config)
             plan_execution_engine = PlanExecutionEngine(
@@ -801,6 +815,7 @@ class Bootstrap:
             self._plan_execution_service = plan_execution_service
             router.register(PlanExecutionModule(plan_execution_service))
             plan_execution_manager_for_tool_bridge = plan_execution_manager
+            plan_execution_engine_for_workflow = plan_execution_engine
         except PlanExecutionError as exc:
             logger.error(
                 f"Plan Execution Engine disabled: invalid 'plan_execution.*' configuration "
@@ -979,6 +994,62 @@ class Bootstrap:
                 "is unavailable this run."
             )
             self._collaboration_service = None
+
+        # EP-033: Workflow Engine. Runs a named, ordered sequence of
+        # plain-text requests (a `WorkflowDefinition`) as a single,
+        # repeatable unit: each step is planned and executed through
+        # EP-030's already-existing `PlanExecutionEngine.execute_request()`
+        # (which itself already optionally calls EP-029's
+        # `PlanningEngine.plan()`), in order, halting on failure per
+        # 'workflow_engine.stop_on_failure'. No AI reasoning, no new
+        # planning logic, and no direct real-subsystem/tool invocation
+        # is performed here or anywhere in this package (see
+        # src/core/workflow_engine/__init__.py, which also documents
+        # why this package is deliberately namespaced apart from
+        # EP-007's dormant, unrelated `src/core/workflows/` --
+        # `WorkflowService`/`WorkflowModule` remain untouched and
+        # unregistered, exactly as before this EP).
+        #
+        # WorkflowEngineManager owns provider registration,
+        # active-provider selection, the stop-on-failure policy, and
+        # the workflow definition catalog
+        # ('workflow_engine.*'); WorkflowEngine reuses the same live
+        # `PlanExecutionEngine` instance built for EP-030 above,
+        # through its public `execute_request()` method only, and
+        # dispatches each step through the active `WorkflowRunProvider`.
+        #
+        # Workflow Engine has a hard dependency on a live
+        # `PlanExecutionEngine` instance existing this run: without one
+        # there is nothing to actually plan and execute a step's
+        # request. Only a genuine `PlanExecutionError` above (invalid
+        # 'plan_execution.*' configuration) leaves
+        # `plan_execution_engine_for_workflow` None and skips this
+        # subsystem entirely (not merely degraded).
+        if plan_execution_engine_for_workflow is not None:
+            try:
+                workflow_engine_manager = WorkflowEngineManager(config=config)
+                workflow_engine = WorkflowEngine(
+                    manager=workflow_engine_manager,
+                    plan_execution_engine=plan_execution_engine_for_workflow,
+                )
+                workflow_engine_service = WorkflowEngineService(
+                    manager=workflow_engine_manager, engine=workflow_engine
+                )
+                self._workflow_engine_service = workflow_engine_service
+                router.register(WorkflowEngineModule(workflow_engine_service))
+            except WorkflowEngineError as exc:
+                logger.error(
+                    f"Workflow Engine disabled: invalid 'workflow_engine.*' "
+                    f"configuration ({exc}). Fix config/config.yaml and restart to "
+                    "re-enable it."
+                )
+                self._workflow_engine_service = None
+        else:
+            logger.warning(
+                "Workflow Engine disabled: the Plan Execution Engine (EP-030) is "
+                "unavailable this run."
+            )
+            self._workflow_engine_service = None
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
@@ -1476,3 +1547,16 @@ class Bootstrap:
             run -- see `_build_command_router`'s EP-032 wiring).
         """
         return self._collaboration_service
+
+    @property
+    def workflow_engine_service(self) -> WorkflowEngineService | None:
+        """Return the WorkflowEngineService built for EP-033, if available.
+
+        Returns:
+            The WorkflowEngineService instance, or None if
+            `run()`/`initialize()` has not completed (or the Workflow
+            Engine subsystem was disabled this run, or the Plan
+            Execution Engine it depends on was unavailable this run --
+            see `_build_command_router`'s EP-033 wiring).
+        """
+        return self._workflow_engine_service

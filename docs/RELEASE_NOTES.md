@@ -449,4 +449,52 @@ No breaking changes.
 
 ---
 
+# EP-033 — Workflow Engine
+
+Status: Released
+
+Highlights:
+
+- Added Workflow Engine: runs a named, ordered sequence of plain-text
+  requests (a workflow definition) as a single, repeatable unit
+- Each step is planned and executed through the already-existing
+  Planning Engine (EP-029) + Plan Execution Engine (EP-030) pipeline,
+  via `PlanExecutionEngine.execute_request()` -- no new AI reasoning,
+  no new planning logic, and no direct real-subsystem/tool invocation
+  is introduced anywhere in this package
+- Steps run in order; a failing step halts the remaining workflow
+  (each remaining step reported SKIPPED) unless
+  'workflow_engine.stop_on_failure' is turned off, in which case every
+  step still runs and failures are simply reported
+- Delegates the actual per-step dispatch to a pluggable workflow-run
+  provider, mirroring the provider/manager pattern already used by
+  the Planning Engine (EP-029), the Plan Execution Engine (EP-030),
+  the Tool Engine (EP-031), and Multi-Agent Collaboration (EP-032);
+  ships with one built-in provider ("workflow_engine")
+- CLI integration: flow status / list / info / use / run / help
+- Naming note: this project already had a completed, dormant
+  Workflow/WorkflowService/WorkflowModule component from EP-007 (never
+  wired into Bootstrap, and left untouched by this release). EP-033 is
+  an entirely new, independent package, deliberately namespaced apart
+  from it at every layer -- including a distinct CLI namespace
+  ("flow", not "workflow") -- to avoid any collision, present or
+  future. See src/core/workflow_engine/__init__.py for the full note
+- Invalid configuration disables Workflow Engine for that run (logged)
+  instead of crashing the rest of Jarvis on startup. Workflow Engine
+  has a hard dependency on the Plan Execution Engine being available
+  this run: without one there is nothing to actually plan and execute
+  a step's request
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed. EP-007's dormant Workflow/WorkflowService/WorkflowModule
+package remains exactly as it was -- still unregistered, still
+untouched.
+
+No breaking changes.
+
+---
+
 End of document.

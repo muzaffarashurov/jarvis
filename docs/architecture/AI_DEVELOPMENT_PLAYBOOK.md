@@ -257,84 +257,129 @@ Maintain consistent output formatting.
 
 # Architecture Audit
 
-After implementation, perform a strict architecture audit.
+Architecture Audit is always performed as STEP 4.
 
-Do not modify files during the first audit.
+STEP 4 is READ-ONLY.
 
-Review only the current EP.
+The AI must NOT modify source code.
 
-Check:
+The AI must NOT modify tests.
 
-* duplicate responsibilities
-* duplicated business logic
-* duplicated CLI logic
-* SOLID violations
-* dependency direction
-* circular dependencies
-* Bootstrap wiring
-* service wiring
-* unnecessary abstractions
-* hidden coupling
-* backward compatibility
-* public API consistency
-* roadmap compliance
-* naming consistency
-* misplaced code
-* accidental feature creep
+The AI must NOT refactor anything.
 
-If issues exist:
+The audit reviews ONLY the current EP.
 
-* list every issue
-* explain why
-* fix them
-* repeat the audit
+The audit must check:
 
-Continue until:
+- architecture layering
+- SOLID
+- dependency direction
+- Bootstrap wiring
+- service wiring
+- module wiring
+- duplicate responsibilities
+- duplicate DTOs
+- duplicate CLI logic
+- hidden coupling
+- circular dependencies
+- backward compatibility
+- public API consistency
+- roadmap compliance
+- unnecessary abstractions
+- dead code
+- maintainability risks
 
-No architecture issues remain.
+The audit must classify findings as:
+
+- Critical
+- High
+- Medium
+- Low
+
+Only Critical issues may interrupt roadmap implementation.
+
+The audit must NEVER automatically fix issues.
+
+STEP 4 is strictly READ-ONLY.
+
+If issues are discovered:
+
+- Critical:
+  Stop and ask the user whether to perform a dedicated Bug Fix step.
+
+- High:
+  Report them and wait for user approval.
+
+- Medium:
+  Record them in ARCHITECTURE_DEBT.md.
+
+- Low:
+  Record them in ARCHITECTURE_DEBT.md.
+
+Never modify code during STEP 4.
+
+Never regenerate the implementation during STEP 4.
+
+Never repeat the audit automatically.
+
+Always wait for user approval before performing corrective work.
+
+Medium and Low findings must NOT trigger immediate refactoring.
 
 ---
 
 # Engineering Review
 
-After the architecture audit passes:
+After the STEP 4 audit is completed:
 
-Perform a second engineering review.
+Perform a second READ-ONLY engineering review.
 
-Check:
+Do NOT modify any source code.
 
-* overengineering
-* dead code
-* unused methods
-* unused interfaces
-* unused enum values
-* hidden assumptions
-* maintainability
-* complexity
-* TODOs
-* technical debt
+Do NOT modify tests.
 
-Fix everything.
+Do NOT refactor.
 
-Repeat until:
+Review:
 
-No engineering concerns remain.
+- overengineering
+- dead code
+- unused methods
+- unused interfaces
+- unused enum values
+- hidden assumptions
+- maintainability
+- complexity
+- TODOs
+- technical debt
+
+Return findings only.
+
+If issues are found:
+
+- classify them by severity
+- Critical issues must be fixed before the EP can be committed
+- High issues should be discussed with the user
+- Medium and Low issues must be recorded in
+  docs/architecture/ARCHITECTURE_DEBT.md
+
+Do NOT perform fixes automatically.
+
+Never repeat the audit automatically.
+
+Always wait for user approval before any corrective work.
 
 ---
 
 # Final Validation
 
-Run only:
+Default validation:
 
 test EPxxx
 
-Verify:
+Run test all only if explicitly requested by the user.
 
-Passed > 0
-
-Failed = 0
-
-Do not run test all unless explicitly requested.
+Regression testing is optional unless the current EP modifies shared infrastructure.
 
 ---
 
@@ -391,6 +436,155 @@ The AI must never:
 
 ---
 
+# Prompt Strategy
+
+Large Engineering Phases must be divided into independent prompts.
+
+Never combine architecture, implementation, documentation and audit into one request.
+
+Always use the following sequence:
+
+STEP 1
+Architecture Design
+
+↓
+
+User Approval
+
+↓
+
+STEP 2
+Implementation
+
+↓
+
+User Approval
+
+↓
+
+STEP 3
+Documentation
+
+↓
+
+User Approval
+
+↓
+
+STEP 4
+Architecture Audit
+
+Each step must be completely independent.
+
+Never continue automatically.
+
+Always wait for the user's approval.
+
+---
+
+# Token Optimization
+
+Always minimize token usage.
+
+Never repeat information already approved.
+
+Do not regenerate architecture after STEP 1.
+
+Do not regenerate implementation during STEP 3.
+
+Do not regenerate documentation during STEP 4.
+
+When possible:
+
+- reference previous approved decisions
+- modify only affected files
+- avoid repeating unchanged explanations
+- avoid repeating full file lists
+- avoid repeating project description
+
+Generate only what belongs to the current step.
+
+---
+
+# Architecture Debt Workflow
+
+After every STEP 4 audit:
+
+If Medium or Low issues are discovered:
+
+- update docs/architecture/ARCHITECTURE_DEBT.md
+- assign the next available ID
+- never renumber existing IDs
+- never delete existing entries
+
+If no Medium or Low issues exist:
+
+leave ARCHITECTURE_DEBT.md unchanged.
+
+Critical issues are never added to Architecture Debt.
+
+They must be fixed before the EP can be committed.
+
+After completing STEP 4:
+
+create:
+
+docs/architecture/audits/EPxxx_AUDIT.md
+
+containing the complete audit report.
+
+Package both files into a ZIP archive:
+
+- docs/architecture/ARCHITECTURE_DEBT.md
+- docs/architecture/audits/EPxxx_AUDIT.md
+
+Return the archive for download.
+
+---
+
+# Prompt Scope
+
+Each prompt must have exactly one purpose.
+
+Allowed prompt types:
+
+- Architecture Design
+- Implementation
+- Documentation
+- Architecture Audit
+- Bug Fix
+- Refactoring
+- Regression Investigation
+
+Never combine multiple prompt types in one request.
+
+If the requested work belongs to another prompt type:
+
+Stop.
+
+Ask for confirmation.
+
+Wait for the next prompt.
+
+---
+
+At the end of STEP 2:
+
+- run only test EPxxx
+- do not run test all unless explicitly requested
+- package the updated project into a ZIP archive
+- return the archive for download
+
+---
+
+At the end of STEP 3:
+
+package the updated documentation into a ZIP archive.
+
+Return the archive for download.
+
+---
+
 # Goal
 
 The long-term goal of this playbook is to ensure that every EP is implemented with the same engineering standards, regardless of which AI model performs the work.
@@ -409,3 +603,25 @@ Before finishing ANY EP, verify:
 □ EP tests pass.
 □ Regression tests pass.
 □ Commit message prepared.
+
+---
+
+# Completion Checklist
+
+Before declaring any EP complete, verify:
+
+□ All new source files are included.
+□ All required imports are added.
+□ New EP registered inside test_module.py.
+□ Bootstrap wiring completed.
+□ Config updated if required.
+□ EP tests pass.
+□ Documentation updated (STEP 3 only).
+□ Architecture audit completed (STEP 4 only).
+□ Architecture Debt updated if required.
+□ Audit report saved.
+□ ZIP archive generated.
+□ Commit message prepared.
+□ Git tag prepared.
+
+---

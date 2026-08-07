@@ -497,4 +497,56 @@ No breaking changes.
 
 ---
 
+# EP-034 — Workflow Scheduler
+
+Status: Released
+
+Highlights:
+
+- Added Workflow Scheduler: gives an EP-033 workflow definition a time
+  trigger -- runs it automatically on a schedule
+  (manual/once/interval/daily/weekly) or on demand
+- Every scheduled run is dispatched through the already-existing
+  Workflow Engine (EP-033) via `WorkflowEngine.run()` -- no new AI
+  reasoning, no new planning logic, and no direct real-subsystem/tool
+  invocation is introduced anywhere in this package
+- Reuses EP-011's `Schedule`/`ScheduleType`/`JobStatus` value types
+  unchanged; its own `WorkflowSchedulerEngine` decides when an entry
+  is due and always delegates the actual run to EP-033
+- Runs on its own background thread (separate from EP-011's own
+  scheduler thread, no shared state), started automatically only when
+  both 'workflow_scheduler.enabled' and 'workflow_scheduler.auto_start'
+  are true -- off by default, since no scheduled workflow is
+  registered out of the box
+- CLI integration: autoflow list / status / run / start / stop / info
+  / help
+- Naming note: this project already had a completed, **actively
+  wired** Job/Scheduler/SchedulerService/SchedulerModule component
+  from EP-011 (still running its own default jobs today, left
+  completely untouched by this release). EP-034 is an entirely new,
+  independent package, deliberately namespaced apart from it at every
+  layer -- including a distinct CLI namespace ("autoflow", not
+  "scheduler") -- to avoid any collision, present or future. See
+  src/core/workflow_scheduler/__init__.py for the full note
+- Invalid configuration disables Workflow Scheduler for that run
+  (logged) instead of crashing the rest of Jarvis on startup. Workflow
+  Scheduler has a hard dependency on the Workflow Engine being
+  available this run: without one there is nothing to actually run a
+  scheduled entry's referenced workflow
+
+New service: `WorkflowSchedulerService` (src/services/workflow_scheduler_service.py).
+New module: `WorkflowSchedulerModule` (src/modules/workflow_scheduler_module.py).
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed. EP-011's active Job/Scheduler/SchedulerService/SchedulerModule
+package remains exactly as it was -- still registered, still running
+its own default jobs, verified unaffected by this release.
+
+No breaking changes.
+
+---
+
 End of document.

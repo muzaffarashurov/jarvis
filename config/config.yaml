@@ -390,3 +390,24 @@ workflow_engine:
   enabled: true
   default_provider: "workflow_engine"
   stop_on_failure: true
+
+workflow_scheduler:
+  # EP-034 Workflow Scheduler. Gives an EP-033 workflow definition a
+  # time trigger -- runs it automatically on a schedule
+  # (interval/daily/weekly/once/manual; cron is an interface only, not
+  # yet implemented), by calling EP-033's already-existing
+  # WorkflowEngine.run() exclusively. No AI reasoning, no planning, no
+  # direct subsystem/tool invocation (see
+  # src/core/workflow_scheduler/__init__.py). Deliberately distinct
+  # from the pre-existing, ACTIVE "scheduler" section below (EP-011's
+  # Task Scheduler, which remains completely untouched) -- see this
+  # package's own naming-collision note. "auto_start" defaults to
+  # false (unlike "scheduler.auto_start"), since no scheduled workflow
+  # is registered out of the box -- nothing to run automatically yet.
+  # Has a hard dependency on a live Workflow Engine instance existing
+  # this run -- only a genuine configuration error (in
+  # 'workflow_engine.*' or, transitively, 'plan_execution.*') skips
+  # Workflow Scheduler entirely for this run.
+  enabled: true
+  auto_start: false
+  tick_interval: 5

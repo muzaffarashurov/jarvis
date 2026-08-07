@@ -6,6 +6,113 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.1-ep034
+
+Released: 2026-08-07
+
+### Added
+
+- Workflow Scheduler (src/core/workflow_scheduler/), a new independent
+  package -- gives an EP-033 workflow definition a time trigger: runs
+  it automatically on a schedule (manual/once/interval/daily/weekly;
+  cron remains an interface only, not yet implemented, matching
+  EP-011's own documented TODO), by calling EP-033's already-existing
+  `WorkflowEngine.run(workflow_id)` exclusively. No AI reasoning, no
+  planning, and no direct real-subsystem/tool invocation anywhere in
+  the package -- it only decides *when* an already-completed EP's
+  public API should be called again:
+  - ScheduledWorkflow (scheduled_workflow.py): plain domain type
+    bundling a `workflow_id` reference to an EP-033
+    `WorkflowDefinition` with scheduling runtime state
+    (last_run/next_run/status). Reuses `Schedule`, `ScheduleType`, and
+    `JobStatus` UNCHANGED from EP-011's Task Scheduler
+    (src/core/scheduler/job.py) -- genuine reuse of pure, stateless
+    value types, not a redefinition
+  - ScheduledWorkflowRegistry (scheduled_workflow_registry.py):
+    thread-safe, in-memory catalog of registered scheduled workflows
+  - WorkflowSchedulerEngine (workflow_scheduler_engine.py):
+    register_entry / remove_entry / start_entry / stop_entry /
+    run_now / list_entries / calculate_next_run / tick -- the only
+    component holding a reference to EP-033's `WorkflowEngine`,
+    reached through its public `run()` method only.
+    `calculate_next_run` deliberately reimplements (rather than calls)
+    EP-011's `Scheduler.calculate_next_run`, since that method is
+    typed to and reads fields from `Job` specifically; duck-typing a
+    `ScheduledWorkflow` into it would create undocumented, fragile
+    coupling with no formal compatibility contract
+  - src/core/workflow_scheduler/__init__.py: package-level public
+    exports, and the naming-collision decision documented below
+  - EP-034 test suite (tests/EP034/test_workflow_scheduler.py)
+- WorkflowSchedulerService (src/services/workflow_scheduler_service.py):
+  config-driven ('workflow_scheduler.enabled',
+  'workflow_scheduler.auto_start', 'workflow_scheduler.tick_interval'),
+  a thin CLI-facing wrapper around WorkflowSchedulerEngine that also
+  owns its own background tick thread (daemon, entirely separate from
+  EP-011's own tick thread -- no shared state) providing automatic
+  execution
+- WorkflowSchedulerModule (src/modules/workflow_scheduler_module.py):
+  "autoflow" CLI namespace -- list / status / run / start / stop /
+  info / help (no "register" command, matching EP-011's SchedulerModule
+  and EP-033's WorkflowEngineModule precedent -- entries are registered
+  only through the public `WorkflowSchedulerService.register()` API)
+- config/config.yaml: new 'workflow_scheduler' section ('enabled',
+  'auto_start', 'tick_interval')
+
+### Naming decision
+
+- EP-011 ("Logging Improvements" era) already shipped a completed,
+  **actively wired** `Job`/`Schedule`/`ScheduleType`/`JobStatus`/
+  `JobRegistry`/`Scheduler` (src/core/scheduler/), `SchedulerService`
+  (src/services/scheduler_service.py, which owns a live background
+  tick thread auto-started at Bootstrap), and `SchedulerModule`
+  (src/modules/scheduler_module.py, CLI namespace "scheduler", config
+  key 'scheduler.*') -- unlike EP-007's dormant Workflow package, this
+  one is live and registers real default jobs today. EP-034 does not
+  touch, fix, or repurpose any of it -- it remains exactly as EP-011
+  left it, verified still running (2 default jobs, tick loop active)
+  after this release. EP-034 is deliberately namespaced apart from it
+  at every layer -- package (`workflow_scheduler`, not `scheduler`),
+  domain type (`ScheduledWorkflow`, not `Job`), registry
+  (`ScheduledWorkflowRegistry`, not `JobRegistry`), engine
+  (`WorkflowSchedulerEngine`, not `Scheduler`), CLI namespace
+  ("autoflow", not "scheduler" -- and deliberately not "schedule"
+  either, to avoid the same near-miss confusion EP-033 avoided by
+  rejecting "workflows" for its own CLI namespace), and config key
+  ('workflow_scheduler.*', not 'scheduler.*') -- to avoid any
+  collision, present or future. See
+  src/core/workflow_scheduler/__init__.py for the full note.
+
+### Changed
+
+- src/bootstrap.py: registers WorkflowSchedulerEngine/
+  WorkflowSchedulerService/WorkflowSchedulerModule after Workflow
+  Engine, wrapped in a try/except for WorkflowSchedulerError so
+  invalid configuration disables the Workflow Scheduler subsystem for
+  that run (logged) instead of crashing startup. The live
+  WorkflowEngine built for EP-033 is captured locally
+  (`workflow_engine_for_scheduler`) and forwarded to
+  WorkflowSchedulerEngine through its existing public `run()` method
+  only -- no file under src/core/workflow_engine/ or
+  src/core/scheduler/ is modified, no existing wiring step is
+  reordered or removed. Workflow Scheduler has a hard dependency on a
+  live WorkflowEngine existing this run (a genuine
+  `WorkflowEngineError` above, or the Plan Execution Engine itself
+  being unavailable, skips this subsystem entirely)
+- src/modules/test_module.py: registers the EP-034 test suite so
+  'test EP034' and 'test all' pick it up
+
+### Improved
+
+- An EP-033 workflow definition can now be scheduled to run
+  automatically (interval/daily/weekly/once) or on demand through the
+  "autoflow" CLI namespace, without any new AI reasoning, planning
+  logic, or direct subsystem/tool invocation being introduced, and
+  without changing any prior release's default behavior -- including
+  EP-011's own, entirely separate Task Scheduler, verified still
+  functioning identically after this release
+
+---
+
 ## v0.1.1-ep033
 
 Released: 2026-08-07

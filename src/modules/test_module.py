@@ -25,6 +25,7 @@ import tests.EP030.test_plan_execution_engine
 import tests.EP031.test_tool_engine
 import tests.EP032.test_collaboration_engine
 import tests.EP033.test_workflow_engine
+import tests.EP034.test_workflow_scheduler
 
 class TestModule(CommandModule):
 

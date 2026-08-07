@@ -40,6 +40,11 @@ from src.core.tool.tool_provider import ToolError
 from src.core.workflow_engine.workflow_engine import WorkflowEngine
 from src.core.workflow_engine.workflow_engine_manager import WorkflowEngineManager
 from src.core.workflow_engine.workflow_run_provider import WorkflowEngineError
+from src.core.workflow_scheduler.scheduled_workflow_registry import ScheduledWorkflowRegistry
+from src.core.workflow_scheduler.workflow_scheduler_engine import (
+    WorkflowSchedulerEngine,
+    WorkflowSchedulerError,
+)
 from src.core.embedding.engine import EmbeddingEngine
 from src.core.embedding.manager import EmbeddingManager
 from src.core.embedding.provider import EmbeddingConfigurationError, EmbeddingError
@@ -81,6 +86,7 @@ from src.modules.planning_module import PlanningModule
 from src.modules.plan_execution_module import PlanExecutionModule
 from src.modules.tool_module import ToolModule
 from src.modules.workflow_engine_module import WorkflowEngineModule
+from src.modules.workflow_scheduler_module import WorkflowSchedulerModule
 from src.modules.conversation_module import ConversationModule
 from src.modules.embedding_module import EmbeddingModule
 from src.modules.fast_response_module import FastResponseModule
@@ -110,6 +116,7 @@ from src.services.planning_service import PlanningService
 from src.services.plan_execution_service import PlanExecutionService
 from src.services.tool_service import ToolService
 from src.services.workflow_engine_service import WorkflowEngineService
+from src.services.workflow_scheduler_service import WorkflowSchedulerService
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -202,6 +209,7 @@ class Bootstrap:
         self._tool_service: ToolService | None = None
         self._collaboration_service: CollaborationService | None = None
         self._workflow_engine_service: WorkflowEngineService | None = None
+        self._workflow_scheduler_service: WorkflowSchedulerService | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -1025,6 +1033,13 @@ class Bootstrap:
         # 'plan_execution.*' configuration) leaves
         # `plan_execution_engine_for_workflow` None and skips this
         # subsystem entirely (not merely degraded).
+        # `workflow_engine_for_scheduler` is captured here (rather than
+        # reading `self._workflow_engine_service` back) so EP-034's
+        # Workflow Scheduler can reuse the same live `WorkflowEngine`
+        # instance, through its existing public `run()` method only --
+        # see the EP-034 wiring further below. It stays None whenever
+        # Workflow Engine itself is unavailable this run.
+        workflow_engine_for_scheduler: WorkflowEngine | None = None
         if plan_execution_engine_for_workflow is not None:
             try:
                 workflow_engine_manager = WorkflowEngineManager(config=config)
@@ -1037,6 +1052,7 @@ class Bootstrap:
                 )
                 self._workflow_engine_service = workflow_engine_service
                 router.register(WorkflowEngineModule(workflow_engine_service))
+                workflow_engine_for_scheduler = workflow_engine
             except WorkflowEngineError as exc:
                 logger.error(
                     f"Workflow Engine disabled: invalid 'workflow_engine.*' "
@@ -1050,6 +1066,59 @@ class Bootstrap:
                 "unavailable this run."
             )
             self._workflow_engine_service = None
+
+        # EP-034: Workflow Scheduler. Gives an EP-033 WorkflowDefinition
+        # a time trigger: runs it automatically on a schedule, by
+        # calling EP-033's already-existing `WorkflowEngine.run()`
+        # exclusively. No AI reasoning, no planning, and no direct
+        # subsystem/tool invocation is performed here or anywhere in
+        # this package (see src/core/workflow_scheduler/__init__.py,
+        # which also documents why this package is deliberately
+        # namespaced apart from EP-011's active, unrelated
+        # `src/core/scheduler/` -- `Scheduler`/`SchedulerModule`/the
+        # "scheduler" CLI namespace/`scheduler.*` config remain
+        # completely untouched and unaffected, exactly as before this
+        # EP).
+        #
+        # WorkflowSchedulerEngine owns its own ScheduledWorkflowRegistry
+        # and reuses the same live `WorkflowEngine` instance built for
+        # EP-033 above, through its public `run()` method only.
+        # WorkflowSchedulerService owns 'workflow_scheduler.*'
+        # configuration and its own, entirely separate background tick
+        # thread (no shared state with EP-011's Scheduler thread).
+        #
+        # Workflow Scheduler has a hard dependency on a live
+        # `WorkflowEngine` instance existing this run: without one
+        # there is nothing to actually run a scheduled entry's
+        # referenced workflow. Only a genuine `WorkflowEngineError`
+        # above (invalid 'workflow_engine.*' configuration) -- or the
+        # Plan Execution Engine itself being unavailable -- leaves
+        # `workflow_engine_for_scheduler` None and skips this subsystem
+        # entirely (not merely degraded).
+        if workflow_engine_for_scheduler is not None:
+            try:
+                scheduled_workflow_registry = ScheduledWorkflowRegistry()
+                workflow_scheduler_engine = WorkflowSchedulerEngine(
+                    registry=scheduled_workflow_registry,
+                    workflow_engine=workflow_engine_for_scheduler,
+                )
+                workflow_scheduler_service = WorkflowSchedulerService(
+                    config=config, engine=workflow_scheduler_engine
+                )
+                self._workflow_scheduler_service = workflow_scheduler_service
+                router.register(WorkflowSchedulerModule(workflow_scheduler_service))
+            except WorkflowSchedulerError as exc:
+                logger.error(
+                    f"Workflow Scheduler disabled: invalid configuration ({exc}). "
+                    "Fix config/config.yaml and restart to re-enable it."
+                )
+                self._workflow_scheduler_service = None
+        else:
+            logger.warning(
+                "Workflow Scheduler disabled: the Workflow Engine (EP-033) is "
+                "unavailable this run."
+            )
+            self._workflow_scheduler_service = None
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
@@ -1560,3 +1629,16 @@ class Bootstrap:
             see `_build_command_router`'s EP-033 wiring).
         """
         return self._workflow_engine_service
+
+    @property
+    def workflow_scheduler_service(self) -> WorkflowSchedulerService | None:
+        """Return the WorkflowSchedulerService built for EP-034, if available.
+
+        Returns:
+            The WorkflowSchedulerService instance, or None if
+            `run()`/`initialize()` has not completed (or the Workflow
+            Scheduler subsystem was disabled this run, or the Workflow
+            Engine it depends on was unavailable this run -- see
+            `_build_command_router`'s EP-034 wiring).
+        """
+        return self._workflow_scheduler_service

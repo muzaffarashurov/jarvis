@@ -10,61 +10,62 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-034 — Scheduler
+### EP-035 — Automation Engine
 
 Planned objectives:
 
 - Tracked in docs/architecture/JARVIS_ROADMAP.md, Phase 5 (Workflow
-  Automation), as the second of that phase (after EP-033 Workflow
-  Engine; alongside EP-035 Automation Engine, EP-036 Background
-  Workers, and EP-037 Event Bus). Not yet scoped in detail. A
-  'scheduler:' configuration section already exists
-  ('enabled'/'auto_start'/'tick_interval' in config/config.yaml) but
-  is not backed by any EP-034 component yet -- likely the natural
-  starting point once this Engineering Package is scoped.
+  Automation), as the third of that phase (after EP-033 Workflow
+  Engine and EP-034 Workflow Scheduler; alongside EP-036 Background
+  Workers and EP-037 Event Bus). Not yet scoped in detail.
 
 Status:
 
 Planned
 
-Note: EP-033 — Workflow Engine is now complete (see CHANGELOG.md /
+Note: EP-034 — Workflow Scheduler is now complete (see CHANGELOG.md /
 docs/RELEASE_NOTES.md). It is a new, independent package
-(`src/core/workflow_engine/`) that runs a named, ordered sequence of
-plain-text requests (a `WorkflowDefinition`) as a single, repeatable
-unit: each `WorkflowRequestStep` is planned and executed through
-EP-030's already-existing `PlanExecutionEngine.execute_request()`
-(which itself already optionally calls EP-029's
-`PlanningEngine.plan()`), in order, halting the remaining workflow on
-failure per 'workflow_engine.stop_on_failure'. It performs no AI
-reasoning, no new planning logic, and no direct real-subsystem/tool
-invocation of its own, and structurally mirrors
-EP-026/EP-027/EP-028/EP-029/EP-030/EP-031/EP-032's own provider/manager
-pattern (WorkflowRunProvider / DefaultWorkflowRunProvider /
-WorkflowEngineManager / WorkflowEngine). It reaches EP-030's Plan
-Execution Engine only through its public `execute_request()` method --
-never any subsystem's internals, and never imports EP-029's
-`PlanningEngine` directly.
+(`src/core/workflow_scheduler/`) that gives an EP-033 workflow
+definition a time trigger: runs it automatically on a schedule
+(manual/once/interval/daily/weekly -- cron remains an interface only,
+matching EP-011's own documented TODO), by calling EP-033's
+already-existing `WorkflowEngine.run(workflow_id)` exclusively. It
+performs no AI reasoning, no planning, and no direct real-subsystem/
+tool invocation of its own. `ScheduledWorkflow`
+(`scheduled_workflow.py`) reuses EP-011's `Schedule`/`ScheduleType`/
+`JobStatus` value types unchanged; `WorkflowSchedulerEngine`
+(`workflow_scheduler_engine.py`) is the only component holding a
+reference to EP-033's `WorkflowEngine`, reached through its public
+`run()` method only, and deliberately reimplements (rather than
+calls) EP-011's `Scheduler.calculate_next_run` date math, since that
+method is typed to and reads fields from `Job` specifically.
 
-NAMING NOTE: this project already had a completed, dormant
-`Workflow`/`WorkflowService`/`WorkflowModule` component from EP-007
-(`src/core/workflows/`, never wired into Bootstrap, left untouched by
-EP-033). EP-033 is deliberately namespaced apart from it at every
-layer -- package (`workflow_engine`, not `workflows`), domain types
-(`WorkflowDefinition`/`WorkflowRequestStep`, not
-`Workflow`/`WorkflowStep`), registry (`WorkflowDefinitionRegistry`,
-not `WorkflowRegistry`), CLI namespace ("flow", not "workflow"), and
-config key ('workflow_engine.*', not 'workflows.*') -- to avoid any
-collision, present or future. See
-src/core/workflow_engine/__init__.py for the full note.
+NAMING NOTE: this project already had a completed, **actively wired**
+`Job`/`Scheduler`/`SchedulerService`/`SchedulerModule` component from
+EP-011 (`src/core/scheduler/`, still running its own default jobs on
+its own background thread today, left completely untouched by
+EP-034). EP-034 is deliberately namespaced apart from it at every
+layer -- package (`workflow_scheduler`, not `scheduler`), domain type
+(`ScheduledWorkflow`, not `Job`), registry
+(`ScheduledWorkflowRegistry`, not `JobRegistry`), engine
+(`WorkflowSchedulerEngine`, not `Scheduler`), CLI namespace
+("autoflow", not "scheduler" or "schedule"), and config key
+('workflow_scheduler.*', not 'scheduler.*') -- to avoid any collision,
+present or future. See src/core/workflow_scheduler/__init__.py for the
+full note.
 
-SCOPE NOTE carried over from EP-033: only one built-in workflow-run
-provider exists today ("workflow_engine"), and the workflow definition
-catalog (`WorkflowDefinitionRegistry`) starts empty at Bootstrap --
-this Engineering Package ships the pipeline and its public
-`register_definition()` API, not any specific built-in business
-workflow, nor a CLI command to author one (only to list/inspect/run
-already-registered ones). A Scheduler (Phase 5 of
-JARVIS_ROADMAP.md) remains future work, tracked as EP-034 above.
+SCOPE NOTE carried over from EP-034: `WorkflowSchedulerEngine` has no
+separate Provider/Manager layer -- there is exactly one way to compute
+a next-run time and exactly one way to dispatch a due entry, so a
+swappable provider abstraction with only one implementation would be
+speculative rather than justified by an actual second strategy
+(matching EP-011's own Scheduler, which likewise has no Provider
+layer). No "register" CLI command exists for `autoflow` either,
+matching EP-011's `SchedulerModule` and EP-033's
+`WorkflowEngineModule` precedent -- entries are registered only
+through the public `WorkflowSchedulerService.register()` API. An
+Automation Engine (Phase 5 of JARVIS_ROADMAP.md) remains future work,
+tracked as EP-035 above.
 
 ---
 

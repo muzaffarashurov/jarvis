@@ -25,18 +25,32 @@ assumptions with no formal contract keeping the two types
 duck-type-compatible over time. This ~80-line switch is small,
 self-contained, and independently tested; it is not a redesign of
 EP-011, which remains completely untouched.
+
+EP-035 ADDITIVE HOOK NOTE: `run_now()` optionally invokes an
+`automation_hook` callback after each dispatch (covering both manual
+`autoflow run` and automatic `tick()`, since `tick()` calls
+`run_now()`), so EP-035's Automation Engine can react to scheduled
+runs (see `src/core/automation_engine/__init__.py`). This class never
+imports `AutomationEngine` or any EP-035 type -- the hook is a bare
+`Callable[[str, WorkflowRunResult], None]`, wired in from outside
+(Bootstrap) via `set_automation_hook()`. Default is None, which
+reproduces this class's exact pre-EP-035 behavior. The hook is always
+invoked inside a try/except that never propagates, so a defect in the
+hook can never break a scheduled run or kill the tick loop.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from threading import Lock
+from typing import Callable
 
 from loguru import logger
 
 from src.core.scheduler.job import JobStatus, Schedule, ScheduleType
 from src.core.workflow_engine.workflow_engine import WorkflowEngine
 from src.core.workflow_engine.workflow_run_provider import WorkflowEngineError
+from src.core.workflow_engine.workflow_run_result import WorkflowRunResult
 from src.core.workflow_scheduler.scheduled_workflow import ScheduledWorkflow
 from src.core.workflow_scheduler.scheduled_workflow_registry import ScheduledWorkflowRegistry
 
@@ -77,6 +91,24 @@ class WorkflowSchedulerEngine:
         self._registry = registry
         self._workflow_engine = workflow_engine
         self._lock = Lock()
+        self._automation_hook: Callable[[str, WorkflowRunResult], None] | None = None
+
+    def set_automation_hook(
+        self, hook: Callable[[str, WorkflowRunResult], None] | None
+    ) -> None:
+        """Wire (or clear) the optional EP-035 automation hook.
+
+        Args:
+            hook: Called as `hook(workflow_id, result)` immediately
+                after `run_now()` produces a `WorkflowRunResult` (for
+                both a manual `run_now()` call and an automatic
+                `tick()`-driven one), or None to remove any previously
+                wired hook (this class's default, and its exact
+                pre-EP-035 behavior). Never called when the run itself
+                raised a `WorkflowEngineError` (no `WorkflowRunResult`
+                exists in that case).
+        """
+        self._automation_hook = hook
 
     # ---------- Public API ----------
 
@@ -168,6 +200,7 @@ class WorkflowSchedulerEngine:
         """
         entry = self._require_entry(entry_id)
 
+        result: WorkflowRunResult | None = None
         try:
             result = self._workflow_engine.run(entry.workflow_id)
             success = result.success
@@ -175,6 +208,12 @@ class WorkflowSchedulerEngine:
         except WorkflowEngineError as exc:
             success = False
             message = str(exc)
+
+        if result is not None and self._automation_hook is not None:
+            try:
+                self._automation_hook(entry.workflow_id, result)
+            except Exception as exc:  # noqa: BLE001 - a hook defect must never break this run or the tick loop
+                logger.error(f"Automation hook failed for scheduled workflow '{entry_id}': {exc}")
 
         with self._lock:
             entry.last_run = datetime.now(timezone.utc)

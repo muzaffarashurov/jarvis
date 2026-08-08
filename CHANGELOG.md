@@ -6,6 +6,125 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.2-ep035
+
+Released: 2026-08-08
+
+### Added
+
+- Automation Engine (src/core/automation_engine/), a new independent
+  package -- chains one EP-033 workflow's completion (whether started
+  on-demand through `WorkflowEngineService.run()`, or automatically
+  through EP-034's `WorkflowSchedulerEngine.run_now()`/`tick()`) into a
+  second workflow's run, based on the first run's outcome
+  (ON_SUCCESS / ON_FAILURE / ON_ANY), by calling EP-033's
+  already-existing `WorkflowEngine.run(workflow_id)` exclusively. No
+  AI reasoning, no scheduling of its own, and no direct
+  real-subsystem/tool invocation anywhere in the package -- it is
+  purely reactive: it never decides that a workflow should run, it is
+  only ever told, after the fact, that one already did:
+  - AutomationRule / AutomationTriggerCondition
+    (automation_rule.py): plain domain types -- a rule bundling a
+    `trigger_workflow_id` reference to an EP-033 `WorkflowDefinition`,
+    an outcome condition, and an `action_workflow_id` reference to a
+    second `WorkflowDefinition`. Deliberately a new, independent type,
+    not a reuse of EP-034's `ScheduledWorkflow` (an automation rule
+    carries no `Schedule` or tick participation; a `ScheduledWorkflow`
+    carries no trigger condition or action workflow)
+  - AutomationRuleRegistry (automation_rule_registry.py):
+    thread-safe, in-memory catalog of registered automation rules
+  - AutomationEngine (automation_engine.py): register_rule /
+    remove_rule / enable_rule / disable_rule / list_rules / get_rule /
+    notify_run -- the only component holding a reference to EP-033's
+    `WorkflowEngine`, reached through its public `run()` method only.
+    `notify_run()` is the reactive entry point: it matches a
+    just-completed run against registered, enabled rules and
+    dispatches each match's action workflow, updating
+    `last_triggered`/`last_action_success` on the rule. It never
+    propagates a failure -- neither an internal matching/dispatch
+    error nor a failed action-workflow run -- back to its caller
+  - src/core/automation_engine/__init__.py: package-level public
+    exports, and the single-hop/no-recursive-chaining note documented
+    below
+  - EP-035 test suite (tests/EP035/test_automation_engine.py)
+- AutomationService (src/services/automation_service.py):
+  config-driven ('automation.enabled'), a thin CLI-facing wrapper
+  around AutomationEngine. Unlike EP-034's WorkflowSchedulerService,
+  it owns no background thread -- Automation Engine is purely
+  reactive, with no tick loop to start or stop
+- AutomationModule (src/modules/automation_module.py): "automate"
+  CLI namespace -- list / status / info / enable / stop / help (no
+  "register" command, matching EP-011's SchedulerModule, EP-033's
+  WorkflowEngineModule, and EP-034's WorkflowSchedulerModule
+  precedent -- rules are registered only through the public
+  `AutomationService.register()` API. No manual "trigger"/"run"
+  command either -- a rule only ever fires reactively, through
+  `AutomationEngine.notify_run()`, when its trigger workflow actually
+  completes)
+- config/config.yaml: new 'automation' section ('enabled')
+
+### Single-hop / no recursive chaining
+
+- EP-035 is deliberately synchronous, single-hop, and non-recursive.
+  `AutomationEngine.notify_run()` dispatches a matched rule's action
+  workflow by calling `WorkflowEngine.run()` directly, bypassing the
+  automation hook entirely -- so an action workflow's own completion
+  never re-enters `notify_run()`. A -> B is supported; A -> B -> C is
+  not. No cycle detection was implemented, because recursive chaining
+  itself was out of scope for this release. Background workers
+  (queued/async dispatch) and a generic publish/subscribe event bus
+  remain future work, tracked as EP-036 and EP-037 respectively --
+  EP-035 introduces neither
+
+### Changed
+
+- src/services/workflow_engine_service.py: `run()` optionally invokes
+  a new `automation_hook` callback (wired via a new
+  `set_automation_hook()` setter) immediately after a run produces a
+  `WorkflowRunResult`, isolated in a try/except that never propagates,
+  so a defect in the hook can never turn a successful `run()` call
+  into a failure. The hook is a bare
+  `Callable[[str, WorkflowRunResult], None]` -- this file does not
+  import AutomationEngine or any EP-035 type. Default is `None`,
+  which reproduces this file's exact pre-EP-035 behavior
+- src/core/workflow_scheduler/workflow_scheduler_engine.py: `run_now()`
+  gains the identical optional `automation_hook` (via the same
+  `set_automation_hook()` pattern), covering both a manual `autoflow
+  run` and an automatic `tick()`-driven run, since `tick()` calls
+  `run_now()`. Same isolation guarantee, same bare-`Callable` typing,
+  same `None` default and unchanged pre-EP-035 behavior
+- src/bootstrap.py: constructs AutomationRuleRegistry /
+  AutomationEngine / AutomationService after the existing EP-034
+  wiring, wrapped in a try/except for AutomationError so invalid
+  configuration disables the Automation Engine subsystem for that run
+  (logged) instead of crashing startup. The live WorkflowEngine built
+  for EP-033 is reused (through its public `run()` method only, via
+  the same `workflow_engine_for_scheduler` reference EP-034 already
+  captured). The reactive hook is wired into both
+  WorkflowEngineService and WorkflowSchedulerEngine only when
+  'automation.enabled' is true, so a disabled Automation Engine can
+  never fire a rule regardless of which path is used to reach
+  `AutomationEngine.notify_run()`. No file under
+  src/core/workflow_engine/ is modified, no existing wiring step is
+  reordered or removed. Automation Engine has a hard dependency on a
+  live WorkflowEngine existing this run (a genuine `WorkflowEngineError`
+  during EP-033 construction, or the Plan Execution Engine itself
+  being unavailable, skips this subsystem entirely)
+- src/modules/test_module.py: registers the EP-035 test suite so
+  'test EP035' and 'test all' pick it up
+
+### Improved
+
+- A completed EP-033 workflow can now automatically trigger a second
+  EP-033 workflow based on its outcome (success, failure, or either),
+  whether that first workflow ran on demand or on an EP-034 schedule,
+  without any new AI reasoning, background thread, queue, or event
+  bus being introduced, and without changing any prior release's
+  default behavior -- verified by EP-033's and EP-034's own test
+  suites, which pass unchanged after this release
+
+---
+
 ## v0.1.1-ep034
 
 Released: 2026-08-07

@@ -17,11 +17,23 @@ It implements no business logic belonging to any other module and
 never imports from src.core.ai, src.core.planning, or
 src.core.plan_execution directly (Workflow Engine must not plan or
 dispatch a step itself).
+
+EP-035 ADDITIVE HOOK NOTE: `run()` optionally invokes an
+`automation_hook` callback after a run completes, so EP-035's
+Automation Engine can react to on-demand runs (see
+`src/core/automation_engine/__init__.py`). This class never imports
+`AutomationEngine` or any EP-035 type -- the hook is a bare
+`Callable[[str, WorkflowRunResult], None]`, wired in from outside
+(Bootstrap) via `set_automation_hook()`. Default is None, which
+reproduces this class's exact pre-EP-035 behavior. The hook is always
+invoked inside a try/except that never propagates, so a defect in the
+hook can never turn a successful `run()` call into a failure.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from loguru import logger
 
@@ -116,6 +128,22 @@ class WorkflowEngineService:
         """
         self._manager = manager
         self._engine = engine
+        self._automation_hook: Callable[[str, WorkflowRunResult], None] | None = None
+
+    def set_automation_hook(
+        self, hook: Callable[[str, WorkflowRunResult], None] | None
+    ) -> None:
+        """Wire (or clear) the optional EP-035 automation hook.
+
+        Args:
+            hook: Called as `hook(definition_id, result)` immediately
+                after `run()` produces a `WorkflowRunResult`, or None
+                to remove any previously wired hook (this class's
+                default, and its exact pre-EP-035 behavior). Never
+                called for an infrastructure-level run failure (i.e.
+                only when a `WorkflowRunResult` actually exists).
+        """
+        self._automation_hook = hook
 
     def status(self) -> WorkflowEngineStatus:
         """Return the Workflow Engine subsystem's overall status."""
@@ -181,5 +209,11 @@ class WorkflowEngineService:
             return WorkflowRunOutcome(
                 success=False, definition_id=definition_id, result=None, error=str(exc)
             )
+
+        if self._automation_hook is not None:
+            try:
+                self._automation_hook(definition_id, result)
+            except Exception as exc:  # noqa: BLE001 - a hook defect must never break this run's result
+                logger.error(f"Automation hook failed for workflow '{definition_id}': {exc}")
 
         return WorkflowRunOutcome(success=True, definition_id=definition_id, result=result, error="")

@@ -411,3 +411,17 @@ workflow_scheduler:
   enabled: true
   auto_start: false
   tick_interval: 5
+
+automation:
+  # EP-035 Automation Engine. Chains one EP-033 workflow's completion
+  # (started on-demand via 'flow run', or automatically via EP-034's
+  # scheduler) into a second workflow run, based on outcome
+  # (ON_SUCCESS / ON_FAILURE / ON_ANY), by calling EP-033's
+  # already-existing WorkflowEngine.run() exclusively. No AI
+  # reasoning, no scheduling of its own, no event bus, no recursive
+  # chaining (see src/core/automation_engine/__init__.py). Purely
+  # reactive: unlike workflow_scheduler, this subsystem owns no
+  # background thread and has no 'auto_start'/'tick_interval' of its
+  # own -- it only ever runs in response to another EP's own
+  # execution path calling AutomationEngine.notify_run().
+  enabled: true

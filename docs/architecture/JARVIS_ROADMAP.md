@@ -109,12 +109,13 @@ Completed sub-packages:
 - EP-032 Multi-Agent Collaboration
 - EP-033 Workflow Engine
 - EP-034 Scheduler
+- EP-035 Automation Engine
 
 ---
 
 ## Current
 
-EP-035 Automation Engine
+EP-036 Background Workers
 
 ---
 
@@ -206,7 +207,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-034 Scheduler
 
-EP-035 Automation Engine
+✓ EP-035 Automation Engine
 
 EP-036 Background Workers
 

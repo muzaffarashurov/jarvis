@@ -549,4 +549,95 @@ No breaking changes.
 
 ---
 
+# EP-035 — Automation Engine — Outcome-Triggered Workflow Chaining
+
+Status: Released
+
+Purpose:
+
+Adds reactive workflow automation on top of the existing EP-033
+Workflow Engine and EP-034 Workflow Scheduler: lets a completed
+workflow automatically trigger a second workflow, based on how the
+first one finished.
+
+Implemented functionality:
+
+- A completed EP-033 workflow can now automatically trigger a second
+  EP-033 workflow, according to the first workflow's outcome
+- Supported trigger conditions:
+  - ON_SUCCESS -- fires only when the trigger workflow succeeded
+  - ON_FAILURE -- fires only when the trigger workflow failed
+  - ON_ANY -- fires regardless of outcome
+- Behavior is synchronous, single-hop, and non-recursive: an
+  automation rule's action workflow is dispatched directly through
+  the Workflow Engine, and that action workflow's own completion does
+  not itself trigger any further automation rule (no A -> B -> C
+  chaining)
+- CLI integration: automate list / status / info / enable / stop /
+  help
+- Works with a workflow run started on demand ("flow run") and with
+  a workflow run started by EP-034's scheduler ("autoflow run", or an
+  automatic scheduled tick) -- both paths can trigger a matching
+  automation rule
+- Automation rules are registered through the public
+  `AutomationService` API
+
+Highlights:
+
+- Added Automation Engine: an EP-033 workflow's completion can chain
+  directly into a second EP-033 workflow's run
+- Every triggered action run is dispatched through the
+  already-existing Workflow Engine (EP-033) via `WorkflowEngine.run()`
+  -- no new AI reasoning and no direct real-subsystem/tool invocation
+  is introduced anywhere in this package
+- Purely reactive: Automation Engine owns no background thread, no
+  queue, and no polling loop -- it only ever runs in response to
+  another EP's own execution path reporting that a run has completed
+- Naming note: `AutomationRule`/`AutomationRuleRegistry`/
+  `AutomationEngine` are a new, independent set of types -- not a
+  reuse of EP-034's `ScheduledWorkflow`/`ScheduledWorkflowRegistry`/
+  `WorkflowSchedulerEngine`. An automation rule carries no schedule or
+  tick participation; a scheduled workflow carries no trigger
+  condition or action workflow. See
+  src/core/automation_engine/__init__.py for the full note
+- Invalid configuration disables Automation Engine for that run
+  (logged) instead of crashing the rest of Jarvis on startup.
+  Automation Engine has a hard dependency on the Workflow Engine being
+  available this run: without one there is nothing to actually
+  dispatch a matched rule's action workflow
+- When 'automation.enabled' is false, no automation rule can ever
+  fire, regardless of whether the triggering workflow ran on demand
+  or on a schedule
+
+Not implemented in this release (future roadmap):
+
+- Background/async dispatch of triggered automations (tracked as
+  EP-036 Background Workers)
+- A generic publish/subscribe event bus (tracked as EP-037 Event Bus)
+- Multi-hop or recursive automation chains
+- Condition types beyond workflow outcome (e.g. data-based or
+  step-level conditions)
+
+New service: `AutomationService` (src/services/automation_service.py).
+New module: `AutomationModule` (src/modules/automation_module.py).
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed. `WorkflowEngineService.run()` and
+`WorkflowSchedulerEngine.run_now()` behave identically to their
+pre-EP-035 selves when no automation hook is wired. EP-033's and
+EP-034's own test suites pass unchanged after this release.
+
+No breaking changes.
+
+Validation:
+
+EP035: 141 passed / 0 failed / 0 skipped
+EP033: 182 passed / 0 failed / 0 skipped (regression, unchanged)
+EP034: 113 passed / 0 failed / 0 skipped (regression, unchanged)
+
+---
+
 End of document.

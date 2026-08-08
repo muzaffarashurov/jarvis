@@ -184,3 +184,30 @@ Architecture Cleanup v0.2
 Description:
 
 Example completed architecture improvement.
+
+AD-004 — Unreachable AutomationError handler in Bootstrap
+
+Status: Open
+Priority: Medium
+Introduced: EP-035
+Related: AD-002
+
+File:
+src/bootstrap.py
+
+Description:
+The EP-035 Bootstrap wiring block catches AutomationError, but the
+constructors executed inside the try block currently do not raise
+AutomationError. Therefore the exception handler is currently unreachable.
+
+Impact:
+Low runtime risk. Moderate maintainability and documentation risk.
+The graceful-degradation path is currently not backed by real
+construction-time validation.
+
+Recommended action:
+Review together with AD-002 during a future Architecture Cleanup
+milestone. Either introduce valid construction-time configuration
+validation or simplify the unreachable exception handlers.
+
+Do not fix during normal EP development.

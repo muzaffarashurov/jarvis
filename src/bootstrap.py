@@ -45,6 +45,8 @@ from src.core.workflow_scheduler.workflow_scheduler_engine import (
     WorkflowSchedulerEngine,
     WorkflowSchedulerError,
 )
+from src.core.automation_engine.automation_engine import AutomationEngine, AutomationError
+from src.core.automation_engine.automation_rule_registry import AutomationRuleRegistry
 from src.core.embedding.engine import EmbeddingEngine
 from src.core.embedding.manager import EmbeddingManager
 from src.core.embedding.provider import EmbeddingConfigurationError, EmbeddingError
@@ -87,6 +89,7 @@ from src.modules.plan_execution_module import PlanExecutionModule
 from src.modules.tool_module import ToolModule
 from src.modules.workflow_engine_module import WorkflowEngineModule
 from src.modules.workflow_scheduler_module import WorkflowSchedulerModule
+from src.modules.automation_module import AutomationModule
 from src.modules.conversation_module import ConversationModule
 from src.modules.embedding_module import EmbeddingModule
 from src.modules.fast_response_module import FastResponseModule
@@ -117,6 +120,7 @@ from src.services.plan_execution_service import PlanExecutionService
 from src.services.tool_service import ToolService
 from src.services.workflow_engine_service import WorkflowEngineService
 from src.services.workflow_scheduler_service import WorkflowSchedulerService
+from src.services.automation_service import AutomationService
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -210,6 +214,7 @@ class Bootstrap:
         self._collaboration_service: CollaborationService | None = None
         self._workflow_engine_service: WorkflowEngineService | None = None
         self._workflow_scheduler_service: WorkflowSchedulerService | None = None
+        self._automation_service: AutomationService | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -1095,6 +1100,14 @@ class Bootstrap:
         # Plan Execution Engine itself being unavailable -- leaves
         # `workflow_engine_for_scheduler` None and skips this subsystem
         # entirely (not merely degraded).
+        # `workflow_scheduler_engine_for_automation` is captured here
+        # (mirroring `workflow_engine_for_scheduler` above) so EP-035's
+        # Automation Engine can wire its reactive hook into the same
+        # live `WorkflowSchedulerEngine` instance, through its
+        # existing public `set_automation_hook()` method only -- see
+        # the EP-035 wiring further below. It stays None whenever
+        # Workflow Scheduler itself is unavailable this run.
+        workflow_scheduler_engine_for_automation: WorkflowSchedulerEngine | None = None
         if workflow_engine_for_scheduler is not None:
             try:
                 scheduled_workflow_registry = ScheduledWorkflowRegistry()
@@ -1107,6 +1120,7 @@ class Bootstrap:
                 )
                 self._workflow_scheduler_service = workflow_scheduler_service
                 router.register(WorkflowSchedulerModule(workflow_scheduler_service))
+                workflow_scheduler_engine_for_automation = workflow_scheduler_engine
             except WorkflowSchedulerError as exc:
                 logger.error(
                     f"Workflow Scheduler disabled: invalid configuration ({exc}). "
@@ -1119,6 +1133,74 @@ class Bootstrap:
                 "unavailable this run."
             )
             self._workflow_scheduler_service = None
+
+        # EP-035: Automation Engine. Chains one EP-033 workflow's
+        # completion (started on-demand via WorkflowEngineService.run(),
+        # or automatically via EP-034's WorkflowSchedulerEngine.run_now()
+        # / tick()) into a second workflow run, based on outcome
+        # (ON_SUCCESS / ON_FAILURE / ON_ANY), by calling EP-033's
+        # already-existing `WorkflowEngine.run()` exclusively. No AI
+        # reasoning, no scheduling of its own, no event bus, no
+        # recursive chaining (see
+        # src/core/automation_engine/__init__.py). Purely reactive: it
+        # owns no background thread and never decides that a workflow
+        # should run -- it is only ever told, after the fact, that one
+        # already did.
+        #
+        # AutomationEngine reuses the same live `WorkflowEngine`
+        # instance built for EP-033 above, through its public `run()`
+        # method only, to dispatch a matched rule's action workflow.
+        # The reactive hook itself is wired as a bare
+        # `Callable[[str, WorkflowRunResult], None]` into
+        # `WorkflowEngineService`/`WorkflowSchedulerEngine` -- neither
+        # of those classes imports `AutomationEngine` or any EP-035
+        # type, so the dependency direction stays one-way (EP-035 ->
+        # EP-033/034 public API, never the reverse). The hook is
+        # skipped entirely (never wired) when 'automation.enabled' is
+        # False, so a disabled Automation Engine can never fire a rule
+        # regardless of which path is used to reach
+        # AutomationEngine.notify_run().
+        #
+        # Automation Engine has a hard dependency on a live
+        # `WorkflowEngine` instance existing this run: without one
+        # there is nothing to actually dispatch a matched rule's
+        # action workflow. Only a genuine `WorkflowEngineError` above
+        # (invalid 'workflow_engine.*' configuration) -- or the Plan
+        # Execution Engine itself being unavailable -- leaves
+        # `workflow_engine_for_scheduler` None and skips this
+        # subsystem entirely (not merely degraded).
+        if workflow_engine_for_scheduler is not None:
+            try:
+                automation_rule_registry = AutomationRuleRegistry()
+                automation_engine = AutomationEngine(
+                    registry=automation_rule_registry,
+                    workflow_engine=workflow_engine_for_scheduler,
+                )
+                automation_service = AutomationService(config=config, engine=automation_engine)
+                self._automation_service = automation_service
+                router.register(AutomationModule(automation_service))
+
+                if bool(config.get("automation.enabled", True)):
+                    if self._workflow_engine_service is not None:
+                        self._workflow_engine_service.set_automation_hook(
+                            automation_engine.notify_run
+                        )
+                    if workflow_scheduler_engine_for_automation is not None:
+                        workflow_scheduler_engine_for_automation.set_automation_hook(
+                            automation_engine.notify_run
+                        )
+            except AutomationError as exc:
+                logger.error(
+                    f"Automation Engine disabled: invalid configuration ({exc}). "
+                    "Fix config/config.yaml and restart to re-enable it."
+                )
+                self._automation_service = None
+        else:
+            logger.warning(
+                "Automation Engine disabled: the Workflow Engine (EP-033) is "
+                "unavailable this run."
+            )
+            self._automation_service = None
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
@@ -1642,3 +1724,16 @@ class Bootstrap:
             `_build_command_router`'s EP-034 wiring).
         """
         return self._workflow_scheduler_service
+
+    @property
+    def automation_service(self) -> AutomationService | None:
+        """Return the AutomationService built for EP-035, if available.
+
+        Returns:
+            The AutomationService instance, or None if
+            `run()`/`initialize()` has not completed (or the
+            Automation Engine subsystem was disabled this run, or the
+            Workflow Engine it depends on was unavailable this run --
+            see `_build_command_router`'s EP-035 wiring).
+        """
+        return self._automation_service

@@ -110,12 +110,13 @@ Completed sub-packages:
 - EP-033 Workflow Engine
 - EP-034 Scheduler
 - EP-035 Automation Engine
+- EP-036 Background Workers
 
 ---
 
 ## Current
 
-EP-036 Background Workers
+EP-037 Event Bus
 
 ---
 
@@ -209,7 +210,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-035 Automation Engine
 
-EP-036 Background Workers
+✓ EP-036 Background Workers
 
 EP-037 Event Bus
 

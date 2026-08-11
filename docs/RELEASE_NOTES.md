@@ -640,4 +640,95 @@ EP034: 113 passed / 0 failed / 0 skipped (regression, unchanged)
 
 ---
 
+# EP-036 — Background Workers
+
+Status: Released
+
+Purpose:
+
+Runs already-registered EP-033 workflows in the background, off the
+calling thread, so a workflow can be dispatched without blocking the
+caller on its full execution.
+
+Implemented functionality:
+
+- A configurable pool of daemon worker threads (`worker_count`,
+  default 4) dequeues submitted `workflow_id`s and runs each one
+  through the already-existing Workflow Engine (EP-033) via
+  `WorkflowEngine.run(workflow_id)` -- the only cross-EP dependency,
+  reached exclusively through that one public method, mirroring
+  EP-034's `WorkflowSchedulerEngine` and EP-035's `AutomationEngine`
+- Each submission returns a task id; task status moves through
+  PENDING -> RUNNING -> COMPLETED or FAILED, tracked thread-safely and
+  readable at any time via `worker info <task_id>` / `worker list`
+- A task already running is never interrupted mid-`WorkflowEngine.run()`
+  -- shutdown lets in-flight work finish, and only tasks still sitting
+  in the queue are left PENDING and not started
+- Shutdown never reports a worker as stopped merely because
+  `Thread.join()` returned -- every join is followed by an explicit
+  `Thread.is_alive()` check, and only a confirmed-dead worker counts as
+  stopped
+- A single failing/misbehaving workflow can never kill its worker
+  thread: both a `WorkflowEngineError` and any other exception raised
+  by `WorkflowEngine.run()` are caught and recorded as that task's
+  FAILED status with an error message, and the worker loop continues
+- CLI integration: worker status / submit / list / info / stop / help
+- Invalid configuration disables Background Worker Service for that
+  run (logged) instead of crashing the rest of Jarvis on startup.
+  Background Worker Service has a hard dependency on the Workflow
+  Engine being available this run: without one there is nothing to
+  actually run a submitted task's workflow
+
+Highlights:
+
+- Added Background Worker Pool: dispatches already-registered EP-033
+  workflows off the calling thread through a fixed pool of daemon
+  worker threads
+- Layering: `BackgroundWorkerPool` (core) -> `BackgroundWorkerService`
+  (config-driven lifecycle owner) -> `BackgroundWorkerModule` (CLI
+  translation layer only) -- each layer reaches the one below it
+  through its public API only, matching the dependency discipline
+  already used by EP-033/EP-034/EP-035
+- `background_workers.enabled` defaults to true, matching every other
+  soft-toggle subsystem (`workflow_engine.enabled`,
+  `workflow_scheduler.enabled`, `automation.enabled`); an enabled pool
+  with nothing submitted to it is just `worker_count` idle daemon
+  threads, with no other observable effect
+- No "register" CLI command, matching EP-034's WorkflowSchedulerModule
+  and EP-035's AutomationModule precedent -- a task is created directly
+  by `worker submit`, not pre-registered then triggered
+
+Known limitations (tracked as Architecture Debt -- see
+docs/architecture/ARCHITECTURE_DEBT.md and
+docs/architecture/audits/EP036_AUDIT.md):
+
+- AD-005 (Medium) -- no process-exit shutdown wiring calls
+  `BackgroundWorkerService.shutdown()` automatically; an in-flight task
+  is terminated mid-run and a still-queued task is silently dropped on
+  interpreter exit unless `worker stop` was run manually first. Worker
+  threads are daemon threads, so this cannot hang process exit
+- AD-006 (Low) -- `BackgroundWorkerPool` retains every submitted task
+  for the pool's lifetime with no eviction/TTL, so task history memory
+  usage grows unbounded in a long-running process
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed. EP-033's, EP-034's, and EP-035's own test suites pass
+unchanged after this release.
+
+No breaking changes.
+
+Validation:
+
+EP036       : 101 passed / 0 failed / 0 skipped
+EP036-STEP2 : 48 passed / 0 failed / 0 skipped
+EP036-STEP3 : 53 passed / 0 failed / 0 skipped
+EP033: 182 passed / 0 failed / 0 skipped (regression, unchanged)
+EP034: 113 passed / 0 failed / 0 skipped (regression, unchanged)
+EP035: 141 passed / 0 failed / 0 skipped (regression, unchanged)
+
+---
+
 End of document.

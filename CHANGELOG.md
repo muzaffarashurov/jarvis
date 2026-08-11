@@ -6,6 +6,112 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.3-ep036
+
+Released: 2026-08-11
+
+### Added
+
+- Background Worker Pool (src/core/background_workers/), a new
+  independent package -- runs already-registered EP-033 workflows in
+  the background, off the calling thread, by dispatching each
+  submitted `workflow_id` through the already-existing
+  `WorkflowEngine.run(workflow_id)` exclusively. No AI reasoning, no
+  planning, and no direct real-subsystem/tool invocation anywhere in
+  the package:
+  - BackgroundWorkerPool (background_worker_pool.py): owns a fixed set
+    of daemon worker threads that pull submitted `workflow_id`s off an
+    internal, thread-safe queue. `_tasks_lock` protects the task
+    registry (submission, status/result updates, reads via
+    `get_task()`/`list_tasks()`, which return snapshots so a caller
+    can never mutate this pool's internal state directly);
+    `_lifecycle_lock` protects `_is_shutdown`. Neither lock is ever
+    held while calling `WorkflowEngine.run()` or while blocked on
+    `queue.get()`
+  - BackgroundTask / TaskStatus: a submitted unit of work and its
+    lifecycle state (PENDING -> RUNNING -> COMPLETED/FAILED)
+  - Idle workers poll the queue every `poll_interval` (default 0.05s)
+    so an idle pool shuts down quickly; this has no effect on a worker
+    already executing a task via `WorkflowEngine.run()`
+  - `shutdown()` never reports a worker as stopped merely because
+    `Thread.join(timeout=...)` returned -- every join is followed by
+    an explicit `Thread.is_alive()` check, and only workers that fail
+    that check are ever reported "stuck"
+  - `worker_threads()` returns the exact `Thread` objects this pool
+    owns, so callers (tests in particular) can check this pool's own
+    liveness without scanning `threading.enumerate()` -- another
+    legitimate pool elsewhere in the process may use the same
+    deterministic worker-naming scheme and must never be mistaken for
+    this pool's own workers
+  - `_execute_task` never raises: any exception from
+    `WorkflowEngine.run()`, including a plain, non-`WorkflowEngineError`
+    defect, is caught and recorded as that task's FAILED status, so a
+    single bad workflow can never kill the worker thread running it
+  - EP-036 STEP 1 test suite (tests/EP036/test_background_worker_pool.py)
+- BackgroundWorkerService (src/services/background_worker_service.py):
+  config-driven ('background_workers.enabled'), a thin owner of a
+  single `BackgroundWorkerPool` instance. Implements no task-execution
+  logic of its own -- every task-facing method (`submit`, `get_task`,
+  `list_tasks`, `shutdown`) is a direct, narrow forward to the pool it
+  owns. `background_workers.enabled` defaults to true, matching
+  `workflow_engine.enabled` / `workflow_scheduler.enabled` /
+  `automation.enabled`
+  - EP-036 STEP 2 test suite
+    (tests/EP036/test_background_worker_service.py)
+- BackgroundWorkerModule (src/modules/background_worker_module.py):
+  "worker" CLI namespace -- status / submit / list / info / stop /
+  help. A pure, additive translation layer: calls
+  BackgroundWorkerService's existing public methods unchanged and
+  catches the domain exceptions it already documents raising
+  (`BackgroundWorkerServiceError`, `PoolShutDownError`) to format them
+  as `CommandResult(success=False, ...)` for the shell. No "register"
+  command, matching EP-034's WorkflowSchedulerModule and EP-035's
+  AutomationModule precedent
+  - EP-036 STEP 3 test suite
+    (tests/EP036/test_background_worker_module.py)
+- config/config.yaml: new 'background_workers' section ('enabled',
+  'worker_count', 'shutdown_timeout')
+- docs/architecture/audits/EP036_AUDIT.md: EP-036 STEP 4 read-only
+  Architecture Audit, covering the Pool/Service/Module layering,
+  thread/task lifecycle, fault containment, and Bootstrap wiring
+
+### Changed
+
+- src/bootstrap.py: constructs BackgroundWorkerService (and registers
+  BackgroundWorkerModule once the service is confirmed available)
+  after the existing EP-035 wiring, wrapped in a try/except for
+  `BackgroundWorkerServiceError`/`BackgroundWorkerPoolError` so invalid
+  'background_workers.*' configuration disables the subsystem for that
+  run (logged) instead of crashing startup. The live `WorkflowEngine`
+  built for EP-033 is reused (through its public `run()` method only,
+  via the same `workflow_engine_for_scheduler` reference EP-034/EP-035
+  already captured). Background Worker Service has a hard dependency
+  on a live WorkflowEngine existing this run
+- src/modules/test_module.py: registers the EP-036 STEP 1/2/3 test
+  suites so 'test EP036' / 'test EP036-STEP2' / 'test EP036-STEP3' and
+  'test all' pick them up
+
+### Known limitations
+
+- AD-005 (Medium) -- no process-exit shutdown wiring calls
+  `BackgroundWorkerService.shutdown()` automatically; deferred and
+  documented in the package/service docstrings and
+  config/config.yaml. See docs/architecture/ARCHITECTURE_DEBT.md
+- AD-006 (Low) -- `BackgroundWorkerPool` task history has no
+  eviction/TTL and grows unbounded over a long-running process. See
+  docs/architecture/ARCHITECTURE_DEBT.md
+
+### Validation
+
+EP036       : 101 passed / 0 failed / 0 skipped
+EP036-STEP2 : 48 passed / 0 failed / 0 skipped
+EP036-STEP3 : 53 passed / 0 failed / 0 skipped
+EP033: 182 passed / 0 failed / 0 skipped (regression, unchanged)
+EP034: 113 passed / 0 failed / 0 skipped (regression, unchanged)
+EP035: 141 passed / 0 failed / 0 skipped (regression, unchanged)
+
+---
+
 ## v0.1.2-ep035
 
 Released: 2026-08-08

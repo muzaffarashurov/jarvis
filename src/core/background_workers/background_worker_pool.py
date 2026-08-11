@@ -1,0 +1,414 @@
+"""BackgroundWorkerPool: EP-036 background execution of EP-033 workflows.
+
+`BackgroundWorkerPool` owns a fixed set of daemon worker threads that
+pull submitted `workflow_id`s off an internal, thread-safe queue and
+run each one through the already-existing
+`WorkflowEngine.run(workflow_id)` -- its only cross-EP dependency,
+reached exclusively through that one public method (mirroring EP-034's
+`WorkflowSchedulerEngine` and EP-035's `AutomationEngine`, both of
+which reach `WorkflowEngine` the same way). This module duplicates no
+workflow-execution logic of its own: planning, step dispatch, failure
+policy, and result construction all remain exclusively
+`WorkflowEngine`'s concern.
+
+LESSONS FROM THE PREVIOUS EP-036 ATTEMPT (see the EP-036 STEP 1
+prompt for the full write-up -- summarized here as inline rationale
+for specific design choices below):
+
+1. Test isolation: worker threads are named deterministically
+   ("background-worker-0", "background-worker-1", ...) for
+   readability/debuggability, but this class never assumes it is the
+   only such pool in the process. `worker_threads()` returns the exact
+   `Thread` objects this pool owns, so callers (tests, in particular)
+   can check this pool's liveness without scanning
+   `threading.enumerate()` -- another legitimate pool elsewhere in the
+   process may use the same naming scheme and must never be mistaken
+   for this pool's own workers.
+
+2. Shutdown race: `shutdown()` never reports a worker as stopped
+   merely because `Thread.join(timeout=...)` returned. Every join is
+   followed by an explicit `is_alive()` check; only workers that fail
+   that check are ever reported "stuck", and `shutdown()`'s return
+   value reflects that check, never the mere return of `join()`.
+
+3. Idle-worker polling: idle workers block on `queue.get(timeout=...)`
+   with a short poll interval (`poll_interval`, default 0.05s) so an
+   idle pool shuts down quickly. This only ever affects idle workers --
+   a worker already executing a task via `WorkflowEngine.run()` keeps
+   running until that call returns; `shutdown()` does not (and cannot,
+   without corrupting in-flight workflow state) interrupt it. Shutdown
+   with `wait=True` and no timeout will wait for that call to finish;
+   with a timeout, `shutdown()` may return `False` while the worker is
+   still finishing that one task.
+
+Thread safety: `_tasks_lock` protects the task registry (submission,
+status/result updates, and reads via `get_task()`/`list_tasks()`,
+which return snapshots so a caller can never observe or mutate this
+pool's internal `BackgroundTask` objects directly). `_lifecycle_lock`
+protects `_is_shutdown`, so a submission racing a shutdown either
+completes before `_is_shutdown` is set (and its task is queued -- see
+the class docstring for what happens to it next) or is rejected with
+`PoolShutDownError`, never both partially. Neither lock is ever held
+while calling `WorkflowEngine.run()` (arbitrary, potentially slow user
+workflow code) or while blocked on `queue.get()`.
+"""
+
+from __future__ import annotations
+
+import queue
+import threading
+import time
+import uuid
+from dataclasses import dataclass, replace
+from enum import Enum
+
+from loguru import logger
+
+from src.core.workflow_engine.workflow_engine import WorkflowEngine
+from src.core.workflow_engine.workflow_run_provider import WorkflowEngineError
+from src.core.workflow_engine.workflow_run_result import WorkflowRunResult
+
+__all__ = [
+    "BackgroundWorkerPool",
+    "BackgroundWorkerPoolError",
+    "InvalidWorkerCountError",
+    "PoolShutDownError",
+    "BackgroundTask",
+    "TaskStatus",
+]
+
+_DEFAULT_WORKER_COUNT = 4
+_DEFAULT_POLL_INTERVAL = 0.05
+
+
+class BackgroundWorkerPoolError(Exception):
+    """Base class for errors raised by BackgroundWorkerPool itself."""
+
+
+class InvalidWorkerCountError(BackgroundWorkerPoolError):
+    """Raised when a pool is constructed with a non-positive `worker_count`."""
+
+
+class PoolShutDownError(BackgroundWorkerPoolError):
+    """Raised by `submit()` once the pool has been shut down."""
+
+
+class TaskStatus(str, Enum):
+    """The lifecycle states a `BackgroundTask` passes through.
+
+    Attributes:
+        PENDING: Submitted and queued, not yet picked up by a worker.
+        RUNNING: A worker is currently executing this task's workflow
+            via `WorkflowEngine.run()`.
+        COMPLETED: The workflow ran and `WorkflowRunResult.success`
+            was True.
+        FAILED: The workflow ran but `WorkflowRunResult.success` was
+            False, or running it raised an exception (caught and
+            translated here -- see `BackgroundWorkerPool._execute_task`).
+    """
+
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+@dataclass
+class BackgroundTask:
+    """A single unit of work submitted to a `BackgroundWorkerPool`.
+
+    Attributes:
+        id: Unique identifier for this task, generated by `submit()`.
+            Distinct from `workflow_id` -- the same workflow definition
+            may be submitted more than once, each as its own task.
+        workflow_id: The id of the EP-033 `WorkflowDefinition` this
+            task runs -- forwarded unchanged to
+            `WorkflowEngine.run(workflow_id)`, never interpreted by
+            this package.
+        status: This task's current lifecycle state.
+        result: The `WorkflowRunResult` produced by running this
+            task's workflow, or None until the task reaches
+            `COMPLETED`/`FAILED` via a result (None forever if it
+            reached `FAILED` via an exception instead -- see `error`).
+        error: Human-readable failure reason, set only when `status`
+            is `FAILED`. Populated from the raised exception's message
+            when running the workflow itself raised, or from a fixed
+            explanatory message when the workflow ran to completion
+            but `WorkflowRunResult.success` was False (in which case
+            `result` also carries the full per-step detail).
+    """
+
+    id: str
+    workflow_id: str
+    status: TaskStatus = TaskStatus.PENDING
+    result: WorkflowRunResult | None = None
+    error: str | None = None
+
+
+class BackgroundWorkerPool:
+    """A configurable pool of daemon worker threads running EP-033 workflows.
+
+    Never selects, constructs, or configures the `WorkflowEngine` it is
+    given -- that remains exclusively the caller's (in a later EP-036
+    step: Bootstrap's) concern. Never dispatches a workflow step
+    itself -- that stays inside `WorkflowEngine`/`WorkflowRunProvider`.
+    Independent of any CLI/application concern: this class has no
+    knowledge of `CommandRouter`, `Config`, or any Jarvis module.
+    """
+
+    def __init__(
+        self,
+        workflow_engine: WorkflowEngine,
+        worker_count: int = _DEFAULT_WORKER_COUNT,
+        poll_interval: float = _DEFAULT_POLL_INTERVAL,
+    ) -> None:
+        """Initialize the pool and immediately start its worker threads.
+
+        Args:
+            workflow_engine: The EP-033 WorkflowEngine used to actually
+                run each submitted task's workflow, through its public
+                `run(workflow_id)` method only. Never mutated by this
+                pool.
+            worker_count: Number of daemon worker threads to start.
+                Must be at least 1.
+            poll_interval: Seconds an idle worker blocks on the
+                internal queue before re-checking for shutdown. Short
+                values (default 0.05s) keep an idle pool's shutdown
+                latency low; this has no effect on a worker that is
+                currently executing a task (see module docstring,
+                lesson 3).
+
+        Raises:
+            InvalidWorkerCountError: If `worker_count` is less than 1.
+        """
+        if worker_count < 1:
+            raise InvalidWorkerCountError(
+                f"worker_count must be at least 1, got {worker_count}."
+            )
+
+        self._workflow_engine = workflow_engine
+        self._worker_count = worker_count
+        self._poll_interval = poll_interval
+
+        self._queue: "queue.Queue[str]" = queue.Queue()
+        self._tasks: dict[str, BackgroundTask] = {}
+        self._tasks_lock = threading.Lock()
+
+        self._shutdown_event = threading.Event()
+        self._lifecycle_lock = threading.Lock()
+        self._is_shutdown = False
+
+        self._workers: tuple[threading.Thread, ...] = tuple(
+            threading.Thread(
+                target=self._worker_loop,
+                name=f"background-worker-{index}",
+                daemon=True,
+            )
+            for index in range(worker_count)
+        )
+        for worker in self._workers:
+            worker.start()
+
+    # ---------- Public API ----------
+
+    @property
+    def worker_count(self) -> int:
+        """Return the number of worker threads this pool was configured with."""
+        return self._worker_count
+
+    def worker_threads(self) -> tuple[threading.Thread, ...]:
+        """Return the exact `Thread` objects owned by this pool.
+
+        Callers -- tests in particular -- must use this (never
+        `threading.enumerate()`) to check this pool's own worker
+        liveness: another legitimate `BackgroundWorkerPool` may already
+        exist in the same process, may use the same deterministic
+        naming scheme, and must never be mistaken for this pool's own
+        workers (see module docstring, lesson 1).
+
+        Returns:
+            A tuple of this pool's worker `Thread` objects, in
+            creation order. Always the same objects for this pool's
+            lifetime -- this pool never replaces a worker.
+        """
+        return self._workers
+
+    @property
+    def is_shutdown(self) -> bool:
+        """Return whether `shutdown()` has been called on this pool."""
+        with self._lifecycle_lock:
+            return self._is_shutdown
+
+    def submit(self, workflow_id: str) -> str:
+        """Submit a workflow for background execution.
+
+        Args:
+            workflow_id: The id of an already-registered EP-033
+                `WorkflowDefinition`, forwarded unchanged to
+                `WorkflowEngine.run()` when a worker picks this task
+                up. Not validated here -- an unknown/disabled/empty
+                definition surfaces as this task's `FAILED` status,
+                exactly as any other `WorkflowEngineError` does (see
+                `_execute_task`).
+
+        Returns:
+            A newly generated task id that can be passed to
+            `get_task()` to track this submission's status.
+
+        Raises:
+            PoolShutDownError: If this pool has already been shut down.
+        """
+        with self._lifecycle_lock:
+            if self._is_shutdown:
+                raise PoolShutDownError(
+                    "Cannot submit new work: this background worker pool has "
+                    "been shut down."
+                )
+
+        task_id = str(uuid.uuid4())
+        with self._tasks_lock:
+            self._tasks[task_id] = BackgroundTask(id=task_id, workflow_id=workflow_id)
+        self._queue.put(task_id)
+        return task_id
+
+    def get_task(self, task_id: str) -> BackgroundTask | None:
+        """Return a snapshot of a submitted task, or None if `task_id` is unknown.
+
+        Args:
+            task_id: A task id previously returned by `submit()`.
+
+        Returns:
+            A copy of the current `BackgroundTask` (safe to read
+            without racing further updates made by a worker), or None
+            if no task with that id was ever submitted to this pool.
+        """
+        with self._tasks_lock:
+            task = self._tasks.get(task_id)
+            return replace(task) if task is not None else None
+
+    def list_tasks(self) -> list[BackgroundTask]:
+        """Return a snapshot of every task ever submitted to this pool.
+
+        Returns:
+            A list of `BackgroundTask` copies, in no particular order.
+        """
+        with self._tasks_lock:
+            return [replace(task) for task in self._tasks.values()]
+
+    def shutdown(self, wait: bool = True, timeout: float | None = None) -> bool:
+        """Signal every worker to stop, optionally waiting for them to terminate.
+
+        Once called, `submit()` always raises `PoolShutDownError`.
+        Workers finish any task they are currently executing (a task
+        already in progress runs to completion -- it is never
+        interrupted mid-`WorkflowEngine.run()`); tasks still sitting in
+        the queue and not yet picked up by a worker are left `PENDING`
+        and are not started.
+
+        Args:
+            wait: If True, block until every worker has terminated (or
+                `timeout` elapses). If False, signal shutdown and
+                return immediately without waiting or verifying
+                termination.
+            timeout: Maximum total seconds to wait across all workers
+                when `wait=True`. None (the default) waits
+                indefinitely for every worker to terminate.
+
+        Returns:
+            True only if every worker was confirmed stopped via
+            `Thread.is_alive()` returning False -- never inferred from
+            `join()` merely returning (see module docstring, lesson
+            2). False if `wait=False` (termination not verified) or if
+            one or more workers were still alive when `timeout`
+            elapsed (logged by name in that case).
+        """
+        with self._lifecycle_lock:
+            self._is_shutdown = True
+        self._shutdown_event.set()
+
+        if not wait:
+            logger.info(
+                "Background worker pool shutdown signaled (wait=False); "
+                "worker termination not verified."
+            )
+            return False
+
+        stuck: list[threading.Thread] = []
+        if timeout is None:
+            for worker in self._workers:
+                worker.join()
+                if worker.is_alive():
+                    stuck.append(worker)
+        else:
+            deadline = time.monotonic() + timeout
+            for worker in self._workers:
+                remaining = max(0.0, deadline - time.monotonic())
+                worker.join(timeout=remaining)
+                if worker.is_alive():
+                    stuck.append(worker)
+
+        if stuck:
+            names = ", ".join(worker.name for worker in stuck)
+            logger.error(
+                "Background worker pool shutdown incomplete: still alive after "
+                f"waiting: {names}."
+            )
+            return False
+
+        logger.info("Background worker pool shut down: all workers stopped.")
+        return True
+
+    # ---------- Internal helpers ----------
+
+    def _worker_loop(self) -> None:
+        """A single worker's run loop: dequeue, execute, repeat, until shutdown.
+
+        Re-checks `_shutdown_event` after every task (including after
+        an idle-poll timeout), so a task already dequeued always runs
+        to completion, and no new task is ever started once shutdown
+        has been signaled.
+        """
+        while not self._shutdown_event.is_set():
+            try:
+                task_id = self._queue.get(timeout=self._poll_interval)
+            except queue.Empty:
+                continue
+            self._execute_task(task_id)
+
+    def _execute_task(self, task_id: str) -> None:
+        """Run one task's workflow and record its outcome.
+
+        Never raises -- any exception from `WorkflowEngine.run()`
+        (including a plain, non-`WorkflowEngineError` defect in a
+        workflow-run provider or executor) is caught and recorded as
+        this task's `FAILED` status, so a single bad workflow can never
+        kill the worker thread running it.
+        """
+        with self._tasks_lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return
+            task.status = TaskStatus.RUNNING
+
+        try:
+            result = self._workflow_engine.run(task.workflow_id)
+        except WorkflowEngineError as exc:
+            with self._tasks_lock:
+                task.status = TaskStatus.FAILED
+                task.error = str(exc)
+            logger.error(f"Background task '{task_id}' failed: {exc}")
+            return
+        except Exception as exc:  # noqa: BLE001 - a workflow defect must never kill this worker
+            with self._tasks_lock:
+                task.status = TaskStatus.FAILED
+                task.error = str(exc)
+            logger.error(f"Background task '{task_id}' raised an unexpected error: {exc}")
+            return
+
+        with self._tasks_lock:
+            task.status = TaskStatus.COMPLETED if result.success else TaskStatus.FAILED
+            task.result = result
+            if not result.success:
+                task.error = "Workflow completed with one or more failed steps."
+
+        logger.info(f"Background task '{task_id}' finished with status {task.status.value}.")

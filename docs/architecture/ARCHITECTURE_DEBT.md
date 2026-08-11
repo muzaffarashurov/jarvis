@@ -42,6 +42,8 @@ Architecture Debt is addressed only during a dedicated cleanup milestone.
 | ID | Severity | Status |
 |----|----------|--------|
 | - | - | - |
+| AD-005 | Medium | Open |
+| AD-006 | Low | Open |
 
 Status values:
 
@@ -154,6 +156,79 @@ Minor duplication of data transfer objects.
 **Recommended solution**
 
 Evaluate introducing a shared immutable DTO during Architecture Cleanup.
+
+**Planned milestone**
+
+Architecture Cleanup v0.2
+
+**Status**
+
+Open
+
+---
+
+## AD-005
+
+**Severity**
+
+Medium
+
+**Discovered in**
+
+EP036 Architecture Audit
+
+**Files**
+
+src/services/background_worker_service.py
+src/main.py
+
+**Description**
+
+No process-exit shutdown wiring calls `BackgroundWorkerService.shutdown()` automatically. Worker threads are daemon threads, so this cannot hang process exit, but a `RUNNING` task is terminated mid-`WorkflowEngine.run()` and any `PENDING` queued task is silently dropped on interpreter exit unless a user has manually run `worker stop` first.
+
+**Why it matters**
+
+Background tasks can be lost without any graceful drain on normal process termination.
+
+**Recommended solution**
+
+Wire `BackgroundWorkerService.shutdown()` into `src/main.py`'s existing shutdown path, alongside `_save_memory_on_shutdown`.
+
+**Planned milestone**
+
+Architecture Cleanup v0.2
+
+**Status**
+
+Open
+
+---
+
+## AD-006
+
+**Severity**
+
+Low
+
+**Discovered in**
+
+EP036 Architecture Audit
+
+**Files**
+
+src/core/background_workers/background_worker_pool.py
+
+**Description**
+
+`BackgroundWorkerPool._tasks` retains every `BackgroundTask` ever submitted for the pool's lifetime, with no eviction, TTL, or cap.
+
+**Why it matters**
+
+In a long-running Jarvis process with many `worker submit` calls, task history memory usage grows unbounded.
+
+**Recommended solution**
+
+Evaluate a bounded history (eviction policy or TTL for `COMPLETED`/`FAILED` tasks) during Architecture Cleanup.
 
 **Planned milestone**
 

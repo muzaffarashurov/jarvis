@@ -27,6 +27,9 @@ import tests.EP032.test_collaboration_engine
 import tests.EP033.test_workflow_engine
 import tests.EP034.test_workflow_scheduler
 import tests.EP035.test_automation_engine
+import tests.EP036.test_background_worker_pool
+import tests.EP036.test_background_worker_service
+import tests.EP036.test_background_worker_module
 
 class TestModule(CommandModule):
 

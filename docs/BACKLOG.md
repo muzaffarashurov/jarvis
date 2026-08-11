@@ -10,58 +10,51 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-036 — Background Workers
+### EP-037 — Event Bus
 
 Planned objectives:
 
 - Tracked in docs/architecture/JARVIS_ROADMAP.md, Phase 5 (Workflow
-  Automation), as the fourth of that phase (after EP-033 Workflow
-  Engine, EP-034 Workflow Scheduler, and EP-035 Automation Engine;
-  alongside EP-037 Event Bus). Not yet scoped in detail.
+  Automation), as the fifth and final EP of that phase (after
+  EP-033 Workflow Engine, EP-034 Workflow Scheduler, EP-035 Automation
+  Engine, and EP-036 Background Workers). Not yet scoped in detail.
 
 Status:
 
 Planned
 
-Note: EP-035 — Automation Engine is now complete (see CHANGELOG.md /
-docs/RELEASE_NOTES.md). It is a new, independent package
-(`src/core/automation_engine/`) that chains one EP-033 workflow's
-completion -- whether started on-demand via
-`WorkflowEngineService.run()`, or automatically via EP-034's
-`WorkflowSchedulerEngine.run_now()`/`tick()` -- into a second workflow
-run, based on outcome (ON_SUCCESS / ON_FAILURE / ON_ANY), by calling
-EP-033's already-existing `WorkflowEngine.run(workflow_id)`
-exclusively. It performs no AI reasoning, no scheduling of its own,
-and no direct real-subsystem/tool invocation of its own.
-`AutomationRule`/`AutomationTriggerCondition`
-(`automation_rule.py`) are a new, independent domain type -- not a
-reuse of EP-034's `ScheduledWorkflow` (an automation rule carries no
-`Schedule` or tick participation; a `ScheduledWorkflow` carries no
-trigger condition or action workflow). `AutomationEngine`
-(`automation_engine.py`) is the only component holding a reference to
-EP-033's `WorkflowEngine`, reached through its public `run()` method
-only. The reactive hook itself (`AutomationEngine.notify_run`) is
-wired into `WorkflowEngineService`/`WorkflowSchedulerEngine` as a bare
-`Callable`, so neither of those EP-033/EP-034 classes imports
-Automation Engine or any of its types -- the dependency direction
-stays one-way.
+Note: EP-036 — Background Workers is now complete through STEP 4 (see
+CHANGELOG.md / docs/RELEASE_NOTES.md /
+docs/architecture/audits/EP036_AUDIT.md). It is a new, independent
+package (`src/core/background_workers/`) that runs already-registered
+EP-033 workflows in the background, off the calling thread, through a
+configurable pool of daemon worker threads, by calling EP-033's
+already-existing `WorkflowEngine.run(workflow_id)` exclusively. It
+performs no AI reasoning, no planning, and no direct
+real-subsystem/tool invocation of its own. `BackgroundWorkerPool`
+(`background_worker_pool.py`) is the only component holding a
+reference to EP-033's `WorkflowEngine`, reached through its public
+`run()` method only, the same discipline `WorkflowSchedulerEngine`
+(EP-034) and `AutomationEngine` (EP-035) already follow. Layering is
+`BackgroundWorkerPool` (core) -> `BackgroundWorkerService`
+(config-driven lifecycle owner, `src/services/background_worker_service.py`)
+-> `BackgroundWorkerModule` (CLI translation layer only,
+`src/modules/background_worker_module.py`, exposing the `worker`
+namespace) -- each layer reaches the one below it through its public
+API only, so the dependency direction stays one-way.
 
-SCOPE NOTE: EP-035 is deliberately synchronous, single-hop, and
-non-recursive -- it owns no background thread, no queue, and no
-generic event bus (those remain EP-036/EP-037, both still future
-work, tracked above/below). An action workflow's own completion is
-dispatched directly through `WorkflowEngine.run()`, bypassing the
-hook entirely, so it never re-enters `notify_run()` and can never
-trigger a further rule (A -> B is supported; A -> B -> C is not, and
-no cycle detection was implemented, since recursive chaining itself
-was out of scope). `AutomationEngine` has no separate Provider/Manager
-layer either, matching EP-034's own `WorkflowSchedulerEngine`
-precedent -- there is exactly one way to evaluate a rule and exactly
-one way to dispatch a match. No "register" or manual "trigger"/"run"
-CLI command exists for `automate` either, matching EP-011's
-`SchedulerModule`, EP-033's `WorkflowEngineModule`, and EP-034's
-`WorkflowSchedulerModule` precedent -- rules are registered only
-through the public `AutomationService.register()` API.
+SCOPE NOTE: EP-036 STEP 4 was a read-only Architecture Audit (no code,
+test, or configuration changes), per
+docs/architecture/AI_DEVELOPMENT_PLAYBOOK.md. It identified two
+tracked, non-urgent architecture-debt items rather than any Critical
+or High finding: AD-005 (Medium) -- no process-exit shutdown wiring
+for `BackgroundWorkerService.shutdown()`, meaning an in-flight task is
+terminated mid-run and a still-queued task is silently dropped on
+interpreter exit unless `worker stop` was run manually first; and
+AD-006 (Low) -- `BackgroundWorkerPool` task history has no
+eviction/TTL and grows unbounded over a long-running process. Both are
+recorded in docs/architecture/ARCHITECTURE_DEBT.md and are explicitly
+deferred to a future Architecture Cleanup milestone, not to EP-037.
 
 ---
 

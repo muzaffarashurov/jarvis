@@ -425,3 +425,35 @@ automation:
   # own -- it only ever runs in response to another EP's own
   # execution path calling AutomationEngine.notify_run().
   enabled: true
+
+background_workers:
+  # EP-036 Background Worker Pool. Runs already-registered EP-033
+  # WorkflowDefinitions in the background, off the calling thread, by
+  # dispatching each submitted workflow_id through the already-existing
+  # WorkflowEngine.run() exclusively -- the same "reach a completed EP
+  # only through its public API" discipline EP-034's WorkflowSchedulerEngine
+  # and EP-035's AutomationEngine already follow (see
+  # src/core/background_workers/__init__.py). No AI reasoning, no planning,
+  # and no direct real-subsystem/tool invocation is performed here or
+  # anywhere in this package -- this subsystem only decides which thread
+  # an already-completed EP's public API call happens to run on.
+  #
+  # "enabled" defaults to true: an enabled pool with nothing submitted to
+  # it is just worker_count idle daemon threads -- STEP 2 wires no producer
+  # that calls submit() automatically, so this has no other observable
+  # effect this run (see BackgroundWorkerService's own module docstring
+  # for the full backward-compatibility reasoning).
+  #
+  # "worker_count" is the number of daemon worker threads started
+  # immediately when this subsystem is enabled (BackgroundWorkerPool starts
+  # its threads at construction time -- there is no separate "start" step).
+  #
+  # "shutdown_timeout" bounds how long BackgroundWorkerService.shutdown()
+  # waits for in-flight tasks to finish before giving up (seconds).
+  # Application-level shutdown wiring (calling shutdown() from
+  # src/main.py at process exit) is deferred to a later EP-036 step -- this
+  # setting exists so that later wiring is a pure addition, not a config
+  # change.
+  enabled: true
+  worker_count: 4
+  shutdown_timeout: 10

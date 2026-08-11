@@ -47,6 +47,7 @@ from src.core.workflow_scheduler.workflow_scheduler_engine import (
 )
 from src.core.automation_engine.automation_engine import AutomationEngine, AutomationError
 from src.core.automation_engine.automation_rule_registry import AutomationRuleRegistry
+from src.core.background_workers.background_worker_pool import BackgroundWorkerPoolError
 from src.core.embedding.engine import EmbeddingEngine
 from src.core.embedding.manager import EmbeddingManager
 from src.core.embedding.provider import EmbeddingConfigurationError, EmbeddingError
@@ -90,6 +91,7 @@ from src.modules.tool_module import ToolModule
 from src.modules.workflow_engine_module import WorkflowEngineModule
 from src.modules.workflow_scheduler_module import WorkflowSchedulerModule
 from src.modules.automation_module import AutomationModule
+from src.modules.background_worker_module import BackgroundWorkerModule
 from src.modules.conversation_module import ConversationModule
 from src.modules.embedding_module import EmbeddingModule
 from src.modules.fast_response_module import FastResponseModule
@@ -121,6 +123,10 @@ from src.services.tool_service import ToolService
 from src.services.workflow_engine_service import WorkflowEngineService
 from src.services.workflow_scheduler_service import WorkflowSchedulerService
 from src.services.automation_service import AutomationService
+from src.services.background_worker_service import (
+    BackgroundWorkerService,
+    BackgroundWorkerServiceError,
+)
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -215,6 +221,7 @@ class Bootstrap:
         self._workflow_engine_service: WorkflowEngineService | None = None
         self._workflow_scheduler_service: WorkflowSchedulerService | None = None
         self._automation_service: AutomationService | None = None
+        self._background_worker_service: BackgroundWorkerService | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -1202,6 +1209,57 @@ class Bootstrap:
             )
             self._automation_service = None
 
+        # EP-036 STEP 2: Background Worker Service. Owns configuration
+        # resolution and the lifecycle of a single EP-036
+        # `BackgroundWorkerPool` (STEP 1, unchanged) -- a pool of
+        # daemon worker threads that run already-registered EP-033
+        # workflows off the calling thread, by calling EP-033's
+        # already-existing `WorkflowEngine.run()` exclusively. No AI
+        # reasoning, no planning, and no direct real-subsystem/tool
+        # invocation is performed here or anywhere in this package
+        # (see src/services/background_worker_service.py).
+        #
+        # EP-036 STEP 3: registers `BackgroundWorkerModule` (the
+        # "worker" CLI command namespace) below, once the service
+        # itself is confirmed available -- STEP 2's own Service API
+        # is unchanged; STEP 3 only adds this additive translation
+        # layer on top of it (see
+        # src/modules/background_worker_module.py).
+        #
+        # BackgroundWorkerService reuses the same live `WorkflowEngine`
+        # instance built for EP-033 above, through its public `run()`
+        # method only (reached exclusively via `BackgroundWorkerPool`).
+        #
+        # Background Worker Pool has a hard dependency on a live
+        # `WorkflowEngine` instance existing this run: without one
+        # there is nothing to actually run a submitted task's
+        # workflow. Only a genuine `WorkflowEngineError` above
+        # (invalid 'workflow_engine.*' configuration) -- or the Plan
+        # Execution Engine itself being unavailable -- leaves
+        # `workflow_engine_for_scheduler` None and skips this
+        # subsystem entirely (not merely degraded), mirroring EP-034/
+        # EP-035's own hard-dependency handling above.
+        if workflow_engine_for_scheduler is not None:
+            try:
+                background_worker_service = BackgroundWorkerService(
+                    config=config, workflow_engine=workflow_engine_for_scheduler
+                )
+                self._background_worker_service = background_worker_service
+                router.register(BackgroundWorkerModule(background_worker_service))
+            except (BackgroundWorkerServiceError, BackgroundWorkerPoolError) as exc:
+                logger.error(
+                    f"Background Worker Service disabled: invalid "
+                    f"'background_workers.*' configuration ({exc}). Fix "
+                    "config/config.yaml and restart to re-enable it."
+                )
+                self._background_worker_service = None
+        else:
+            logger.warning(
+                "Background Worker Service disabled: the Workflow Engine "
+                "(EP-033) is unavailable this run."
+            )
+            self._background_worker_service = None
+
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
 
@@ -1737,3 +1795,18 @@ class Bootstrap:
             see `_build_command_router`'s EP-035 wiring).
         """
         return self._automation_service
+
+    @property
+    def background_worker_service(self) -> BackgroundWorkerService | None:
+        """Return the BackgroundWorkerService built for EP-036 STEP 2, if available.
+
+        Returns:
+            The BackgroundWorkerService instance, or None if
+            `run()`/`initialize()` has not completed (or the
+            Background Worker Service subsystem was disabled this
+            run, or invalid 'background_workers.*' configuration was
+            supplied, or the Workflow Engine it depends on was
+            unavailable this run -- see `_build_command_router`'s
+            EP-036 wiring).
+        """
+        return self._background_worker_service

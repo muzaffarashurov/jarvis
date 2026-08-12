@@ -30,6 +30,7 @@ import tests.EP035.test_automation_engine
 import tests.EP036.test_background_worker_pool
 import tests.EP036.test_background_worker_service
 import tests.EP036.test_background_worker_module
+import tests.EP037.test_event_bus
 
 class TestModule(CommandModule):
 

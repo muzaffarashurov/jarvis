@@ -1060,7 +1060,9 @@ class Bootstrap:
                     plan_execution_engine=plan_execution_engine_for_workflow,
                 )
                 workflow_engine_service = WorkflowEngineService(
-                    manager=workflow_engine_manager, engine=workflow_engine
+                    manager=workflow_engine_manager,
+                    engine=workflow_engine,
+                    event_bus=self._event_bus,
                 )
                 self._workflow_engine_service = workflow_engine_service
                 router.register(WorkflowEngineModule(workflow_engine_service))
@@ -1108,12 +1110,16 @@ class Bootstrap:
         # `workflow_engine_for_scheduler` None and skips this subsystem
         # entirely (not merely degraded).
         # `workflow_scheduler_engine_for_automation` is captured here
-        # (mirroring `workflow_engine_for_scheduler` above) so EP-035's
-        # Automation Engine can wire its reactive hook into the same
-        # live `WorkflowSchedulerEngine` instance, through its
-        # existing public `set_automation_hook()` method only -- see
-        # the EP-035 wiring further below. It stays None whenever
-        # Workflow Scheduler itself is unavailable this run.
+        # (mirroring `workflow_engine_for_scheduler` above). EP-037
+        # STEP 2 migrated Bootstrap's own production wiring to
+        # `AutomationEngine.notify_run()` subscribing to the
+        # `"workflow.completed"` event instead of using this engine's
+        # `set_automation_hook()` directly (see the EP-035/EP-037
+        # wiring further below), so this reference is currently unused
+        # by Bootstrap; it is kept for parity with
+        # `workflow_engine_for_scheduler` and as a stable extension
+        # point. It stays None whenever Workflow Scheduler itself is
+        # unavailable this run.
         workflow_scheduler_engine_for_automation: WorkflowSchedulerEngine | None = None
         if workflow_engine_for_scheduler is not None:
             try:
@@ -1121,6 +1127,7 @@ class Bootstrap:
                 workflow_scheduler_engine = WorkflowSchedulerEngine(
                     registry=scheduled_workflow_registry,
                     workflow_engine=workflow_engine_for_scheduler,
+                    event_bus=self._event_bus,
                 )
                 workflow_scheduler_service = WorkflowSchedulerService(
                     config=config, engine=workflow_scheduler_engine
@@ -1157,16 +1164,29 @@ class Bootstrap:
         # AutomationEngine reuses the same live `WorkflowEngine`
         # instance built for EP-033 above, through its public `run()`
         # method only, to dispatch a matched rule's action workflow.
-        # The reactive hook itself is wired as a bare
-        # `Callable[[str, WorkflowRunResult], None]` into
-        # `WorkflowEngineService`/`WorkflowSchedulerEngine` -- neither
-        # of those classes imports `AutomationEngine` or any EP-035
-        # type, so the dependency direction stays one-way (EP-035 ->
-        # EP-033/034 public API, never the reverse). The hook is
-        # skipped entirely (never wired) when 'automation.enabled' is
-        # False, so a disabled Automation Engine can never fire a rule
-        # regardless of which path is used to reach
-        # AutomationEngine.notify_run().
+        #
+        # EP-037 MIGRATION NOTE: production wiring now reaches
+        # `AutomationEngine.notify_run()` by subscribing it to the
+        # `"workflow.completed"` event on `self._event_bus`, instead of
+        # via `WorkflowEngineService.set_automation_hook()`/
+        # `WorkflowSchedulerEngine.set_automation_hook()`. Both engines
+        # publish the same `"workflow.completed"` event (see
+        # src/services/workflow_engine_service.py and
+        # src/core/workflow_scheduler/workflow_scheduler_engine.py), so
+        # a single subscription here covers both an on-demand `flow
+        # run` and a scheduled/`tick()`-driven run -- previously this
+        # required two separate `set_automation_hook()` calls, one per
+        # engine. The `set_automation_hook()` API and its call sites in
+        # both engines are left fully intact for backward compatibility
+        # (existing/external callers can still use it directly); this
+        # is a change to *production Bootstrap wiring* only, not to
+        # either engine's public API. Neither
+        # `WorkflowEngineService`/`WorkflowSchedulerEngine` imports
+        # `AutomationEngine` or any EP-035 type -- the dependency
+        # direction stays one-way. The subscription is skipped entirely
+        # when 'automation.enabled' is False, so a disabled Automation
+        # Engine can never fire a rule, matching the hook-based
+        # wiring's exact same gating.
         #
         # Automation Engine has a hard dependency on a live
         # `WorkflowEngine` instance existing this run: without one
@@ -1188,14 +1208,45 @@ class Bootstrap:
                 router.register(AutomationModule(automation_service))
 
                 if bool(config.get("automation.enabled", True)):
-                    if self._workflow_engine_service is not None:
-                        self._workflow_engine_service.set_automation_hook(
-                            automation_engine.notify_run
+                    self._event_bus.subscribe("workflow.completed", automation_engine.notify_run)
+
+                    # EP-037 STEP 3: BackgroundWorkerPool (EP-036) calls
+                    # `WorkflowEngine.run()` directly, not through
+                    # `WorkflowEngineService`, so a `worker submit` task
+                    # never publishes `"workflow.completed"` and had no
+                    # path to automation at all. This adapter closes that
+                    # gap for a task's *successful* completion only, by
+                    # re-keying `background_worker.task_completed`'s
+                    # existing `workflow_id` kwarg (see
+                    # src/core/background_workers/background_worker_pool.py)
+                    # to the `definition_id` kwarg `notify_run()` expects --
+                    # STEP 2's event payload contracts are left completely
+                    # unchanged. Deliberately NOT subscribed to
+                    # `"background_worker.task_failed"`: that event carries
+                    # only `error: str`, never a `WorkflowRunResult`, which
+                    # `notify_run()` requires and which a bare exception
+                    # (e.g. a provider defect) never produces in the first
+                    # place. A background task's own failure therefore
+                    # cannot trigger automation, matching the same
+                    # ON_SUCCESS/ON_FAILURE/ON_ANY semantics `notify_run()`
+                    # already applies uniformly to every *successful* run
+                    # dispatch, regardless of path.
+                    #
+                    # This cannot double-trigger a rule together with the
+                    # `"workflow.completed"` subscription above: the two
+                    # event names are disjoint, each has exactly one
+                    # subscriber, and `BackgroundWorkerPool` never publishes
+                    # `"workflow.completed"` -- a given task submission
+                    # produces exactly one of `task_completed`/`task_failed`,
+                    # never both, and never `workflow.completed` too.
+                    def _on_background_worker_task_completed(**kwargs) -> None:
+                        automation_engine.notify_run(
+                            definition_id=kwargs["workflow_id"], result=kwargs["result"]
                         )
-                    if workflow_scheduler_engine_for_automation is not None:
-                        workflow_scheduler_engine_for_automation.set_automation_hook(
-                            automation_engine.notify_run
-                        )
+
+                    self._event_bus.subscribe(
+                        "background_worker.task_completed", _on_background_worker_task_completed
+                    )
             except AutomationError as exc:
                 logger.error(
                     f"Automation Engine disabled: invalid configuration ({exc}). "
@@ -1242,7 +1293,9 @@ class Bootstrap:
         if workflow_engine_for_scheduler is not None:
             try:
                 background_worker_service = BackgroundWorkerService(
-                    config=config, workflow_engine=workflow_engine_for_scheduler
+                    config=config,
+                    workflow_engine=workflow_engine_for_scheduler,
+                    event_bus=self._event_bus,
                 )
                 self._background_worker_service = background_worker_service
                 router.register(BackgroundWorkerModule(background_worker_service))

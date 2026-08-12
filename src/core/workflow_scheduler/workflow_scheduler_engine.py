@@ -37,6 +37,17 @@ imports `AutomationEngine` or any EP-035 type -- the hook is a bare
 reproduces this class's exact pre-EP-035 behavior. The hook is always
 invoked inside a try/except that never propagates, so a defect in the
 hook can never break a scheduled run or kill the tick loop.
+
+EP-037 ADDITIVE EVENT NOTE: `run_now()` optionally also publishes a
+`"workflow.completed"` event on an injected `EventBus`
+(`src/core/events.py`), at the exact same point and under the exact
+same condition as the automation hook above (a `WorkflowRunResult`
+must exist; never published for a bare `WorkflowEngineError`). This is
+purely additive -- the automation hook is left completely intact and
+is not replaced by this event. `event_bus` defaults to None,
+reproducing this class's exact pre-EP-037 behavior (no publish call).
+Publishing happens outside `self._lock`, exactly like the automation
+hook already does, so it cannot affect this engine's own locking.
 """
 
 from __future__ import annotations
@@ -47,6 +58,7 @@ from typing import Callable
 
 from loguru import logger
 
+from src.core.events import EventBus
 from src.core.scheduler.job import JobStatus, Schedule, ScheduleType
 from src.core.workflow_engine.workflow_engine import WorkflowEngine
 from src.core.workflow_engine.workflow_run_provider import WorkflowEngineError
@@ -79,7 +91,12 @@ class WorkflowSchedulerEngine:
     ('workflow_scheduler.tick_interval' in config/config.yaml).
     """
 
-    def __init__(self, registry: ScheduledWorkflowRegistry, workflow_engine: WorkflowEngine) -> None:
+    def __init__(
+        self,
+        registry: ScheduledWorkflowRegistry,
+        workflow_engine: WorkflowEngine,
+        event_bus: EventBus | None = None,
+    ) -> None:
         """Initialize the WorkflowSchedulerEngine.
 
         Args:
@@ -87,9 +104,14 @@ class WorkflowSchedulerEngine:
             workflow_engine: The EP-033 WorkflowEngine used to actually
                 run a scheduled entry's referenced workflow definition,
                 through its public `run()` method only.
+            event_bus: Optional EventBus to publish `"workflow.completed"`
+                on after `run_now()` produces a result (EP-037).
+                Defaults to None, which reproduces this class's exact
+                pre-EP-037 behavior (no publish call).
         """
         self._registry = registry
         self._workflow_engine = workflow_engine
+        self._event_bus = event_bus
         self._lock = Lock()
         self._automation_hook: Callable[[str, WorkflowRunResult], None] | None = None
 
@@ -214,6 +236,9 @@ class WorkflowSchedulerEngine:
                 self._automation_hook(entry.workflow_id, result)
             except Exception as exc:  # noqa: BLE001 - a hook defect must never break this run or the tick loop
                 logger.error(f"Automation hook failed for scheduled workflow '{entry_id}': {exc}")
+
+        if result is not None and self._event_bus is not None:
+            self._event_bus.publish("workflow.completed", definition_id=entry.workflow_id, result=result)
 
         with self._lock:
             entry.last_run = datetime.now(timezone.utc)

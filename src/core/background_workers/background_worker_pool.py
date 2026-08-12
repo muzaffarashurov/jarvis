@@ -64,6 +64,7 @@ from enum import Enum
 
 from loguru import logger
 
+from src.core.events import EventBus
 from src.core.workflow_engine.workflow_engine import WorkflowEngine
 from src.core.workflow_engine.workflow_run_provider import WorkflowEngineError
 from src.core.workflow_engine.workflow_run_result import WorkflowRunResult
@@ -161,6 +162,7 @@ class BackgroundWorkerPool:
         workflow_engine: WorkflowEngine,
         worker_count: int = _DEFAULT_WORKER_COUNT,
         poll_interval: float = _DEFAULT_POLL_INTERVAL,
+        event_bus: EventBus | None = None,
     ) -> None:
         """Initialize the pool and immediately start its worker threads.
 
@@ -177,6 +179,12 @@ class BackgroundWorkerPool:
                 latency low; this has no effect on a worker that is
                 currently executing a task (see module docstring,
                 lesson 3).
+            event_bus: Optional EventBus to publish
+                `"background_worker.task_completed"` /
+                `"background_worker.task_failed"` on as tasks reach
+                their final status (EP-037). Defaults to None, which
+                reproduces this class's exact pre-EP-037 behavior (no
+                publish calls).
 
         Raises:
             InvalidWorkerCountError: If `worker_count` is less than 1.
@@ -189,6 +197,7 @@ class BackgroundWorkerPool:
         self._workflow_engine = workflow_engine
         self._worker_count = worker_count
         self._poll_interval = poll_interval
+        self._event_bus = event_bus
 
         self._queue: "queue.Queue[str]" = queue.Queue()
         self._tasks: dict[str, BackgroundTask] = {}
@@ -383,6 +392,14 @@ class BackgroundWorkerPool:
         workflow-run provider or executor) is caught and recorded as
         this task's `FAILED` status, so a single bad workflow can never
         kill the worker thread running it.
+
+        EP-037 ADDITIVE EVENT NOTE: if this pool was given an
+        `event_bus`, `"background_worker.task_completed"` or
+        `"background_worker.task_failed"` is published once this
+        task's final status is known, always outside `_tasks_lock` --
+        the same "never hold a lock while calling out" discipline
+        already used for `WorkflowEngine.run()` itself. This is purely
+        additive and changes no task state, locking, or timing.
         """
         with self._tasks_lock:
             task = self._tasks.get(task_id)
@@ -397,12 +414,26 @@ class BackgroundWorkerPool:
                 task.status = TaskStatus.FAILED
                 task.error = str(exc)
             logger.error(f"Background task '{task_id}' failed: {exc}")
+            if self._event_bus is not None:
+                self._event_bus.publish(
+                    "background_worker.task_failed",
+                    task_id=task_id,
+                    workflow_id=task.workflow_id,
+                    error=task.error,
+                )
             return
         except Exception as exc:  # noqa: BLE001 - a workflow defect must never kill this worker
             with self._tasks_lock:
                 task.status = TaskStatus.FAILED
                 task.error = str(exc)
             logger.error(f"Background task '{task_id}' raised an unexpected error: {exc}")
+            if self._event_bus is not None:
+                self._event_bus.publish(
+                    "background_worker.task_failed",
+                    task_id=task_id,
+                    workflow_id=task.workflow_id,
+                    error=task.error,
+                )
             return
 
         with self._tasks_lock:
@@ -412,3 +443,19 @@ class BackgroundWorkerPool:
                 task.error = "Workflow completed with one or more failed steps."
 
         logger.info(f"Background task '{task_id}' finished with status {task.status.value}.")
+
+        if self._event_bus is not None:
+            if task.status == TaskStatus.COMPLETED:
+                self._event_bus.publish(
+                    "background_worker.task_completed",
+                    task_id=task_id,
+                    workflow_id=task.workflow_id,
+                    result=result,
+                )
+            else:
+                self._event_bus.publish(
+                    "background_worker.task_failed",
+                    task_id=task_id,
+                    workflow_id=task.workflow_id,
+                    error=task.error,
+                )

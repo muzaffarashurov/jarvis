@@ -111,12 +111,13 @@ Completed sub-packages:
 - EP-034 Scheduler
 - EP-035 Automation Engine
 - EP-036 Background Workers
+- EP-037 Event Bus
 
 ---
 
 ## Current
 
-EP-037 Event Bus
+EP-038 Git Integration
 
 ---
 
@@ -212,7 +213,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-036 Background Workers
 
-EP-037 Event Bus
+✓ EP-037 Event Bus
 
 ---
 

@@ -62,6 +62,7 @@ from src.core.background_workers.background_worker_pool import (
     BackgroundWorkerPoolError,
 )
 from src.core.config import Config
+from src.core.events import EventBus
 from src.core.workflow_engine.workflow_engine import WorkflowEngine
 
 _DEFAULT_WORKER_COUNT = 4
@@ -117,7 +118,12 @@ class BackgroundWorkerService:
     note on hidden-coupling avoidance).
     """
 
-    def __init__(self, config: Config, workflow_engine: WorkflowEngine) -> None:
+    def __init__(
+        self,
+        config: Config,
+        workflow_engine: WorkflowEngine,
+        event_bus: EventBus | None = None,
+    ) -> None:
         """Initialize the BackgroundWorkerService, constructing its pool if enabled.
 
         Args:
@@ -128,6 +134,12 @@ class BackgroundWorkerService:
                 WorkflowEngine forwarded unchanged to the
                 BackgroundWorkerPool this service builds (when
                 enabled). Never mutated by this service.
+            event_bus: Optional EventBus, forwarded unchanged to the
+                BackgroundWorkerPool this service builds (when
+                enabled), for it to publish task-lifecycle events on
+                (EP-037). Defaults to None, which reproduces this
+                class's exact pre-EP-037 behavior (no events
+                published).
 
         Raises:
             BackgroundWorkerServiceError: If 'background_workers.worker_count'
@@ -139,6 +151,7 @@ class BackgroundWorkerService:
         """
         self._config = config
         self._workflow_engine = workflow_engine
+        self._event_bus = event_bus
         self._shutdown_timeout = self._resolve_shutdown_timeout()
         self._pool: BackgroundWorkerPool | None = None
 
@@ -147,6 +160,7 @@ class BackgroundWorkerService:
             self._pool = BackgroundWorkerPool(
                 workflow_engine=workflow_engine,
                 worker_count=worker_count,
+                event_bus=event_bus,
             )
             logger.info(
                 f"Background Worker Service started with {worker_count} worker(s)."

@@ -10,51 +10,67 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-037 — Event Bus
+### EP-038 — Git Integration
 
 Planned objectives:
 
-- Tracked in docs/architecture/JARVIS_ROADMAP.md, Phase 5 (Workflow
-  Automation), as the fifth and final EP of that phase (after
-  EP-033 Workflow Engine, EP-034 Workflow Scheduler, EP-035 Automation
-  Engine, and EP-036 Background Workers). Not yet scoped in detail.
+- Tracked in docs/architecture/JARVIS_ROADMAP.md, Phase 6
+  (Integrations), as the first of that phase (alongside EP-039 GitHub
+  Integration). Not yet scoped in detail.
 
 Status:
 
 Planned
 
-Note: EP-036 — Background Workers is now complete through STEP 4 (see
+Note: EP-037 — Event Bus is now complete through STEP 4 (see
 CHANGELOG.md / docs/RELEASE_NOTES.md /
-docs/architecture/audits/EP036_AUDIT.md). It is a new, independent
-package (`src/core/background_workers/`) that runs already-registered
-EP-033 workflows in the background, off the calling thread, through a
-configurable pool of daemon worker threads, by calling EP-033's
-already-existing `WorkflowEngine.run(workflow_id)` exclusively. It
-performs no AI reasoning, no planning, and no direct
-real-subsystem/tool invocation of its own. `BackgroundWorkerPool`
-(`background_worker_pool.py`) is the only component holding a
-reference to EP-033's `WorkflowEngine`, reached through its public
-`run()` method only, the same discipline `WorkflowSchedulerEngine`
-(EP-034) and `AutomationEngine` (EP-035) already follow. Layering is
-`BackgroundWorkerPool` (core) -> `BackgroundWorkerService`
-(config-driven lifecycle owner, `src/services/background_worker_service.py`)
--> `BackgroundWorkerModule` (CLI translation layer only,
-`src/modules/background_worker_module.py`, exposing the `worker`
-namespace) -- each layer reaches the one below it through its public
-API only, so the dependency direction stays one-way.
+docs/architecture/audits/EP037_AUDIT.md). It did not create a second
+event bus -- it strengthened and put the existing
+`src/core/events.py::EventBus` (in place since EP-001) into real
+production use: `EventBus.publish()`/`subscribe()`/`unsubscribe()`
+became thread-safe (a lock-protected snapshot of subscribers is
+invoked outside the lock), and two new production event paths were
+wired through it. `WorkflowEngineService` (EP-033) and
+`WorkflowSchedulerEngine` (EP-034) now publish `"workflow.completed"`
+(`definition_id`, `result`) at the same point their existing
+`automation_hook` already fired; `BackgroundWorkerPool` (EP-036) now
+publishes `"background_worker.task_completed"` /
+`"background_worker.task_failed"` (`task_id`, `workflow_id`,
+`result`/`error`) at its existing task-completion transitions. In
+production, Bootstrap now reaches `AutomationEngine.notify_run()`
+(EP-035) by subscribing it to `"workflow.completed"`, replacing the
+two separate `set_automation_hook()` calls that previously wired
+on-demand and scheduled runs to it (the hook APIs themselves remain
+intact for backward compatibility; they are simply no longer used for
+production automation wiring). A second, small Bootstrap-local adapter
+closes the one remaining gap: `BackgroundWorkerPool` calls the raw
+`WorkflowEngine.run()` directly rather than going through
+`WorkflowEngineService`, so a `worker submit` task previously had no
+path to automation at all -- the adapter subscribes to
+`"background_worker.task_completed"` only, re-keying its existing
+`workflow_id` kwarg to the `definition_id` kwarg `notify_run()`
+expects, without changing that event's payload contract.
+`"background_worker.task_failed"` is deliberately not wired to
+automation, since it carries no `WorkflowRunResult`. The two
+production notification paths (`workflow.completed` and
+`background_worker.task_completed`) are structurally disjoint --
+different event names, one subscriber each, published from call paths
+that never both fire for the same run -- so a workflow completion,
+however it was dispatched, triggers automation exactly once.
 
-SCOPE NOTE: EP-036 STEP 4 was a read-only Architecture Audit (no code,
+SCOPE NOTE: EP-037 STEP 4 was a read-only Architecture Audit (no code,
 test, or configuration changes), per
 docs/architecture/AI_DEVELOPMENT_PLAYBOOK.md. It identified two
 tracked, non-urgent architecture-debt items rather than any Critical
-or High finding: AD-005 (Medium) -- no process-exit shutdown wiring
-for `BackgroundWorkerService.shutdown()`, meaning an in-flight task is
-terminated mid-run and a still-queued task is silently dropped on
-interpreter exit unless `worker stop` was run manually first; and
-AD-006 (Low) -- `BackgroundWorkerPool` task history has no
-eviction/TTL and grows unbounded over a long-running process. Both are
-recorded in docs/architecture/ARCHITECTURE_DEBT.md and are explicitly
-deferred to a future Architecture Cleanup milestone, not to EP-037.
+or High finding: AD-007 (Low) -- a background-worker-triggered
+automation action workflow runs synchronously on the pool worker
+thread that completed the triggering task, which could delay that
+worker under load; and AD-008 (Low) -- the background-worker adapter's
+payload key access is implicitly, not explicitly, coupled to
+`BackgroundWorkerPool`'s exact publish-call kwarg names, with a silent
+(log-only) failure mode if that shape ever changes. Both are recorded
+in docs/architecture/ARCHITECTURE_DEBT.md and are explicitly deferred
+to a future Architecture Cleanup milestone, not to EP-038.
 
 ---
 

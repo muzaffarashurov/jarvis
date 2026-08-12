@@ -6,6 +6,91 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.4-ep037
+
+Released: 2026-08-12
+
+### Added
+
+- docs/architecture/audits/EP037_AUDIT.md: EP-037 STEP 4 read-only
+  Architecture Audit, covering EventBus thread-safety, the two new
+  event paths, the background-worker adapter, duplicate-notification
+  prevention, and EP-033/034/035/036 interaction
+
+### Changed
+
+- src/core/events.py: `EventBus` is now thread-safe. A single
+  `threading.Lock` protects the subscriber registry; `subscribe()`/
+  `unsubscribe()` mutate under the lock; `publish()` takes a snapshot
+  copy of the relevant handler list under the lock, then releases the
+  lock before invoking any handler -- the same lock-then-release-then-
+  call-out discipline `BackgroundWorkerPool` (EP-036) already uses for
+  `WorkflowEngine.run()`. Public API (`subscribe`, `unsubscribe`,
+  `publish`, `event_names`) is unchanged
+- src/services/workflow_engine_service.py: `WorkflowEngineService`
+  gained an optional `event_bus` constructor parameter (default
+  `None`, reproducing pre-EP-037 behavior exactly). `run()` publishes
+  `"workflow.completed"` (`definition_id`, `result`) at the same point
+  the existing `automation_hook` already fires. The hook and its call
+  site are unchanged
+- src/core/workflow_scheduler/workflow_scheduler_engine.py: same
+  change, for `WorkflowSchedulerEngine.run_now()`
+- src/core/background_workers/background_worker_pool.py:
+  `BackgroundWorkerPool` gained an optional `event_bus` constructor
+  parameter. `_execute_task` publishes
+  `"background_worker.task_completed"` (`task_id`, `workflow_id`,
+  `result`) or `"background_worker.task_failed"` (`task_id`,
+  `workflow_id`, `error`) at its existing `COMPLETED`/`FAILED`
+  transitions, always outside `_tasks_lock`. No change to task state
+  semantics, locking, worker lifecycle, or shutdown behavior
+- src/services/background_worker_service.py: threads the optional
+  `event_bus` parameter through to the pool it constructs
+- src/bootstrap.py:
+  - Passes the existing `self._event_bus` into
+    `WorkflowEngineService`, `WorkflowSchedulerEngine`, and
+    `BackgroundWorkerService`
+  - Production automation wiring now subscribes
+    `AutomationEngine.notify_run()` to `"workflow.completed"` instead
+    of calling `set_automation_hook()` on both engines separately --
+    one subscription covers both the on-demand and scheduled paths.
+    `set_automation_hook()` remains available and fully functional for
+    direct/external callers; Bootstrap simply no longer uses it for
+    production wiring
+  - A small local adapter, `_on_background_worker_task_completed`,
+    subscribes to `"background_worker.task_completed"` only and calls
+    `automation_engine.notify_run(definition_id=workflow_id, result=result)`,
+    re-keying the event's existing `workflow_id` kwarg without
+    changing that event's payload contract. Not subscribed to
+    `"background_worker.task_failed"` (no `WorkflowRunResult` in that
+    event's payload)
+- src/modules/test_module.py: registers the EP-037 test suite so
+  `test EP037` and `test all` pick it up
+
+### Known limitations
+
+- AD-007 (Low) -- a background-worker-triggered automation action
+  workflow runs synchronously on the pool worker thread that completed
+  the triggering task. See docs/architecture/ARCHITECTURE_DEBT.md
+- AD-008 (Low) -- the background-worker adapter's payload key access
+  is implicitly coupled to `BackgroundWorkerPool`'s exact publish-call
+  kwarg names, with a silent (log-only) failure mode if that shape
+  changes. See docs/architecture/ARCHITECTURE_DEBT.md
+
+### Validation
+
+EP037       : 87 passed / 0 failed / 0 skipped
+EP036       : 101 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP2 : 48 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP3 : 53 passed / 0 failed / 0 skipped (regression, unchanged)
+EP033: 182 passed / 0 failed / 0 skipped (regression, unchanged)
+EP034: 113 passed / 0 failed / 0 skipped (regression, unchanged)
+EP035: 143 passed / 0 failed / 0 skipped (regression -- see
+  docs/RELEASE_NOTES.md for why this is 2 more than EP-036's release
+  figure, and not a weakened assertion)
+EP001: 20 passed / 0 failed / 0 skipped (regression, unchanged)
+
+---
+
 ## v0.1.3-ep036
 
 Released: 2026-08-11

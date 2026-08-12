@@ -28,6 +28,18 @@ Automation Engine can react to on-demand runs (see
 reproduces this class's exact pre-EP-035 behavior. The hook is always
 invoked inside a try/except that never propagates, so a defect in the
 hook can never turn a successful `run()` call into a failure.
+
+EP-037 ADDITIVE EVENT NOTE: `run()` optionally also publishes a
+`"workflow.completed"` event on an injected `EventBus`
+(`src/core/events.py`), at the exact same point the automation hook is
+invoked -- immediately after a `WorkflowRunResult` exists, never for
+an infrastructure-level run failure. This is purely additive: the
+automation hook above is left completely intact and is not replaced by
+this event. `event_bus` defaults to None, which reproduces this
+class's exact pre-EP-037 behavior (no publish call at all). Publishing
+reuses `EventBus.publish()`'s own exception isolation, so a bad
+subscriber can never turn a successful `run()` call into a failure,
+matching the same guarantee already made for the automation hook.
 """
 
 from __future__ import annotations
@@ -37,6 +49,7 @@ from typing import Callable
 
 from loguru import logger
 
+from src.core.events import EventBus
 from src.core.workflow_engine.workflow_definition import WorkflowDefinition
 from src.core.workflow_engine.workflow_engine import WorkflowEngine, WorkflowRunError
 from src.core.workflow_engine.workflow_engine_manager import (
@@ -117,7 +130,12 @@ class WorkflowEngineService:
     dataclasses/CommandResult for WorkflowEngineModule.
     """
 
-    def __init__(self, manager: WorkflowEngineManager, engine: WorkflowEngine) -> None:
+    def __init__(
+        self,
+        manager: WorkflowEngineManager,
+        engine: WorkflowEngine,
+        event_bus: EventBus | None = None,
+    ) -> None:
         """Initialize the WorkflowEngineService.
 
         Args:
@@ -125,9 +143,14 @@ class WorkflowEngineService:
                 and selects providers through.
             engine: The WorkflowEngine this service requests workflow
                 runs through.
+            event_bus: Optional EventBus to publish `"workflow.completed"`
+                on after a run produces a result (EP-037). Defaults to
+                None, which reproduces this class's exact pre-EP-037
+                behavior (no publish call).
         """
         self._manager = manager
         self._engine = engine
+        self._event_bus = event_bus
         self._automation_hook: Callable[[str, WorkflowRunResult], None] | None = None
 
     def set_automation_hook(
@@ -215,5 +238,8 @@ class WorkflowEngineService:
                 self._automation_hook(definition_id, result)
             except Exception as exc:  # noqa: BLE001 - a hook defect must never break this run's result
                 logger.error(f"Automation hook failed for workflow '{definition_id}': {exc}")
+
+        if self._event_bus is not None:
+            self._event_bus.publish("workflow.completed", definition_id=definition_id, result=result)
 
         return WorkflowRunOutcome(success=True, definition_id=definition_id, result=result, error="")

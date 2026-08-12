@@ -731,4 +731,109 @@ EP035: 141 passed / 0 failed / 0 skipped (regression, unchanged)
 
 ---
 
+# EP-037 — Event Bus
+
+Status: Released
+
+Purpose:
+
+Puts the existing, previously-dormant `EventBus` (in place since
+EP-001) into real production use as a decoupling mechanism between
+EP-033 through EP-036, replacing bespoke point-to-point callback
+wiring where doing so genuinely improves decoupling, without creating
+a second event bus implementation.
+
+Implemented functionality:
+
+- `EventBus` (`src/core/events.py`) is now thread-safe: a single lock
+  protects its subscriber registry; `publish()` takes a snapshot copy
+  of the relevant handlers under the lock, then invokes them outside
+  it, so a handler that itself subscribes/unsubscribes/publishes
+  during its own invocation can never deadlock or corrupt the
+  subscriber list. The public API (`subscribe`, `unsubscribe`,
+  `publish`, `event_names`) is unchanged; every pre-existing caller
+  (including EP-001's own `Orchestrator` publishes) continues to work
+  unmodified
+- `WorkflowEngineService` (EP-033) and `WorkflowSchedulerEngine`
+  (EP-034) publish `"workflow.completed"` (`definition_id`, `result`)
+  at the same point their existing `automation_hook` already fired --
+  purely additive; the hook and its call sites are left fully intact
+- `BackgroundWorkerPool` (EP-036) publishes
+  `"background_worker.task_completed"` / `"background_worker.task_failed"`
+  (`task_id`, `workflow_id`, `result`/`error`) at its existing
+  `COMPLETED`/`FAILED` task transitions, always outside its own task
+  lock -- task state semantics, locking, and shutdown behavior are
+  unchanged
+- Bootstrap's production automation wiring now subscribes
+  `AutomationEngine.notify_run()` (EP-035) to `"workflow.completed"`
+  instead of calling `set_automation_hook()` on both engines
+  separately -- one subscription now covers both the on-demand and
+  scheduled paths. `set_automation_hook()` itself remains available
+  and fully functional for any external/direct caller
+- A small Bootstrap-local adapter subscribes to
+  `"background_worker.task_completed"` only, and calls
+  `AutomationEngine.notify_run(definition_id=workflow_id, result=result)`
+  -- closing the one integration gap `BackgroundWorkerPool` had, since
+  it calls the raw `WorkflowEngine.run()` directly rather than through
+  `WorkflowEngineService`. `"background_worker.task_failed"` is
+  deliberately not wired to automation, since it carries no
+  `WorkflowRunResult`
+- The two production notification paths are structurally disjoint --
+  different event names, one subscriber each, published from call
+  paths that never both fire for the same run -- so a workflow
+  completion, however it was dispatched (on-demand, scheduled, or
+  background), triggers automation exactly once, never zero or twice
+
+Highlights:
+
+- No second `EventBus` implementation anywhere in the codebase --
+  EP-037 strengthens and reuses `src/core/events.py::EventBus`
+  exclusively
+- No new configuration and no new CLI namespace: an EventBus is
+  internal architectural infrastructure, not a user-facing surface
+- Every new production wiring point is additive: no existing public
+  API (`set_automation_hook()`, `BackgroundWorkerPool`/`Service`'s
+  pre-EP-037 call shape) was removed, narrowed, or had its behavior
+  changed for a caller that doesn't use the new `event_bus` parameter
+
+Known limitations (tracked as Architecture Debt -- see
+docs/architecture/ARCHITECTURE_DEBT.md and
+docs/architecture/audits/EP037_AUDIT.md):
+
+- AD-007 (Low) -- a background-worker-triggered automation action
+  workflow runs synchronously on the pool worker thread that completed
+  the triggering task, which could delay that worker under load. A
+  latency characteristic, not a defect
+- AD-008 (Low) -- the background-worker adapter's payload key access
+  (`workflow_id`, `result`) is implicitly, not explicitly, coupled to
+  `BackgroundWorkerPool`'s exact publish-call kwarg names, with a
+  silent (log-only) failure mode if that shape ever changes
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed. `set_automation_hook()` on both `WorkflowEngineService` and
+`WorkflowSchedulerEngine` remains callable and functional directly.
+EP-033's, EP-034's, EP-035's, and EP-036's own test suites pass
+unchanged after this release.
+
+No breaking changes.
+
+Validation:
+
+EP037       : 87 passed / 0 failed / 0 skipped
+EP036       : 101 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP2 : 48 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP3 : 53 passed / 0 failed / 0 skipped (regression, unchanged)
+EP033: 182 passed / 0 failed / 0 skipped (regression, unchanged)
+EP034: 113 passed / 0 failed / 0 skipped (regression, unchanged)
+EP035: 143 passed / 0 failed / 0 skipped (regression -- 2 more than EP-036's
+  release, explained by EP-035's own import-scanning test now also
+  checking the one new `EventBus` import line EP-037 added to each of
+  the two files it touched; not a weakened or modified assertion)
+EP001: 20 passed / 0 failed / 0 skipped (regression, unchanged)
+
+---
+
 End of document.

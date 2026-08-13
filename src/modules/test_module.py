@@ -31,6 +31,8 @@ import tests.EP036.test_background_worker_pool
 import tests.EP036.test_background_worker_service
 import tests.EP036.test_background_worker_module
 import tests.EP037.test_event_bus
+import tests.EP038.test_git_service
+import tests.EP038.test_git_module
 
 class TestModule(CommandModule):
 

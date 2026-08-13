@@ -457,3 +457,28 @@ background_workers:
   enabled: true
   worker_count: 4
   shutdown_timeout: 10
+
+git:
+  # EP-038 Git Integration. Exposes five read-only operations (status,
+  # diff, log, branch, show) by shelling out to the system "git"
+  # executable via subprocess -- no third-party git library dependency.
+  # No remote or destructive operation (push, pull, clone, commit) is
+  # implemented. This subsystem has no dependency on any other
+  # Engineering Package's service or engine (see src/core/git/__init__.py).
+  #
+  # "enabled" defaults to true, matching every other soft-toggle
+  # subsystem. An enabled GitService with no caller has zero observable
+  # effect -- unlike BackgroundWorkerPool, there is no thread or
+  # background work started at construction time.
+  #
+  # "repository_path" is null by default, which Bootstrap resolves to
+  # its own project root. Set this to inspect a different repository's
+  # working tree instead.
+  #
+  # "timeout_seconds" bounds every git subprocess call, so a hung git
+  # process (e.g. one waiting on a credential prompt this subsystem
+  # never supplies, since no remote operation is in scope) cannot hang
+  # the calling thread indefinitely.
+  enabled: true
+  repository_path: null
+  timeout_seconds: 10

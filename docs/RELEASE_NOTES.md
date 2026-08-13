@@ -836,4 +836,170 @@ EP001: 20 passed / 0 failed / 0 skipped (regression, unchanged)
 
 ---
 
+# EP-038 — Git Integration
+
+Status: STEP 1-3 complete (STEP 4 Architecture Audit pending)
+
+Purpose:
+
+Gives Jarvis a way to inspect the state of a git repository -- what's
+changed, what the history looks like, what branches exist, what a
+given commit contains -- without any ability to alter that repository.
+Before this EP, no git-related implementation existed anywhere in the
+codebase.
+
+Implemented functionality:
+
+- Five read-only operations: `status`, `diff` (optionally scoped to a
+  path), `log` (bounded by a count), `branch`, `show <ref>`. No
+  `commit`, `push`, `pull`, or `clone` exists anywhere in this
+  subsystem -- not merely unwired, genuinely absent from both
+  `GitService`'s and `GitModule`'s code
+- Core -> Service -> Module layering, matching the EP-033 through
+  EP-036 precedent:
+  - Core (`src/core/git/`): `GitResult` (a frozen dataclass carrying
+    `command`, `success`, `stdout`, `stderr`, `exit_code`) and a flat
+    `GitError` exception hierarchy (`GitNotFoundError`,
+    `GitRepositoryError`, `GitCommandError`) -- pure data, no
+    subprocess call
+  - Service (`src/services/git_service.py`): `GitService` owns the one
+    place `subprocess.run(["git", ...])` is ever called in this
+    subsystem, exactly matching the "one component owns the one real
+    invocation" discipline `BackgroundWorkerPool` (EP-036) established
+    for `WorkflowEngine.run()`. Every call passes
+    `encoding="utf-8", errors="replace"` explicitly (never `text=True`
+    alone), and is bounded by `git.timeout_seconds` so a hung `git`
+    process cannot hang the calling thread indefinitely
+  - Module (`src/modules/git_module.py`): the `git` CLI namespace
+    (`status`, `diff [path]`, `log [count]`, `branch`, `show <ref>`,
+    `help`), a pure `CommandResult` translation layer over
+    `GitService`'s existing public methods, matching
+    `BackgroundWorkerModule`'s shape exactly
+- No third-party git library: every operation shells out to the
+  system `git` executable via the standard library's `subprocess`
+  module. `requirements.txt` is unchanged
+- `GitService` has no dependency on any other Engineering Package's
+  service or engine -- the first EP since EP-033 with zero cross-EP
+  runtime dependency
+- Config-gated construction in Bootstrap (`git.enabled`, default
+  `true`), matching every other soft-toggle subsystem. Invalid
+  `git.*` configuration (an unreachable/non-repository path, an
+  invalid `timeout_seconds`) disables the subsystem for that run
+  (logged) instead of crashing startup, matching
+  `BackgroundWorkerService`'s handling of invalid
+  `background_workers.*` configuration
+- Tool Engine (EP-031) readiness: `Tool`
+  (`src/core/tool/tool.py`) already wraps an already-built subsystem
+  service without requiring any change to Tool Engine itself, so
+  `GitService`'s narrow, five-method public API can be exposed as
+  `Tool` entries in a future EP with zero modification to
+  `src/core/tool/`. No such registration was added in this EP --
+  confirming Tool-Engine-readiness was a design analysis, not an
+  implementation task in scope here
+
+Configuration and disabled behavior:
+
+`config/config.yaml`'s new `git` section has exactly three keys:
+`enabled` (default `true`), `repository_path` (default `null`, meaning
+Bootstrap's own project root), and `timeout_seconds` (default `10`).
+When `git.enabled` is `false`, Bootstrap never constructs `GitService`
+and never registers `GitModule` at all -- a `git status` (or any other
+`git <action>`) command falls through to the router's existing
+"Unknown command" handling, exactly matching how a disabled
+`BackgroundWorkerModule`/`AutomationModule` behaves today; no
+subsystem-specific "this is disabled" message is invented, since no
+existing module produces one either. The same applies if `git.enabled`
+is `true` but construction still fails (invalid `timeout_seconds`, or
+`repository_path` not inside a git working tree) -- Bootstrap catches
+`GitServiceError`, logs it, and leaves the subsystem disabled for that
+run rather than crashing startup.
+
+Error handling:
+
+- `git` executable not on `PATH` -> `GitNotFoundError`
+- configured/resolved path is not (or no longer is) a git working tree
+  -> `GitRepositoryError`
+- any other non-zero `git` exit (bad ref, bad path, ...) ->
+  `GitCommandError`, carrying the underlying `GitResult`
+- a call exceeding `git.timeout_seconds` -> also `GitCommandError`
+  (the subprocess's own timeout, not a separate exception type)
+- invalid `git.*` configuration, or a `repository_path` that isn't a
+  valid working tree, at construction time -> `GitServiceError`
+  (Bootstrap-only; can never be raised by a running CLI call)
+- `GitModule` catches `GitError` (the common base of the first four)
+  and formats it as `CommandResult(success=False, message=str(exc))`,
+  never letting a raw exception reach the shell
+
+Design deviation from `EP038_DESIGN.md` (approved, not a regression):
+
+`GitService.__init__(config, repository_path=None)`'s `repository_path`
+parameter is an explicit override, exactly as designed. Passing
+Bootstrap's own project root unconditionally as that override would
+have silently ignored a real `git.repository_path` value set in
+config. Bootstrap therefore reads `git.repository_path` from config
+itself first, and only supplies its own project root as the
+`repository_path` argument when config's value is null/absent. The
+design's Configuration section already stated the intended outcome
+("null -> defaults to Bootstrap's project root, real value ->
+respected") -- this is the mechanism that actually delivers that
+outcome; `GitService`'s public constructor signature itself is
+unchanged from the design. Bootstrap's `git.enabled` gate (implied by
+the design's CLI "Disabled behavior" row and by every other
+subsystem's convention, but not spelled out in the Configuration
+section's code snippet) was likewise added so the config key has any
+effect at all.
+
+Known limitations:
+
+- No structured/parsed result shape -- `GitResult.stdout` is raw text
+  (`--porcelain=v1` for `status`, `--oneline` for `log`, chosen for
+  stable script-parseable output). No concrete consumer need for
+  further parsing was identified; deferred, per the design's own
+  "avoid unnecessary abstraction" reasoning
+- `diff`/`show` output is not size-bounded (`log` is, via its own
+  count argument) -- acceptable for the initial read-only scope; see
+  the design document's Risks section
+- The safety rule that `git push` requires human confirmation
+  (`docs/architecture/JARVIS_ARCHITECTURE_VISION.md`) is not
+  implemented, since `push` itself is out of this EP's scope entirely
+
+Testing:
+
+`tests/EP038/test_git_service.py` and `tests/EP038/test_git_module.py`
+(one shared `"EP038"` suite, matching how EP-037's two files share one
+suite) never touch this project's own `.git`. Every test creates a
+disposable, throwaway git repository in a `tempfile.TemporaryDirectory()`,
+initialized via direct `subprocess` calls (not through `GitService`, so
+fixture setup stays independent of the code under test) with a
+*repository-local* `user.name`/`user.email` -- the sandbox's global git
+configuration is never read or written either. Coverage includes all
+five operations against real repository state, config validation
+(bad path, bad timeout), timeout enforcement, CLI dispatch/error
+formatting for every command including invalid arguments, and real
+`Bootstrap` wiring for both the enabled and `git.enabled: false` cases.
+
+Compatibility:
+
+Fully additive. No existing service, manager, or CLI command was
+renamed, removed, or had its behavior changed. `requirements.txt` is
+unchanged -- no new third-party dependency. EP-033's, EP-034's,
+EP-035's, EP-036's, and EP-037's own test suites pass unchanged after
+this work.
+
+No breaking changes.
+
+Validation:
+
+EP038       : 30 passed / 0 failed / 0 skipped
+EP037       : 87 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036       : 101 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP2 : 48 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP3 : 53 passed / 0 failed / 0 skipped (regression, unchanged)
+EP033: 182 passed / 0 failed / 0 skipped (regression, unchanged)
+EP034: 113 passed / 0 failed / 0 skipped (regression, unchanged)
+EP035: 143 passed / 0 failed / 0 skipped (regression, unchanged)
+EP001: 20 passed / 0 failed / 0 skipped (regression, unchanged)
+
+---
+
 End of document.

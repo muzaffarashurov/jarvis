@@ -6,6 +6,107 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.5-ep038
+
+Released: 2026-08-13
+
+Status: STEP 1-3 complete (STEP 4 Architecture Audit pending)
+
+### Added
+
+- src/core/git/git_result.py: `GitResult`, a frozen dataclass
+  describing the outcome of one `git` subprocess invocation
+  (`command`, `success`, `stdout`, `stderr`, `exit_code`). Pure data,
+  no subprocess call in this module
+- src/core/git/git_error.py: flat `GitError` exception hierarchy
+  (`GitError`, `GitNotFoundError`, `GitRepositoryError`,
+  `GitCommandError`), matching this project's existing per-subsystem
+  domain-exception convention
+- src/core/git/__init__.py: package docstring and public re-exports
+- src/services/git_service.py: `GitService`, a config-driven, read-only
+  wrapper around the system `git` executable. Exposes exactly five
+  operations -- `status()`, `diff(path=None)`,
+  `log(max_count=10)`, `branch()`, `show(ref)` -- no `commit`,
+  `push`, `pull`, or `clone` method exists. Owns the sole
+  `subprocess.run(["git", ...])` invocation point in this subsystem;
+  every call passes `encoding="utf-8", errors="replace"` explicitly
+  and is bounded by `git.timeout_seconds`. `GitServiceError` (raised
+  only from `__init__`, for invalid `git.*` configuration or a
+  non-repository path) is defined here, not in
+  `src/core/git/git_error.py`, mirroring how
+  `BackgroundWorkerServiceError` is distinct from the pool-level
+  errors in EP-036
+  - EP-038 test suite (tests/EP038/test_git_service.py)
+- src/modules/git_module.py: `GitModule`, the "git" CLI namespace
+  (`status`, `diff [path]`, `log [count]`, `branch`, `show <ref>`,
+  `help`). A pure, additive translation layer: calls `GitService`'s
+  existing public methods unchanged and catches `GitError` to format
+  `CommandResult(success=False, ...)`, matching
+  `BackgroundWorkerModule`'s pattern exactly
+  - EP-038 test suite (tests/EP038/test_git_module.py)
+- config/config.yaml: new `git` section (`enabled`, `repository_path`,
+  `timeout_seconds`)
+
+### Changed
+
+- src/bootstrap.py: constructs `GitService` (and registers
+  `GitModule`, once construction is confirmed) after the existing
+  EP-036 wiring, gated by `git.enabled` (default `true`) and wrapped
+  in a `try/except GitServiceError` so invalid `git.*` configuration
+  or an unreachable/non-repository path disables the subsystem for
+  that run (logged) instead of crashing startup. Unlike every
+  EP-034/035/036 subsystem, there is no cross-EP "if `<other EP's
+  engine>` is not None" hard-dependency gate, since `GitService`
+  depends only on `Config` and the filesystem. `git.repository_path`
+  is read from config in Bootstrap itself; Bootstrap's own project
+  root is supplied as the `GitService(repository_path=...)` argument
+  only when that config value is null/absent, so a real configured
+  path is respected rather than silently overridden (see "Design
+  deviation" below)
+- src/modules/test_module.py: registers the EP-038 test suite so
+  `test EP038` and `test all` pick it up
+
+### Design deviation from EP038_DESIGN.md (approved, not a regression)
+
+The design's Configuration section stated the intended outcome
+("`repository_path` null/absent -> defaults to Bootstrap's project
+root; a real configured value is respected") without spelling out the
+mechanism. Implementing it required Bootstrap to resolve
+`git.repository_path` from config itself before constructing
+`GitService`, rather than passing its own project root unconditionally
+as the `repository_path` constructor argument (which would have
+silently ignored a real configured value, since that parameter is an
+explicit override by design). `GitService`'s own public constructor
+signature is unchanged from the design. The `git.enabled` gate --
+implied by the design's CLI "Disabled behavior" row and every other
+subsystem's convention, but not present in the Configuration section's
+code snippet -- was added for the same reason: without it, the config
+key would have had no effect.
+
+### Known limitations
+
+- No structured/parsed result shape; `GitResult.stdout` is raw
+  `--porcelain=v1` (`status`) / `--oneline` (`log`) text. No parsing
+  consumer need was identified for this initial scope
+- `diff`/`show` output size is not bounded (`log` is, via its own
+  count argument)
+- The Vision document's "git push requires human confirmation" rule is
+  not implemented, since `push` is out of this EP's scope entirely
+
+### Validation
+
+EP038       : 30 passed / 0 failed / 0 skipped
+EP037       : 87 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036       : 101 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP2 : 48 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP3 : 53 passed / 0 failed / 0 skipped (regression, unchanged)
+EP033: 182 passed / 0 failed / 0 skipped (regression, unchanged)
+EP034: 113 passed / 0 failed / 0 skipped (regression, unchanged)
+EP035: 143 passed / 0 failed / 0 skipped (regression, unchanged)
+EP001: 20 passed / 0 failed / 0 skipped (regression, unchanged)
+
+---
+
 ## v0.1.4-ep037
 
 Released: 2026-08-12

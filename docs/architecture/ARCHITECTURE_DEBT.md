@@ -46,6 +46,7 @@ Architecture Debt is addressed only during a dedicated cleanup milestone.
 | AD-006 | Low | Open |
 | AD-007 | Low | Open |
 | AD-008 | Low | Open |
+| AD-009 | Low | Open |
 
 Status values:
 
@@ -305,6 +306,42 @@ If a future change altered that payload's key names, the adapter would not fail 
 **Recommended solution**
 
 If more EventBus payloads accumulate implicit key-name contracts like this one, consider a light typed-payload convention (e.g. a small dataclass per event) so a shape mismatch fails a type check instead of failing silently at runtime.
+
+**Planned milestone**
+
+Architecture Cleanup v0.2
+
+**Status**
+
+Open
+
+---
+
+## AD-009
+
+**Severity**
+
+Low
+
+**Discovered in**
+
+EP038 Architecture Audit
+
+**Files**
+
+src/services/git_service.py
+
+**Description**
+
+`GitService.show(ref)` passes a caller-supplied `ref` directly into `git show`'s argv (`["show", ref]`) without a `--` separator, unlike `diff(path)` in the same file, which correctly guards its own caller-supplied value with `args.extend(["--", path])`. `ref` reaches this method directly from CLI user input via `GitModule._show`.
+
+**Why it matters**
+
+A `ref` value beginning with `-` (e.g. a user typing `git show --some-flag`) would be interpreted by `git show` as an option rather than a revision argument. `git show` has no generic arbitrary-file-write or code-execution option, and this subsystem has no write/remote operations for an injected flag to escalate into, so the realistic worst case is unexpected/erroring `git show` behavior rather than a security breach -- but it is a genuine, fixable inconsistency in defensive argument construction within the same file.
+
+**Recommended solution**
+
+Apply the same `--` separator `diff()` already uses: `self._run("show", ["show", "--", ref])` (or equivalent), so `ref` can never be interpreted as an option regardless of its content.
 
 **Planned milestone**
 

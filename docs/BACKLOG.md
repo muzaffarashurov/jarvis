@@ -12,15 +12,29 @@ Status: Active
 
 ### EP-038 — Git Integration
 
-Planned objectives:
+Implemented scope:
 
-- Tracked in docs/architecture/JARVIS_ROADMAP.md, Phase 6
-  (Integrations), as the first of that phase (alongside EP-039 GitHub
-  Integration). Not yet scoped in detail.
+- A new, independent Core -> Service -> Module subsystem
+  (`src/core/git/`, `src/services/git_service.py`,
+  `src/modules/git_module.py`) exposing five read-only operations --
+  `status`, `diff`, `log`, `branch`, `show` -- by shelling out to the
+  system `git` executable via `subprocess`. No third-party git library
+  was added. No `commit`, `push`, `pull`, or `clone` capability exists
+  anywhere in this subsystem. `GitService` has no dependency on any
+  other Engineering Package's service or engine -- the first EP since
+  EP-033 with zero cross-EP runtime dependency. Config-gated in
+  Bootstrap via `git.enabled` (default true), matching every other
+  soft-toggle subsystem; `git.repository_path` defaults to Bootstrap's
+  own project root when unset. See CHANGELOG.md / docs/RELEASE_NOTES.md
+  / docs/architecture/designs/EP038_DESIGN.md for full detail.
 
 Status:
 
-Planned
+STEP 1-3 complete (design, implementation, and documentation). STEP 4
+Architecture Audit not yet performed -- EP-038 is not yet marked
+complete in docs/architecture/JARVIS_ROADMAP.md, and "Next Engineering
+Package" below remains EP-038 rather than advancing to EP-039 until
+that audit is done.
 
 Note: EP-037 — Event Bus is now complete through STEP 4 (see
 CHANGELOG.md / docs/RELEASE_NOTES.md /

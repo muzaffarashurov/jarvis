@@ -92,6 +92,7 @@ from src.modules.workflow_engine_module import WorkflowEngineModule
 from src.modules.workflow_scheduler_module import WorkflowSchedulerModule
 from src.modules.automation_module import AutomationModule
 from src.modules.background_worker_module import BackgroundWorkerModule
+from src.modules.git_module import GitModule
 from src.modules.conversation_module import ConversationModule
 from src.modules.embedding_module import EmbeddingModule
 from src.modules.fast_response_module import FastResponseModule
@@ -127,6 +128,7 @@ from src.services.background_worker_service import (
     BackgroundWorkerService,
     BackgroundWorkerServiceError,
 )
+from src.services.git_service import GitService, GitServiceError
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -222,6 +224,7 @@ class Bootstrap:
         self._workflow_scheduler_service: WorkflowSchedulerService | None = None
         self._automation_service: AutomationService | None = None
         self._background_worker_service: BackgroundWorkerService | None = None
+        self._git_service: GitService | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -1313,6 +1316,36 @@ class Bootstrap:
             )
             self._background_worker_service = None
 
+        # EP-038 Git Integration. Unlike every EP-034/035/036 subsystem
+        # above, GitService has no dependency on any other Engineering
+        # Package's service or engine -- it depends only on Config and
+        # the filesystem -- so there is no "if <some other EP's engine>
+        # is not None" hard-dependency gate here, just the same
+        # 'enabled' + config-validation try/except every subsystem uses.
+        if bool(config.get("git.enabled", True)):
+            try:
+                configured_repository_path = config.get("git.repository_path", None)
+                git_service = GitService(
+                    config=config,
+                    repository_path=(
+                        Path(configured_repository_path)
+                        if configured_repository_path
+                        else self._project_root
+                    ),
+                )
+                self._git_service = git_service
+                router.register(GitModule(git_service))
+            except GitServiceError as exc:
+                logger.error(
+                    f"Git Service disabled: invalid 'git.*' configuration or "
+                    f"repository ({exc}). Fix config/config.yaml and restart "
+                    "to re-enable it."
+                )
+                self._git_service = None
+        else:
+            logger.info("Git Service disabled ('git.enabled: false').")
+            self._git_service = None
+
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
 
@@ -1863,3 +1896,16 @@ class Bootstrap:
             EP-036 wiring).
         """
         return self._background_worker_service
+
+    @property
+    def git_service(self) -> GitService | None:
+        """Return the GitService built for EP-038, if available.
+
+        Returns:
+            The GitService instance, or None if `run()`/`initialize()`
+            has not completed (or the Git Service subsystem was
+            disabled this run, or invalid 'git.*' configuration or
+            repository path was supplied -- see
+            `_build_command_router`'s EP-038 wiring).
+        """
+        return self._git_service

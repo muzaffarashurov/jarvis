@@ -482,3 +482,31 @@ git:
   enabled: true
   repository_path: null
   timeout_seconds: 10
+
+github:
+  # EP-039 GitHub Integration. Exposes eight read-only operations
+  # (repository info, list repositories, list/get issue, list/get
+  # pull request, list/get commit) against the GitHub REST API, using
+  # the project's existing "requests" dependency directly -- no
+  # GitHub SDK. No write/mutating operation (create, comment, merge,
+  # close, reopen, release, ...) is implemented. This subsystem has
+  # no dependency on any other Engineering Package's service or
+  # engine (see src/core/github/__init__.py).
+  #
+  # IMPORTANT: authentication uses the GITHUB_TOKEN environment
+  # variable ONLY. The token itself must never be placed here or in
+  # any other config file -- only the two non-secret settings below.
+  #
+  # "enabled" defaults to true, matching every other soft-toggle
+  # subsystem. An enabled GitHubService with no caller has zero
+  # observable effect -- there is no thread or background work
+  # started at construction time.
+  #
+  # "api_base_url" defaults to the real GitHub REST API root;
+  # override for a GitHub Enterprise Server deployment.
+  #
+  # "timeout_seconds" bounds every GitHub HTTP call, so a hung/slow
+  # network request cannot hang the calling thread indefinitely.
+  enabled: true
+  api_base_url: "https://api.github.com"
+  timeout_seconds: 30

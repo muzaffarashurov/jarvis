@@ -93,6 +93,7 @@ from src.modules.workflow_scheduler_module import WorkflowSchedulerModule
 from src.modules.automation_module import AutomationModule
 from src.modules.background_worker_module import BackgroundWorkerModule
 from src.modules.git_module import GitModule
+from src.modules.github_module import GitHubModule
 from src.modules.conversation_module import ConversationModule
 from src.modules.embedding_module import EmbeddingModule
 from src.modules.fast_response_module import FastResponseModule
@@ -129,6 +130,7 @@ from src.services.background_worker_service import (
     BackgroundWorkerServiceError,
 )
 from src.services.git_service import GitService, GitServiceError
+from src.services.github_service import GitHubService, GitHubServiceError
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -225,6 +227,7 @@ class Bootstrap:
         self._automation_service: AutomationService | None = None
         self._background_worker_service: BackgroundWorkerService | None = None
         self._git_service: GitService | None = None
+        self._github_service: GitHubService | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -1346,6 +1349,30 @@ class Bootstrap:
             logger.info("Git Service disabled ('git.enabled: false').")
             self._git_service = None
 
+        # EP-039 GitHub Integration. Like GitService, GitHubService has
+        # no dependency on any other Engineering Package's service or
+        # engine -- it depends only on Config and, at call time, the
+        # process environment (GITHUB_TOKEN) -- so there is no
+        # cross-EP hard-dependency gate here either, just the same
+        # 'enabled' + config-validation try/except every subsystem
+        # uses. GITHUB_TOKEN itself is never read here or anywhere in
+        # Bootstrap -- GitHubService reads it directly from the
+        # environment at call time (see src/services/github_service.py).
+        if bool(config.get("github.enabled", True)):
+            try:
+                github_service = GitHubService(config=config)
+                self._github_service = github_service
+                router.register(GitHubModule(github_service))
+            except GitHubServiceError as exc:
+                logger.error(
+                    f"GitHub Service disabled: invalid 'github.*' configuration "
+                    f"({exc}). Fix config/config.yaml and restart to re-enable it."
+                )
+                self._github_service = None
+        else:
+            logger.info("GitHub Service disabled ('github.enabled: false').")
+            self._github_service = None
+
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
 
@@ -1909,3 +1936,16 @@ class Bootstrap:
             `_build_command_router`'s EP-038 wiring).
         """
         return self._git_service
+
+    @property
+    def github_service(self) -> GitHubService | None:
+        """Return the GitHubService built for EP-039, if available.
+
+        Returns:
+            The GitHubService instance, or None if
+            `run()`/`initialize()` has not completed (or the GitHub
+            Service subsystem was disabled this run, or invalid
+            'github.*' configuration was supplied -- see
+            `_build_command_router`'s EP-039 wiring).
+        """
+        return self._github_service

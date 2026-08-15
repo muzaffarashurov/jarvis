@@ -112,12 +112,13 @@ Completed sub-packages:
 - EP-035 Automation Engine
 - EP-036 Background Workers
 - EP-037 Event Bus
+- EP-038 Git Integration
 
 ---
 
 ## Current
 
-EP-038 Git Integration
+EP-039 GitHub Integration
 
 ---
 
@@ -219,7 +220,7 @@ EP-013 AI Infrastructure
 
 ## Phase 6 — Integrations
 
-EP-038 Git Integration
+✓ EP-038 Git Integration
 
 EP-039 GitHub Integration
 

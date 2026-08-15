@@ -1002,4 +1002,163 @@ EP001: 20 passed / 0 failed / 0 skipped (regression, unchanged)
 
 ---
 
+# EP-039 — GitHub Integration
+
+Status: STEP 1-3 complete (STEP 4 Architecture Audit pending)
+
+Purpose:
+
+Gives Jarvis a way to read information from GitHub -- repository
+metadata, issues, pull requests, and commits -- without any ability to
+change that state. Before this EP, no GitHub-related implementation
+existed anywhere in the codebase. The direct architectural sibling of
+EP-038 (Git Integration), one phase later in Phase 6 (Integrations).
+
+Implemented functionality:
+
+- Eight read-only operations: repository information, the
+  authenticated user's own repositories, list/get issue, list/get
+  pull request, list/get commit. No create, update, delete, comment,
+  merge, close, reopen, release, or any other write/mutating GitHub
+  operation exists anywhere in this subsystem -- not merely unwired,
+  genuinely absent from both `GitHubService`'s and `GitHubModule`'s
+  code
+- Core -> Service -> Module layering, matching the EP-038 precedent
+  exactly:
+  - Core (`src/core/github/`): `GitHubResult` (a frozen dataclass
+    carrying `operation`, `status_code`, `data` -- the parsed JSON
+    response body, exactly as GitHub returns it) and a flat
+    `GitHubError` exception hierarchy (`GitHubAuthenticationError`,
+    `GitHubNotFoundError`, `GitHubRateLimitError`, `GitHubTimeoutError`,
+    `GitHubNetworkError`, `GitHubAPIError`) -- pure data, no HTTP call
+  - Service (`src/services/github_service.py`): `GitHubService` owns
+    the one place `requests.get(...)` is ever called in this
+    subsystem, exactly matching the "one component owns the one real
+    invocation" discipline `GitService` (EP-038) established for
+    `subprocess.run(["git", ...])`. HTTP error translation follows
+    `claude_provider.py`'s existing, already-proven pattern
+    (`Timeout`/`ConnectionError`/other `RequestException`, then
+    status-code mapping)
+  - Module (`src/modules/github_module.py`): the `github` CLI
+    namespace (`repo`, `repos`, `issues`, `issue`, `prs`, `pr`,
+    `commits`, `commit`, `help`), a pure `CommandResult` translation
+    layer over `GitHubService`'s existing public methods, matching
+    `GitModule`'s shape exactly
+  - Bootstrap constructs `GitHubService` and registers `GitHubModule`,
+    gated by `github.enabled`, mirroring the EP-038 wiring block
+    exactly -- **EP-031 Tool Engine was not modified**; `GitHubService`'s
+    eight side-effect-free methods remain clean future `Tool` candidates
+    by construction, the same conclusion EP-038 reached for `GitService`
+- No third-party GitHub SDK: every operation uses the project's
+  existing `requests` dependency directly. `requirements.txt` is
+  unchanged
+- `GitHubService` has no dependency on any other Engineering Package's
+  service or engine, like `GitService` before it
+
+Authentication:
+
+`GITHUB_TOKEN` is supplied **only** through an environment variable,
+read fresh via `os.environ.get("GITHUB_TOKEN")` inside `GitHubService`
+at the start of every operation call -- never at construction, never
+cached beyond the duration of a single call. **The token must never be
+placed in `config/config.yaml` or any other config file**, and none of
+this subsystem's code paths do so. If the token is missing or blank
+when an operation is requested, `GitHubAuthenticationError` is raised
+immediately, before any HTTP call is attempted -- no wasted network
+request. The token is sent only as the `Authorization` request header;
+it is never logged, never included in an exception message, and never
+appears in any CLI (`CommandResult`) output -- every error message in
+this subsystem is built from fixed text and/or the HTTP response
+itself, never from the token value. `GitHubModule` never reads or
+handles the token at all.
+
+Configuration and disabled behavior:
+
+`config/config.yaml`'s new `github` section has exactly three keys:
+`enabled` (default `true`), `api_base_url` (default
+`"https://api.github.com"`, overridable for a GitHub Enterprise Server
+deployment), and `timeout_seconds` (default `30`). `GITHUB_TOKEN` is
+not one of them and never will be under this design. When
+`github.enabled` is `false`, Bootstrap never constructs `GitHubService`
+and never registers `GitHubModule` -- a `github <anything>` command
+falls through to the router's existing "Unknown command" handling,
+identical to a disabled `GitModule`. The same applies if construction
+still fails (invalid `timeout_seconds`, empty `api_base_url`) --
+Bootstrap catches `GitHubServiceError`, logs it, and leaves the
+subsystem disabled for that run rather than crashing startup.
+
+Error handling:
+
+- `GITHUB_TOKEN` unset/blank, or GitHub returns HTTP 401, or HTTP 403
+  without a rate-limit signal -> `GitHubAuthenticationError`
+- HTTP 404 -> `GitHubNotFoundError`
+- HTTP 403 with `X-RateLimit-Remaining: 0`, or HTTP 429 ->
+  `GitHubRateLimitError`
+- Request exceeds `github.timeout_seconds` -> `GitHubTimeoutError`
+- A connection-level failure -> `GitHubNetworkError`
+- Any other non-2xx status, or an unparseable (non-JSON) response body
+  -> `GitHubAPIError`
+- Invalid `github.*` configuration at construction ->
+  `GitHubServiceError` (Bootstrap-only; can never be raised by a
+  running CLI call)
+- `GitHubModule` catches `GitHubError` (the common base of the first
+  six) and formats it as `CommandResult(success=False, message=str(exc))`,
+  never letting a raw exception reach the shell
+
+Testing:
+
+`tests/EP039/test_github_service.py` and
+`tests/EP039/test_github_module.py` (one shared `"EP039"` suite) never
+make a real GitHub API call. Every test constructs `GitHubService`
+with a small duck-typed stub `session` object in place of a real
+`requests.Session` -- the same technique
+`tests/EP035/test_automation_engine.py`'s `_StubPlanExecutionEngine`
+already uses for a different dependency -- so no new mocking/HTTP
+library was added. Coverage includes all eight operations, missing/blank
+token handling (asserting zero HTTP calls are attempted), every HTTP
+status-code mapping, timeout/connection-error translation, malformed
+JSON, CLI dispatch/argument validation for every command, real
+Bootstrap wiring for both `github.enabled` states, and a dedicated
+assertion that a fixed fake token value never appears in any exception
+message across six different error scenarios.
+
+Known limitations:
+
+- No pagination -- list operations return only GitHub's default first
+  page. Acceptable for the initial read-only scope; deferred rather
+  than solved, matching `GitService`'s own restraint in EP-038
+- `list_repositories()` covers the authenticated user's own
+  repositories only (`GET /user/repos`), not an arbitrary named
+  user's or organization's repositories
+- No retry/backoff on rate-limit errors
+- `python-dotenv` is listed in `requirements.txt` but is not imported
+  anywhere in the codebase -- `GITHUB_TOKEN` must be present in the
+  actual process environment Jarvis is started with, not merely placed
+  in a `.env` file
+
+Compatibility:
+
+Fully additive. No existing service, manager, or CLI command was
+renamed, removed, or had its behavior changed. `requirements.txt` is
+unchanged -- no new third-party dependency. EP-033's, EP-034's,
+EP-035's, EP-036's, EP-037's, and EP-038's own test suites pass
+unchanged after this work.
+
+No breaking changes.
+
+Validation:
+
+EP039       : 36 passed / 0 failed / 0 skipped
+EP038       : 30 passed / 0 failed / 0 skipped (regression, unchanged)
+EP037       : 87 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036       : 101 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP2 : 48 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP3 : 53 passed / 0 failed / 0 skipped (regression, unchanged)
+EP033: 182 passed / 0 failed / 0 skipped (regression, unchanged)
+EP034: 113 passed / 0 failed / 0 skipped (regression, unchanged)
+EP035: 143 passed / 0 failed / 0 skipped (regression, unchanged)
+EP001: 20 passed / 0 failed / 0 skipped (regression, unchanged)
+
+---
+
 End of document.

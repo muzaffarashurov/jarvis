@@ -33,6 +33,8 @@ import tests.EP036.test_background_worker_module
 import tests.EP037.test_event_bus
 import tests.EP038.test_git_service
 import tests.EP038.test_git_module
+import tests.EP039.test_github_service
+import tests.EP039.test_github_module
 
 class TestModule(CommandModule):
 

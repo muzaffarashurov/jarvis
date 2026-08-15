@@ -6,6 +6,103 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.6-ep039
+
+Released: 2026-08-14
+
+Status: STEP 1-3 complete (STEP 4 Architecture Audit pending)
+
+### Added
+
+- src/core/github/github_result.py: `GitHubResult`, a frozen dataclass
+  describing the outcome of one successful GitHub REST API call
+  (`operation`, `status_code`, `data` -- the parsed JSON response body,
+  exactly as GitHub returns it). Pure data, no HTTP call in this module
+- src/core/github/github_error.py: flat `GitHubError` exception
+  hierarchy (`GitHubError`, `GitHubAuthenticationError`,
+  `GitHubNotFoundError`, `GitHubRateLimitError`, `GitHubTimeoutError`,
+  `GitHubNetworkError`, `GitHubAPIError`), modeled directly on
+  `src/core/ai/claude_provider.py`'s existing
+  `ProviderAuthenticationError`/`ProviderRateLimitError`/etc. split
+- src/core/github/__init__.py: package docstring and public re-exports
+- src/services/github_service.py: `GitHubService`, a config-driven,
+  read-only wrapper around the GitHub REST API. Exposes exactly eight
+  operations -- `get_repository()`, `list_repositories()`,
+  `list_issues()`, `get_issue()`, `list_pull_requests()`,
+  `get_pull_request()`, `list_commits()`, `get_commit()` -- no
+  create/update/delete/comment/merge/release method exists. Owns the
+  sole `requests.get(...)` invocation point in this subsystem.
+  `GITHUB_TOKEN` is read via `os.environ.get()` at the start of every
+  operation call (never at `__init__`, never cached, never logged);
+  missing/blank token raises `GitHubAuthenticationError` before any
+  HTTP call is attempted. `owner`/`repo`/`number`/`sha` path segments
+  are URL-quoted (`urllib.parse.quote`). `session` is an injectable,
+  optional `requests.Session`-like parameter, defaulting to a real
+  `requests.Session()`, enabling dependency-free test doubles.
+  `GitHubServiceError` (raised only from `__init__`, for invalid
+  `github.*` configuration) is defined here, not in
+  `src/core/github/github_error.py`, mirroring how
+  `GitServiceError` is distinct from `GitError` in EP-038
+  - EP-039 test suite (tests/EP039/test_github_service.py)
+- src/modules/github_module.py: `GitHubModule`, the "github" CLI
+  namespace (`repo`, `repos`, `issues`, `issue`, `prs`, `pr`,
+  `commits`, `commit`, `help`). A pure, additive translation layer:
+  calls `GitHubService`'s existing public methods unchanged and
+  catches `GitHubError` to format `CommandResult(success=False, ...)`,
+  matching `GitModule`'s pattern exactly. Never reads or handles
+  `GITHUB_TOKEN`
+  - EP-039 test suite (tests/EP039/test_github_module.py)
+- config/config.yaml: new `github` section (`enabled`,
+  `api_base_url`, `timeout_seconds` -- deliberately no token key)
+
+### Changed
+
+- src/bootstrap.py: constructs `GitHubService` (and registers
+  `GitHubModule`, once construction is confirmed) after the existing
+  EP-038 wiring, gated by `github.enabled` (default `true`) and
+  wrapped in a `try/except GitHubServiceError` so invalid `github.*`
+  configuration disables the subsystem for that run (logged) instead
+  of crashing startup. Like `GitService`, there is no cross-EP
+  hard-dependency gate, since `GitHubService` depends only on `Config`
+  and, at call time, the process environment
+- src/modules/test_module.py: registers the EP-039 test suite so
+  `test EP039` and `test all` pick it up
+
+### Security
+
+`GITHUB_TOKEN` is never placed in `config/config.yaml` or any other
+config file by this implementation, is never logged, and never
+appears in any exception message or CLI output -- verified directly by
+a dedicated test asserting a fixed fake token value never appears in
+any exception message across six different error scenarios.
+`EP-031 Tool Engine was not modified.`
+
+### Known limitations
+
+- No pagination -- list operations return only GitHub's default first
+  page
+- `list_repositories()` covers the authenticated user's own
+  repositories only, not an arbitrary named user's or organization's
+- No retry/backoff on rate-limit errors
+- `python-dotenv` (in `requirements.txt`) is not imported anywhere;
+  `GITHUB_TOKEN` must be present in the actual process environment,
+  not merely a `.env` file
+
+### Validation
+
+EP039       : 36 passed / 0 failed / 0 skipped
+EP038       : 30 passed / 0 failed / 0 skipped (regression, unchanged)
+EP037       : 87 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036       : 101 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP2 : 48 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP3 : 53 passed / 0 failed / 0 skipped (regression, unchanged)
+EP033: 182 passed / 0 failed / 0 skipped (regression, unchanged)
+EP034: 113 passed / 0 failed / 0 skipped (regression, unchanged)
+EP035: 143 passed / 0 failed / 0 skipped (regression, unchanged)
+EP001: 20 passed / 0 failed / 0 skipped (regression, unchanged)
+
+---
+
 ## v0.1.5-ep038
 
 Released: 2026-08-13

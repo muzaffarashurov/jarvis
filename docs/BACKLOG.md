@@ -10,81 +10,58 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-038 — Git Integration
+### EP-039 — GitHub Integration
 
 Implemented scope:
 
 - A new, independent Core -> Service -> Module subsystem
-  (`src/core/git/`, `src/services/git_service.py`,
-  `src/modules/git_module.py`) exposing five read-only operations --
-  `status`, `diff`, `log`, `branch`, `show` -- by shelling out to the
-  system `git` executable via `subprocess`. No third-party git library
-  was added. No `commit`, `push`, `pull`, or `clone` capability exists
-  anywhere in this subsystem. `GitService` has no dependency on any
-  other Engineering Package's service or engine -- the first EP since
-  EP-033 with zero cross-EP runtime dependency. Config-gated in
-  Bootstrap via `git.enabled` (default true), matching every other
-  soft-toggle subsystem; `git.repository_path` defaults to Bootstrap's
-  own project root when unset. See CHANGELOG.md / docs/RELEASE_NOTES.md
-  / docs/architecture/designs/EP038_DESIGN.md for full detail.
+  (`src/core/github/`, `src/services/github_service.py`,
+  `src/modules/github_module.py`) exposing eight read-only operations
+  -- repository information, the authenticated user's own
+  repositories, list/get issue, list/get pull request, list/get
+  commit -- against the GitHub REST API, using the project's existing
+  `requests` dependency directly. No third-party GitHub SDK was added.
+  No create, update, delete, comment, merge, close, reopen, release,
+  or any other write/mutating GitHub operation exists anywhere in this
+  subsystem. `GitHubService` has no dependency on any other
+  Engineering Package's service or engine, like `GitService` (EP-038)
+  before it. Config-gated in Bootstrap via `github.enabled` (default
+  true), matching every other soft-toggle subsystem. Authentication
+  uses the `GITHUB_TOKEN` environment variable only -- it is never
+  placed in `config/config.yaml` or any other config file, and it is
+  never logged or included in an exception message or CLI output. See
+  CHANGELOG.md / docs/RELEASE_NOTES.md /
+  docs/architecture/designs/EP039_DESIGN.md for full detail.
 
 Status:
 
 STEP 1-3 complete (design, implementation, and documentation). STEP 4
-Architecture Audit not yet performed -- EP-038 is not yet marked
+Architecture Audit not yet performed -- EP-039 is not yet marked
 complete in docs/architecture/JARVIS_ROADMAP.md, and "Next Engineering
-Package" below remains EP-038 rather than advancing to EP-039 until
+Package" below remains EP-039 rather than advancing to EP-040 until
 that audit is done.
 
-Note: EP-037 — Event Bus is now complete through STEP 4 (see
-CHANGELOG.md / docs/RELEASE_NOTES.md /
-docs/architecture/audits/EP037_AUDIT.md). It did not create a second
-event bus -- it strengthened and put the existing
-`src/core/events.py::EventBus` (in place since EP-001) into real
-production use: `EventBus.publish()`/`subscribe()`/`unsubscribe()`
-became thread-safe (a lock-protected snapshot of subscribers is
-invoked outside the lock), and two new production event paths were
-wired through it. `WorkflowEngineService` (EP-033) and
-`WorkflowSchedulerEngine` (EP-034) now publish `"workflow.completed"`
-(`definition_id`, `result`) at the same point their existing
-`automation_hook` already fired; `BackgroundWorkerPool` (EP-036) now
-publishes `"background_worker.task_completed"` /
-`"background_worker.task_failed"` (`task_id`, `workflow_id`,
-`result`/`error`) at its existing task-completion transitions. In
-production, Bootstrap now reaches `AutomationEngine.notify_run()`
-(EP-035) by subscribing it to `"workflow.completed"`, replacing the
-two separate `set_automation_hook()` calls that previously wired
-on-demand and scheduled runs to it (the hook APIs themselves remain
-intact for backward compatibility; they are simply no longer used for
-production automation wiring). A second, small Bootstrap-local adapter
-closes the one remaining gap: `BackgroundWorkerPool` calls the raw
-`WorkflowEngine.run()` directly rather than going through
-`WorkflowEngineService`, so a `worker submit` task previously had no
-path to automation at all -- the adapter subscribes to
-`"background_worker.task_completed"` only, re-keying its existing
-`workflow_id` kwarg to the `definition_id` kwarg `notify_run()`
-expects, without changing that event's payload contract.
-`"background_worker.task_failed"` is deliberately not wired to
-automation, since it carries no `WorkflowRunResult`. The two
-production notification paths (`workflow.completed` and
-`background_worker.task_completed`) are structurally disjoint --
-different event names, one subscriber each, published from call paths
-that never both fire for the same run -- so a workflow completion,
-however it was dispatched, triggers automation exactly once.
+Note: EP-038 — Git Integration is now fully complete through STEP 4
+(see CHANGELOG.md / docs/RELEASE_NOTES.md /
+docs/architecture/audits/EP038_AUDIT.md), and is now marked complete
+in docs/architecture/JARVIS_ROADMAP.md. It is a new, independent
+Core -> Service -> Module subsystem (`src/core/git/`,
+`src/services/git_service.py`, `src/modules/git_module.py`) exposing
+five read-only operations -- `status`, `diff`, `log`, `branch`,
+`show` -- by shelling out to the system `git` executable via
+`subprocess`, with no third-party git library. `GitService` has no
+dependency on any other Engineering Package's service or engine -- the
+first EP since EP-033 with zero cross-EP runtime dependency.
 
-SCOPE NOTE: EP-037 STEP 4 was a read-only Architecture Audit (no code,
-test, or configuration changes), per
-docs/architecture/AI_DEVELOPMENT_PLAYBOOK.md. It identified two
-tracked, non-urgent architecture-debt items rather than any Critical
-or High finding: AD-007 (Low) -- a background-worker-triggered
-automation action workflow runs synchronously on the pool worker
-thread that completed the triggering task, which could delay that
-worker under load; and AD-008 (Low) -- the background-worker adapter's
-payload key access is implicitly, not explicitly, coupled to
-`BackgroundWorkerPool`'s exact publish-call kwarg names, with a silent
-(log-only) failure mode if that shape ever changes. Both are recorded
-in docs/architecture/ARCHITECTURE_DEBT.md and are explicitly deferred
-to a future Architecture Cleanup milestone, not to EP-038.
+SCOPE NOTE: EP-038 STEP 4 was a read-only Architecture Audit. It
+identified one new, non-urgent architecture-debt item: AD-009 (Low) --
+`GitService.show()` passes a caller-supplied `ref` directly into
+`git show`'s argv without the `--` separator `diff()` already
+correctly uses for its own caller-supplied `path`, a narrow
+defensive-coding inconsistency with limited practical impact (`git
+show` has no generic write/execute option). Recorded in
+docs/architecture/ARCHITECTURE_DEBT.md and explicitly deferred to a
+future Architecture Cleanup milestone, not to EP-039.
 
 ---
 

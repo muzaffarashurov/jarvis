@@ -10,58 +10,59 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-039 — GitHub Integration
+### EP-040 — Telegram Information Integration
 
 Implemented scope:
 
 - A new, independent Core -> Service -> Module subsystem
-  (`src/core/github/`, `src/services/github_service.py`,
-  `src/modules/github_module.py`) exposing eight read-only operations
-  -- repository information, the authenticated user's own
-  repositories, list/get issue, list/get pull request, list/get
-  commit -- against the GitHub REST API, using the project's existing
-  `requests` dependency directly. No third-party GitHub SDK was added.
-  No create, update, delete, comment, merge, close, reopen, release,
-  or any other write/mutating GitHub operation exists anywhere in this
-  subsystem. `GitHubService` has no dependency on any other
-  Engineering Package's service or engine, like `GitService` (EP-038)
-  before it. Config-gated in Bootstrap via `github.enabled` (default
-  true), matching every other soft-toggle subsystem. Authentication
-  uses the `GITHUB_TOKEN` environment variable only -- it is never
-  placed in `config/config.yaml` or any other config file, and it is
-  never logged or included in an exception message or CLI output. See
-  CHANGELOG.md / docs/RELEASE_NOTES.md /
-  docs/architecture/designs/EP039_DESIGN.md for full detail.
+  (`src/core/telegram_info/`, `src/services/telegram_info_service.py`,
+  `src/modules/telegram_info_module.py`) exposing exactly one
+  read-only operation -- `get_chat(chat_id)` -- against the Telegram
+  Bot API, using the project's existing `python-telegram-bot`
+  dependency directly. No message history, `getUpdates`/polling,
+  chat listing/discovery, or any write/mutating Telegram operation
+  exists anywhere in this subsystem; the first two are not achievable
+  at all through the Bot API tier this project uses. Deliberately
+  separate from EP-012 "Telegram Gateway" (`src/core/telegram/`,
+  `src/services/telegram_service.py`,
+  `src/modules/telegram_module.py`), which remains fully responsible
+  for the inbound control gateway and was not modified -- all four of
+  its files were confirmed byte-identical before and after this
+  implementation. `TelegramInfoService` constructs its own,
+  independent `telegram.Bot` instance and never calls
+  `fetch_updates()`/`get_updates()` or touches EP-012's update
+  offset/cursor. The existing `telegram.token` (EP-012's key) is
+  reused read-only; no second token configuration was added.
+  Config-gated in Bootstrap via `telegram_info.enabled` (default
+  true). See CHANGELOG.md / docs/RELEASE_NOTES.md /
+  docs/architecture/designs/EP040_DESIGN.md for full detail.
 
 Status:
 
 STEP 1-3 complete (design, implementation, and documentation). STEP 4
-Architecture Audit not yet performed -- EP-039 is not yet marked
+Architecture Audit not yet performed -- EP-040 is not yet marked
 complete in docs/architecture/JARVIS_ROADMAP.md, and "Next Engineering
-Package" below remains EP-039 rather than advancing to EP-040 until
+Package" below remains EP-040 rather than advancing to EP-041 until
 that audit is done.
 
-Note: EP-038 — Git Integration is now fully complete through STEP 4
-(see CHANGELOG.md / docs/RELEASE_NOTES.md /
-docs/architecture/audits/EP038_AUDIT.md), and is now marked complete
-in docs/architecture/JARVIS_ROADMAP.md. It is a new, independent
-Core -> Service -> Module subsystem (`src/core/git/`,
-`src/services/git_service.py`, `src/modules/git_module.py`) exposing
-five read-only operations -- `status`, `diff`, `log`, `branch`,
-`show` -- by shelling out to the system `git` executable via
-`subprocess`, with no third-party git library. `GitService` has no
-dependency on any other Engineering Package's service or engine -- the
-first EP since EP-033 with zero cross-EP runtime dependency.
+Note: EP-039 — GitHub Integration is now fully complete through
+STEP 4 (see CHANGELOG.md / docs/RELEASE_NOTES.md /
+docs/architecture/audits/EP039_ARCHITECTURE_AUDIT.md), and is now
+marked complete in docs/architecture/JARVIS_ROADMAP.md. It is a new,
+independent Core -> Service -> Module subsystem (`src/core/github/`,
+`src/services/github_service.py`, `src/modules/github_module.py`)
+exposing eight read-only operations against the GitHub REST API,
+authenticated via the `GITHUB_TOKEN` environment variable only (never
+placed in config). `GitHubService` has no dependency on any other
+Engineering Package's service or engine.
 
-SCOPE NOTE: EP-038 STEP 4 was a read-only Architecture Audit. It
-identified one new, non-urgent architecture-debt item: AD-009 (Low) --
-`GitService.show()` passes a caller-supplied `ref` directly into
-`git show`'s argv without the `--` separator `diff()` already
-correctly uses for its own caller-supplied `path`, a narrow
-defensive-coding inconsistency with limited practical impact (`git
-show` has no generic write/execute option). Recorded in
-docs/architecture/ARCHITECTURE_DEBT.md and explicitly deferred to a
-future Architecture Cleanup milestone, not to EP-039.
+SCOPE NOTE: EP-039 STEP 4 was a read-only Architecture Audit and
+returned a final verdict of PASS. No new architecture debt was
+identified -- the audit explicitly confirmed that GitHub's deferred
+Tool Engine registration, absence of pagination/retries, and
+read-only scope are deliberate scope decisions, not architectural
+defects. Exactly one authoritative `GitHubService`/`GitHubModule`
+implementation was confirmed, with no duplicate/parallel client.
 
 ---
 

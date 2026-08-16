@@ -35,6 +35,8 @@ import tests.EP038.test_git_service
 import tests.EP038.test_git_module
 import tests.EP039.test_github_service
 import tests.EP039.test_github_module
+import tests.EP040.test_telegram_info_service
+import tests.EP040.test_telegram_info_module
 
 class TestModule(CommandModule):
 

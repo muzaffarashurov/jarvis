@@ -6,6 +6,112 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.7-ep040
+
+Released: 2026-08-15
+
+Status: STEP 1-3 complete (STEP 4 Architecture Audit pending)
+
+### Added
+
+- src/core/telegram_info/telegram_info_result.py: `TelegramInfoResult`,
+  a frozen dataclass describing the outcome of one successful
+  `get_chat` call (`chat_id`, `data` -- the chat's fields exactly as
+  `telegram.Chat.to_dict()` returns them). Pure data, no Bot API call
+  in this module
+- src/core/telegram_info/telegram_info_error.py: flat
+  `TelegramInfoError` exception hierarchy (`TelegramInfoError`,
+  `TelegramInfoAuthenticationError`, `TelegramInfoNotFoundError`,
+  `TelegramInfoRateLimitError`, `TelegramInfoTimeoutError`,
+  `TelegramInfoNetworkError`, `TelegramInfoAPIError`), mapped onto
+  `python-telegram-bot`'s actual `telegram.error` hierarchy
+  (`InvalidToken`/`Forbidden`/`BadRequest`/`RetryAfter`/`TimedOut`/
+  `NetworkError`), the same way `GitHubError` was mapped onto
+  `requests.exceptions` in EP-039
+- src/core/telegram_info/__init__.py: package docstring and public
+  re-exports
+- src/services/telegram_info_service.py: `TelegramInfoService`, a
+  config-driven, read-only wrapper exposing exactly one operation --
+  `get_chat(chat_id)`. Owns the sole `Bot.get_chat(...)` invocation
+  point in this subsystem. Constructs its own, **independent**
+  `telegram.Bot` instance -- never imports or instantiates
+  `TelegramClient` (EP-012). `telegram.token` (EP-012's existing key)
+  is read read-only and validated at construction (missing/blank ->
+  `TelegramInfoServiceError`, raised before any Bot/network call is
+  attempted). `bot` is an injectable, optional parameter, enabling
+  dependency-free test doubles
+  - EP-040 test suite (tests/EP040/test_telegram_info_service.py)
+- src/modules/telegram_info_module.py: `TelegramInfoModule`, the
+  "telegram-info" CLI namespace (`chat`, `help`). A pure, additive
+  translation layer: calls `TelegramInfoService`'s single public
+  method unchanged and catches `TelegramInfoError` to format
+  `CommandResult(success=False, ...)`, matching `GitHubModule`'s
+  pattern exactly. Never imports `telegram` and never reads
+  `telegram.token`
+  - EP-040 test suite (tests/EP040/test_telegram_info_module.py)
+- config/config.yaml: new `telegram_info` section (`enabled`,
+  `timeout_seconds` -- deliberately no token key), added immediately
+  after EP-012's existing, unmodified `telegram` section
+
+### Changed
+
+- src/bootstrap.py: constructs `TelegramInfoService` (and registers
+  `TelegramInfoModule`, once construction is confirmed) after the
+  existing EP-039 wiring, gated by `telegram_info.enabled` (default
+  `true`) and wrapped in a `try/except TelegramInfoServiceError` so a
+  missing/blank token or invalid `telegram_info.*` configuration
+  disables the subsystem for that run (logged) instead of crashing
+  startup. Like `GitHubService`, there is no cross-EP hard-dependency
+  gate. EP-012's own Bootstrap wiring (`TelegramClient`/
+  `TelegramService`/`TelegramModule`) is untouched
+- src/modules/test_module.py: registers the EP-040 test suite so
+  `test EP040` and `test all` pick it up
+
+### EP-012 boundary
+
+EP-012 "Telegram Gateway" was not modified. All four of its files
+(`src/core/telegram/telegram_client.py`, `telegram_router.py`,
+`src/services/telegram_service.py`, `src/modules/telegram_module.py`)
+were confirmed byte-identical before and after this implementation.
+EP-040 does not use `TelegramClient`, `fetch_updates()`,
+`get_updates()`, any update offset/cursor, Telegram polling, or
+`TelegramRouter`.
+
+### Security
+
+`telegram.token` is never duplicated into a second configuration key,
+never logged, and never appears in any exception message or CLI
+output -- verified directly by a dedicated test asserting a fixed fake
+token value never appears in any exception message across seven
+different error scenarios. No new dependency was introduced.
+
+### Known limitations
+
+- Scope is intentionally limited to single-chat metadata lookup only
+  (`get_chat`). Message history and chat discovery/listing are not
+  implemented because the Telegram Bot API does not support them --
+  a hard capability boundary, not a deferred future step
+- `get_chat` requires an already-known chat id; there is no way to
+  enumerate chats the bot has access to
+
+### Validation
+
+EP040       : 25 passed / 0 failed / 0 skipped
+EP039       : 36 passed / 0 failed / 0 skipped (regression, unchanged)
+EP038       : 30 passed / 0 failed / 0 skipped (regression, unchanged)
+EP037       : 87 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036       : 101 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP2 : 48 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP3 : 53 passed / 0 failed / 0 skipped (regression, unchanged)
+EP033: 182 passed / 0 failed / 0 skipped (regression, unchanged)
+EP034: 113 passed / 0 failed / 0 skipped (regression, unchanged)
+EP035: 143 passed / 0 failed / 0 skipped (regression, unchanged)
+EP001: 20 passed / 0 failed / 0 skipped (regression, unchanged)
+
+`test all` was not run.
+
+---
+
 ## v0.1.6-ep039
 
 Released: 2026-08-14

@@ -108,6 +108,30 @@ telegram:
   allowed_chat_ids: []
   polling_interval: 2
 
+telegram_info:
+  # EP-040 Telegram Info. Read-only chat/channel metadata lookup
+  # (get_chat only) against the Telegram Bot API, using the project's
+  # existing "python-telegram-bot" dependency directly -- no new
+  # dependency. No message reading, message history, chat discovery/
+  # listing, or any write/mutating Telegram operation is implemented.
+  #
+  # Architecturally independent of EP-012 above: this subsystem
+  # constructs its own, separate telegram.Bot connection and never
+  # touches EP-012's fetch_updates()/getUpdates polling or its update
+  # offset/cursor -- the two subsystems cannot race or interfere with
+  # each other. The ONLY thing shared with EP-012 is the "token" value
+  # directly above, read read-only -- IMPORTANT: there is deliberately
+  # no separate token key here; do not add one.
+  #
+  # "enabled" defaults to true, matching every other soft-toggle
+  # subsystem, and is independently toggleable from "telegram.enabled"
+  # above -- one can be on while the other is off.
+  #
+  # "timeout_seconds" bounds the single get_chat call, so a hung/slow
+  # network request cannot hang the calling thread indefinitely.
+  enabled: true
+  timeout_seconds: 10
+
 ai:
   # EP-014 AI Provider Manager. Disabled provider selection by default
   # ("none") -- the rest of Jarvis never needs to know which provider

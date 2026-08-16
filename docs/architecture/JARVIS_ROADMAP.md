@@ -113,12 +113,13 @@ Completed sub-packages:
 - EP-036 Background Workers
 - EP-037 Event Bus
 - EP-038 Git Integration
+- EP-039 GitHub Integration
 
 ---
 
 ## Current
 
-EP-039 GitHub Integration
+EP-040 Telegram Integration
 
 ---
 
@@ -222,7 +223,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-038 Git Integration
 
-EP-039 GitHub Integration
+✓ EP-039 GitHub Integration
 
 EP-040 Telegram Integration
 

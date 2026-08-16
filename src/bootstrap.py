@@ -94,6 +94,7 @@ from src.modules.automation_module import AutomationModule
 from src.modules.background_worker_module import BackgroundWorkerModule
 from src.modules.git_module import GitModule
 from src.modules.github_module import GitHubModule
+from src.modules.telegram_info_module import TelegramInfoModule
 from src.modules.conversation_module import ConversationModule
 from src.modules.embedding_module import EmbeddingModule
 from src.modules.fast_response_module import FastResponseModule
@@ -131,6 +132,7 @@ from src.services.background_worker_service import (
 )
 from src.services.git_service import GitService, GitServiceError
 from src.services.github_service import GitHubService, GitHubServiceError
+from src.services.telegram_info_service import TelegramInfoService, TelegramInfoServiceError
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -228,6 +230,7 @@ class Bootstrap:
         self._background_worker_service: BackgroundWorkerService | None = None
         self._git_service: GitService | None = None
         self._github_service: GitHubService | None = None
+        self._telegram_info_service: TelegramInfoService | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -1373,6 +1376,36 @@ class Bootstrap:
             logger.info("GitHub Service disabled ('github.enabled: false').")
             self._github_service = None
 
+        # EP-040 Telegram Info. Architecturally independent of EP-012
+        # "Telegram Gateway" (src/core/telegram/, src/services/telegram_service.py,
+        # src/modules/telegram_module.py) -- none of those files are
+        # imported, modified, or referenced here or anywhere in
+        # TelegramInfoService/TelegramInfoModule. This subsystem
+        # constructs its own, separate telegram.Bot connection and
+        # never calls fetch_updates()/get_updates() or touches EP-012's
+        # update offset/cursor, so the two subsystems cannot race or
+        # interfere with each other even when both are enabled at
+        # once. The only thing shared with EP-012 is the existing
+        # 'telegram.token' config value, read read-only by
+        # TelegramInfoService itself -- never read or duplicated here.
+        # No cross-EP hard-dependency gate is needed either, matching
+        # GitService/GitHubService's own zero-dependency shape.
+        if bool(config.get("telegram_info.enabled", True)):
+            try:
+                telegram_info_service = TelegramInfoService(config=config)
+                self._telegram_info_service = telegram_info_service
+                router.register(TelegramInfoModule(telegram_info_service))
+            except TelegramInfoServiceError as exc:
+                logger.error(
+                    f"Telegram Info Service disabled: invalid configuration or "
+                    f"missing token ({exc}). Fix config/config.yaml and restart "
+                    "to re-enable it."
+                )
+                self._telegram_info_service = None
+        else:
+            logger.info("Telegram Info Service disabled ('telegram_info.enabled: false').")
+            self._telegram_info_service = None
+
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
 
@@ -1949,3 +1982,17 @@ class Bootstrap:
             `_build_command_router`'s EP-039 wiring).
         """
         return self._github_service
+
+    @property
+    def telegram_info_service(self) -> TelegramInfoService | None:
+        """Return the TelegramInfoService built for EP-040, if available.
+
+        Returns:
+            The TelegramInfoService instance, or None if
+            `run()`/`initialize()` has not completed (or the Telegram
+            Info Service subsystem was disabled this run, or invalid
+            configuration/a missing token was supplied -- see
+            `_build_command_router`'s EP-040 wiring). Distinct from,
+            and independent of, EP-012's own Telegram Gateway wiring.
+        """
+        return self._telegram_info_service

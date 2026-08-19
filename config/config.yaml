@@ -132,6 +132,37 @@ telegram_info:
   enabled: true
   timeout_seconds: 10
 
+discord:
+  # EP-041 Discord Integration. Exposes five read-only operations
+  # (get_guild, list_guild_channels, get_channel, get_guild_member,
+  # get_message) against the Discord REST API v10, using the
+  # project's existing "requests" dependency directly -- no Discord
+  # SDK, no Gateway/WebSocket connection. No write/mutating operation
+  # (send, edit, delete, create, moderation, webhooks, roles,
+  # reactions, invites, ...) is implemented. This subsystem has no
+  # dependency on any other Engineering Package's service or engine
+  # (see src/core/discord/__init__.py), and is stateless -- no
+  # persistent connection, no cursor/offset -- so a future Discord
+  # Gateway EP could coexist without sharing state.
+  #
+  # IMPORTANT: authentication uses the DISCORD_TOKEN environment
+  # variable ONLY. The token itself must never be placed here or in
+  # any other config file -- only the two non-secret settings below.
+  #
+  # "enabled" defaults to true, matching every other soft-toggle
+  # subsystem. An enabled DiscordService with no caller has zero
+  # observable effect -- there is no thread or background work
+  # started at construction time.
+  #
+  # "api_base_url" defaults to Discord's current REST API version
+  # root; override only if Discord's API version changes.
+  #
+  # "timeout_seconds" bounds every Discord HTTP call, so a hung/slow
+  # network request cannot hang the calling thread indefinitely.
+  enabled: true
+  api_base_url: "https://discord.com/api/v10"
+  timeout_seconds: 30
+
 ai:
   # EP-014 AI Provider Manager. Disabled provider selection by default
   # ("none") -- the rest of Jarvis never needs to know which provider

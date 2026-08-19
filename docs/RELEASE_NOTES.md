@@ -1314,6 +1314,242 @@ step of this EP, but a hard capability boundary of the API tier this
 project uses. `Bot.get_chat` also requires an already-known chat id;
 there is no way to enumerate chats the bot has access to.
 
+# EP-041 — Discord Integration
+
+Status: COMPLETE. STEP 1-4 complete -- design, implementation,
+documentation, and Architecture Audit (Final Verdict: EP041 STEP 4 --
+PASS; see `docs/architecture/audits/EP041_ARCHITECTURE_AUDIT.md`).
+
+## Overview
+
+Gives Jarvis a way to read Discord server (guild), channel, member,
+and message metadata via Discord's REST API v10. Before this EP, no
+Discord-related implementation, dependency, or configuration existed
+anywhere in the codebase.
+
+## Scope
+
+Implements exactly five read-only Discord REST API v10 operations:
+
+- `get_guild(guild_id)`
+- `list_guild_channels(guild_id)`
+- `get_channel(channel_id)`
+- `get_guild_member(guild_id, user_id)`
+- `get_message(channel_id, message_id)`
+
+**Not implemented** -- explicitly, not merely deferred:
+
+- message history / bulk message retrieval
+- sending, editing, or deleting messages
+- moderation operations
+- role management
+- webhooks
+- reactions
+- invites
+- any channel-scoped member listing (not a Discord API concept --
+  channel access is computed from guild membership plus role/channel
+  permission overwrites, not a per-channel member roster)
+- any other Discord mutation
+- any Discord Gateway/WebSocket connection
+
+None of the above exist anywhere in `DiscordService` or
+`DiscordModule`'s code. Discord's REST API does technically support
+bulk historical message retrieval
+(`GET /channels/{channel.id}/messages`) without Gateway state, but it
+was deliberately excluded from this EP's confirmed scope pending
+separate approval.
+
+## Architecture
+
+Core -> Service -> Module -> Bootstrap, matching the EP-038/039/040
+precedent:
+
+- Core (`src/core/discord/`): `DiscordResult` (a frozen dataclass
+  carrying `operation`, `status_code`, `data` -- the parsed JSON
+  response body, exactly as Discord returns it) and a flat
+  `DiscordError` exception hierarchy (`DiscordAuthenticationError`,
+  `DiscordNotFoundError`, `DiscordRateLimitError`,
+  `DiscordTimeoutError`, `DiscordAPIError`) -- pure data, no HTTP
+  call
+- Service (`src/services/discord_service.py`): `DiscordService` owns
+  the one place `requests.get(...)` is ever called in this
+  subsystem, mirroring the "one component owns the one real
+  invocation" discipline `GitHubService` (EP-039) established
+- Module (`src/modules/discord_module.py`): the `discord` CLI
+  namespace (`guild`, `channels`, `channel`, `member`, `message`,
+  `help`), a pure `CommandResult` translation layer over
+  `DiscordService`'s five public methods, matching `GitHubModule`'s
+  shape exactly
+- Bootstrap constructs `DiscordService` and registers `DiscordModule`,
+  gated by `discord.enabled`, mirroring the EP-039/040 wiring block
+- No third-party dependency was added: the project's existing
+  `requests` dependency is reused directly against Discord's REST
+  API. `requirements.txt` is unchanged
+
+## Discord REST API usage
+
+All five operations are single, stateless `GET` requests against
+`https://discord.com/api/v10` (configurable via `discord.api_base_url`),
+authenticated with the bot token as the `Authorization` request
+header. No Gateway/WebSocket connection is opened, and no privileged
+Gateway intent is required -- `get_guild_member` looks up a single
+already-known member by id, which does not require the privileged
+`GUILD_MEMBERS` intent that applies only to the Gateway member-stream
+and to the bulk List/Search Guild Members endpoints.
+
+## Read-only operations
+
+Supported:
+
+- `get_guild` -- `GET /guilds/{guild.id}`
+- `list_guild_channels` -- `GET /guilds/{guild.id}/channels`
+- `get_channel` -- `GET /channels/{channel.id}`
+- `get_guild_member` -- `GET /guilds/{guild.id}/members/{user.id}`
+- `get_message` -- `GET /channels/{channel.id}/messages/{message.id}`
+  (requires `READ_MESSAGE_HISTORY` permission in that channel)
+
+Unsupported (not implemented anywhere in this subsystem):
+
+- message history / bulk message retrieval
+- send message
+- edit/delete message
+- moderation
+- roles
+- reactions
+- invites
+- webhooks
+- Gateway/WebSocket
+
+## CLI commands
+
+```text
+discord guild <guild_id>
+discord channels <guild_id>
+discord channel <channel_id>
+discord member <guild_id> <user_id>
+discord message <channel_id> <message_id>
+discord help
+```
+
+No other command exists in `DiscordModule`'s dispatch table.
+
+## Configuration
+
+```yaml
+discord:
+  enabled: true
+  api_base_url: "https://discord.com/api/v10"
+  timeout_seconds: 30
+```
+
+There is **no** token key in configuration. Authentication uses the
+`DISCORD_TOKEN` environment variable only. When `discord.enabled` is
+`false`, Bootstrap never constructs `DiscordService` and never
+registers `DiscordModule` -- `discord <anything>` falls through to
+"Unknown command," matching every other disabled subsystem in this
+project.
+
+## Security
+
+- `DISCORD_TOKEN` is read from `os.environ` at the start of every
+  operation call -- never at `__init__`, never cached on `self`
+  beyond the duration of a single call, never logged
+- The token is sent only as the `Authorization` request header; it
+  never appears in a log line, an exception message, or a
+  `DiscordResult` -- every error message in this subsystem is built
+  from fixed text and/or the HTTP response, never the token value
+- `DiscordModule` never reads or handles the token at all -- it has
+  no code path that could reference it
+- No new secret storage mechanism and no new third-party dependency
+  were introduced
+
+## Error handling
+
+`DiscordService` maps HTTP-layer failures onto the `DiscordError`
+hierarchy: authentication failures (401) raise
+`DiscordAuthenticationError`, not-found (404) raises
+`DiscordNotFoundError`, rate limiting (429) raises
+`DiscordRateLimitError`, request timeouts raise `DiscordTimeoutError`,
+network-layer failures raise `DiscordNetworkError`, and any other
+non-2xx response raises `DiscordAPIError`. `DiscordModule` catches
+`DiscordError` uniformly and formats every failure as
+`CommandResult(success=False, ...)`, never letting an exception
+propagate to the CLI layer.
+
+## Testing strategy
+
+`tests/EP041/test_discord_service.py` and
+`tests/EP041/test_discord_module.py` (one shared `"EP041"` suite)
+never make a real Discord API call and never require a real bot
+token. Every test constructs `DiscordService` with a small
+duck-typed stub `session` object exposing only `.get(...)` -- no
+Gateway/WebSocket client exists on the stub at all, structurally
+proving no such call path is exercised. Coverage includes the
+successful call for each of the five operations, every HTTP-status
+error mapping, missing/blank token handling, invalid configuration,
+CLI dispatch/argument validation, real Bootstrap wiring, and a
+dedicated read-only-boundary test asserting none of
+"send"/"edit"/"delete"/moderation-style operations exist anywhere in
+the subsystem, plus a dedicated assertion that a fixed fake token
+value never appears in any exception message across all error
+scenarios.
+
+## Regression verification
+
+The EP041 test suite and the existing EP001/EP033-040 regression
+suites were run individually as part of the STEP 4 Architecture
+Audit; `test all` was not run. Results:
+
+```
+EP041       : 39 passed / 0 failed / 0 skipped
+EP040       : 25 passed / 0 failed / 0 skipped
+EP039       : 36 passed / 0 failed / 0 skipped
+EP038       : 30 passed / 0 failed / 0 skipped
+EP037       : 87 passed / 0 failed / 0 skipped
+EP036       : 101 passed / 0 failed / 0 skipped
+EP036-STEP2 : 48 passed / 0 failed / 0 skipped
+EP036-STEP3 : 53 passed / 0 failed / 0 skipped
+EP035       : 143 passed / 0 failed / 0 skipped
+EP034       : 113 passed / 0 failed / 0 skipped
+EP033       : 182 passed / 0 failed / 0 skipped
+EP001       : 20 passed / 0 failed / 0 skipped
+```
+
+Every regression count matches its last recorded baseline -- no
+regression was introduced by EP041. Source, test, and configuration
+files outside the files listed as modified for this EP were verified
+unchanged. See
+`docs/architecture/audits/EP041_ARCHITECTURE_AUDIT.md` (Final
+Verdict: EP041 STEP 4 -- PASS) for the complete audit.
+
+## Known limitations
+
+- No Discord Gateway/WebSocket connection anywhere in this subsystem
+- No message history retrieval -- technically available via Discord's
+  REST API without Gateway state, but deliberately excluded from this
+  EP's confirmed scope
+- No write operations (send, edit, delete, create)
+- No moderation operations
+- No role management
+- No webhooks
+- No Tool Engine integration
+
+## Future Gateway boundary
+
+No Discord Gateway/WebSocket connection exists anywhere in this EP.
+`DiscordService` is stateless REST-only, with no persistent
+connection and no cursor/offset, so a future Discord Gateway EP could
+be added later without sharing state with, or being blocked by, this
+subsystem.
+
+## Tool Engine boundary
+
+`DiscordService` is not registered with the EP-031 Tool Engine in
+this EP -- deferred, matching the same deferral EP-039 (GitHub) and
+EP-040 (Telegram Info) made for their own Tool Engine registration.
+
+---
+
 ---
 
 End of document.

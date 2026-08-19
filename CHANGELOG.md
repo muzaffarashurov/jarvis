@@ -6,6 +6,123 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.8-ep041
+
+Released: 2026-08-19
+
+Status: COMPLETE (STEP 1-4 complete; STEP 4 Architecture Audit --
+Final Verdict: EP041 STEP 4 -- PASS)
+
+### Added
+
+- src/core/discord/discord_result.py: `DiscordResult`, a frozen
+  dataclass describing the outcome of one successful Discord REST
+  API v10 call (`operation`, `status_code`, `data` -- the parsed
+  JSON response body, exactly as Discord returns it). Pure data, no
+  HTTP call in this module
+- src/core/discord/discord_error.py: flat `DiscordError` exception
+  hierarchy (`DiscordError`, `DiscordAuthenticationError`,
+  `DiscordNotFoundError`, `DiscordRateLimitError`,
+  `DiscordTimeoutError`, `DiscordAPIError`), mirroring
+  `GitHubError`'s split from `requests.exceptions` in EP-039
+- src/core/discord/__init__.py: package docstring and public
+  re-exports
+- src/services/discord_service.py: `DiscordService`, a config-driven,
+  read-only wrapper around the Discord REST API (v10). Exposes
+  exactly five operations -- `get_guild()`, `list_guild_channels()`,
+  `get_channel()`, `get_guild_member()`, `get_message()` -- no
+  create/update/delete/moderation/webhook/role/reaction/invite
+  method exists. Owns the sole `requests.get(...)` invocation point
+  in this subsystem. `DISCORD_TOKEN` is read via `os.environ` at the
+  start of every operation call (never at `__init__`, never cached
+  on `self` beyond the call, never logged); missing/blank token
+  raises `DiscordAuthenticationError` before any HTTP call is
+  attempted. `guild_id`/`channel_id`/`user_id`/`message_id` path
+  segments are URL-quoted (`urllib.parse.quote`). `session` is an
+  injectable, optional `requests.Session`-like parameter, defaulting
+  to a real `requests.Session()`, enabling dependency-free test
+  doubles. `DiscordServiceError` (raised only from `__init__`, for
+  invalid `discord.*` configuration) is defined here, not in
+  `src/core/discord/discord_error.py`, mirroring `GitHubServiceError`'s
+  split from `GitHubError` in EP-039
+  - EP-041 test suite (tests/EP041/test_discord_service.py)
+- src/modules/discord_module.py: `DiscordModule`, the "discord" CLI
+  namespace (`guild`, `channels`, `channel`, `member`, `message`,
+  `help`). A pure, additive translation layer: calls `DiscordService`'s
+  existing public methods unchanged and catches `DiscordError` to
+  format `CommandResult(success=False, ...)`, matching `GitHubModule`'s
+  pattern exactly. Never reads or handles `DISCORD_TOKEN`
+  - EP-041 test suite (tests/EP041/test_discord_module.py)
+- config/config.yaml: new `discord` section (`enabled`,
+  `api_base_url`, `timeout_seconds` -- deliberately no token key)
+
+### Changed
+
+- src/bootstrap.py: constructs `DiscordService` (and registers
+  `DiscordModule`, once construction is confirmed) after the existing
+  EP-040 wiring, gated by `discord.enabled` (default `true`) and
+  wrapped in a `try/except DiscordServiceError` so a missing/blank
+  token or invalid `discord.*` configuration disables the subsystem
+  for that run (logged) instead of crashing startup. Exposes a new
+  `discord_service` property, mirroring the EP-039/EP-040 pattern.
+  No cross-EP hard-dependency gate; this subsystem has no dependency
+  on any other Engineering Package's service or engine
+- src/modules/test_module.py: registers the EP-041 test suite so
+  `test EP041` and `test all` pick it up
+
+### Security
+
+- `DISCORD_TOKEN` is environment-only -- read via `os.environ` at
+  call time, never accepted from or written to `config/config.yaml`
+  or any other config file
+- Token never stored in config
+- Token never exposed in logs, exceptions, or CLI output -- every
+  error message in this subsystem is built from fixed text and/or
+  the HTTP response, never from the token value
+
+### Known limitations
+
+- No Discord Gateway/WebSocket connection is opened anywhere in this
+  subsystem -- every operation is a single, stateless HTTP GET
+- No message history retrieval. Discord's REST API does technically
+  support bulk historical message retrieval
+  (`GET /channels/{channel.id}/messages`) without Gateway state, but
+  it was deliberately not included in this EP's confirmed scope
+- No write operations (create/send/edit/delete)
+- No moderation operations
+- No role management
+- No webhooks
+- No Tool Engine integration (deferred, matching EP-039/EP-040)
+
+### Validation
+
+EP041       : 39 passed / 0 failed / 0 skipped
+EP040       : 25 passed / 0 failed / 0 skipped (regression, unchanged)
+EP039       : 36 passed / 0 failed / 0 skipped (regression, unchanged)
+EP038       : 30 passed / 0 failed / 0 skipped (regression, unchanged)
+EP037       : 87 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036       : 101 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP2 : 48 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP3 : 53 passed / 0 failed / 0 skipped (regression, unchanged)
+EP035: 143 passed / 0 failed / 0 skipped (regression, unchanged)
+EP034: 113 passed / 0 failed / 0 skipped (regression, unchanged)
+EP033: 182 passed / 0 failed / 0 skipped (regression, unchanged)
+EP001: 20 passed / 0 failed / 0 skipped (regression, unchanged)
+
+`test all` was not run.
+
+### STEP 4 — Architecture Audit
+
+Final Verdict: EP041 STEP 4 -- PASS. See
+`docs/architecture/audits/EP041_ARCHITECTURE_AUDIT.md` for the full
+audit (architecture layering, scope compliance, security, error
+handling, CLI boundary, EP-012/EP-031/previous-EP integrity,
+documentation consistency -- all PASS, no architecture debt found).
+
+EP-041 is now fully complete through STEP 4.
+
+---
+
 ## v0.1.7-ep040
 
 Released: 2026-08-15

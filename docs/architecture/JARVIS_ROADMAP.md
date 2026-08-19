@@ -114,12 +114,14 @@ Completed sub-packages:
 - EP-037 Event Bus
 - EP-038 Git Integration
 - EP-039 GitHub Integration
+- EP-040 Telegram Integration
+- EP-041 Discord Integration
 
 ---
 
 ## Current
 
-EP-040 Telegram Integration
+EP-042 Email Integration
 
 ---
 
@@ -225,9 +227,9 @@ EP-013 AI Infrastructure
 
 ✓ EP-039 GitHub Integration
 
-EP-040 Telegram Integration
+✓ EP-040 Telegram Integration
 
-EP-041 Discord Integration
+✓ EP-041 Discord Integration
 
 EP-042 Email Integration
 

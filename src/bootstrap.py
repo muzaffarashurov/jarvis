@@ -95,6 +95,7 @@ from src.modules.background_worker_module import BackgroundWorkerModule
 from src.modules.git_module import GitModule
 from src.modules.github_module import GitHubModule
 from src.modules.telegram_info_module import TelegramInfoModule
+from src.modules.discord_module import DiscordModule
 from src.modules.conversation_module import ConversationModule
 from src.modules.embedding_module import EmbeddingModule
 from src.modules.fast_response_module import FastResponseModule
@@ -133,6 +134,7 @@ from src.services.background_worker_service import (
 from src.services.git_service import GitService, GitServiceError
 from src.services.github_service import GitHubService, GitHubServiceError
 from src.services.telegram_info_service import TelegramInfoService, TelegramInfoServiceError
+from src.services.discord_service import DiscordService, DiscordServiceError
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -231,6 +233,7 @@ class Bootstrap:
         self._git_service: GitService | None = None
         self._github_service: GitHubService | None = None
         self._telegram_info_service: TelegramInfoService | None = None
+        self._discord_service: DiscordService | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -1406,6 +1409,33 @@ class Bootstrap:
             logger.info("Telegram Info Service disabled ('telegram_info.enabled: false').")
             self._telegram_info_service = None
 
+        # EP-041 Discord Integration. Like GitHubService, DiscordService
+        # has no dependency on any other Engineering Package's service
+        # or engine -- it depends only on Config and, at call time, the
+        # process environment (DISCORD_TOKEN) -- so there is no
+        # cross-EP hard-dependency gate here either, just the same
+        # 'enabled' + config-validation try/except every subsystem
+        # uses. DISCORD_TOKEN itself is never read here or anywhere in
+        # Bootstrap -- DiscordService reads it directly from the
+        # environment at call time (see src/services/discord_service.py).
+        # DiscordService is stateless REST-only -- no Gateway/WebSocket,
+        # no persistent connection, no cursor/offset -- so a future
+        # Discord Gateway EP could coexist without sharing state.
+        if bool(config.get("discord.enabled", True)):
+            try:
+                discord_service = DiscordService(config=config)
+                self._discord_service = discord_service
+                router.register(DiscordModule(discord_service))
+            except DiscordServiceError as exc:
+                logger.error(
+                    f"Discord Service disabled: invalid 'discord.*' configuration "
+                    f"({exc}). Fix config/config.yaml and restart to re-enable it."
+                )
+                self._discord_service = None
+        else:
+            logger.info("Discord Service disabled ('discord.enabled: false').")
+            self._discord_service = None
+
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
 
@@ -1996,3 +2026,16 @@ class Bootstrap:
             and independent of, EP-012's own Telegram Gateway wiring.
         """
         return self._telegram_info_service
+
+    @property
+    def discord_service(self) -> DiscordService | None:
+        """Return the DiscordService built for EP-041, if available.
+
+        Returns:
+            The DiscordService instance, or None if
+            `run()`/`initialize()` has not completed (or the Discord
+            Service subsystem was disabled this run, or invalid
+            'discord.*' configuration was supplied -- see
+            `_build_command_router`'s EP-041 wiring).
+        """
+        return self._discord_service

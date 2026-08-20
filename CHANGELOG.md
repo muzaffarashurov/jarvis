@@ -6,6 +6,174 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.9-ep042
+
+Released: 2026-08-20
+
+Status: COMPLETE (STEP 1-4 complete; STEP 3 Deep Audit -- Final
+Verdict: EP042 STEP 3 -- PASS)
+
+### Added
+
+- src/core/email/email_result.py: `EmailFolder`, `EmailAttachment`,
+  `EmailMessageSummary`, `EmailMessage`, `EmailResult` -- frozen
+  dataclasses describing normalized IMAP mailbox/message data. Pure
+  data, no IMAP/network call in this module
+- src/core/email/email_error.py: flat `EmailError` exception hierarchy
+  (`EmailError`, `EmailAuthenticationError`, `EmailConnectionError`,
+  `EmailTimeoutError`, `EmailTLSError`, `EmailMailboxError`,
+  `EmailMessageNotFoundError`, `EmailSearchError`,
+  `EmailProtocolError`), mirroring `DiscordError`'s pattern from
+  EP-041
+- src/core/email/__init__.py: package docstring and public re-exports
+- src/services/email_service.py: `EmailService`, a config-driven,
+  read-only wrapper around a standard, provider-independent IMAP
+  server, using the Python standard library (`imaplib` + `email`)
+  only -- no third-party dependency, no provider-specific API (Gmail
+  API, Microsoft Graph, Outlook API), no OAuth. Exposes exactly four
+  operations -- `list_folders()`, `list_messages(folder, limit)`,
+  `get_message(folder, uid)`, `search_messages(folder, criteria)` --
+  no send/reply/forward/delete/move/flag method exists anywhere.
+  Every mailbox `SELECT` is performed read-only (IMAP `EXAMINE`
+  semantics). Username/password are read via `os.environ` at the
+  start of every operation call (never at `__init__`, never cached on
+  `self` beyond the call, never logged), using the two configured
+  environment-variable *names*
+  (`email.imap_username_env_var`/`email.imap_password_env_var`);
+  missing/blank credentials raise `EmailAuthenticationError` before
+  any connection is opened. `connection_factory` is an injectable,
+  optional callable, defaulting to a real
+  `imaplib.IMAP4_SSL`/`IMAP4` connection, enabling dependency-free
+  test doubles. All operations use IMAP `UID` command variants
+  (`UID SEARCH`, `UID FETCH`), with SEARCH results explicitly sorted
+  by numeric UID rather than trusting server-returned order.
+  `EmailServiceError` (raised only from `__init__`, for invalid
+  `email.*` configuration) is defined here, not in
+  `src/core/email/email_error.py`, mirroring `DiscordServiceError`'s
+  split from `DiscordError`
+  - EP-042 test suite (tests/EP042/test_email_service.py)
+- src/modules/email_module.py: `EmailModule`, the "email" CLI
+  namespace (`folders`, `list`, `message`, `search`, `help`). A pure,
+  additive translation layer: calls `EmailService`'s existing public
+  methods unchanged and catches `EmailError` to format
+  `CommandResult(success=False, ...)`, matching `DiscordModule`'s
+  pattern exactly. Never reads or handles IMAP credentials, never
+  imports `imaplib`
+  - EP-042 test suite (tests/EP042/test_email_module.py)
+- config/config.yaml: new `email` section (`enabled`, `imap_host`,
+  `imap_port`, `tls_mode`, `imap_username_env_var`,
+  `imap_password_env_var`, `default_mailbox`,
+  `default_message_limit`, `timeout_seconds` -- deliberately no
+  credential value key)
+
+### Changed
+
+- src/bootstrap.py: constructs `EmailService` (and registers
+  `EmailModule`, once construction is confirmed) after the existing
+  EP-041 wiring, gated by `email.enabled` (default `false` --
+  deliberately unlike EP-039/040/041's `true` default, since IMAP has
+  no safe universal default host) and wrapped in a
+  `try/except EmailServiceError` so invalid `email.*` configuration
+  disables the subsystem for that run (logged) instead of crashing
+  startup. Exposes a new `email_service` property, mirroring the
+  EP-039/040/041 pattern. No cross-EP hard-dependency gate; this
+  subsystem has no dependency on any other Engineering Package's
+  service or engine
+- src/modules/test_module.py: registers the EP-042 test suite so
+  `test EP042` and `test all` pick it up
+
+### Fixed
+
+(Found and fixed during STEP 3 Deep Audit, before this version was
+released -- not a post-release regression)
+
+- Message/header decoding no longer raises an untyped `LookupError`
+  when a message declares a malformed/unrecognized MIME charset
+  (e.g. a nonstandard or misspelled encoded-word charset) -- both
+  header decoding and body-part decoding now fall back to a
+  best-effort UTF-8 decode instead of crashing the calling operation
+- To/Cc headers are now RFC 2047-decoded the same way Subject/From
+  already were (previously only comma-split, undecoded)
+- `list_messages`/`search_messages` now explicitly sort IMAP UIDs
+  numerically ascending before determining "most recent"/order, since
+  RFC 3501 does not guarantee `SEARCH` results are returned in any
+  particular order
+
+### Security
+
+- IMAP username/password are environment-only -- read via
+  `os.environ` at call time, never accepted from or written to
+  `config/config.yaml` or any other config file; only the two
+  environment-variable *names* are configurable
+- Credentials never stored in config
+- Credentials never exposed in logs, exceptions, or CLI output --
+  every error message in this subsystem is built from fixed text
+  and/or non-secret server response text, never from the credential
+  values
+- TLS is mandatory -- `email.tls_mode` only accepts `"ssl"` (implicit
+  TLS/IMAPS) or `"starttls"`; no code path connects over plaintext
+  IMAP. Certificate validation uses `ssl.create_default_context()`,
+  with no configuration option to disable it
+- Every mailbox is opened read-only (`SELECT ... readonly=True`, IMAP
+  `EXAMINE` semantics) -- this subsystem cannot set the `\Seen` flag
+  or otherwise mutate a mailbox as a side effect of any operation
+
+### Known limitations
+
+- No SMTP / message-sending capability anywhere in this subsystem
+- No reply, forward, delete, move, or flag/mark (read/unread)
+  operation exists anywhere in this subsystem
+- No provider-specific API (Gmail API, Microsoft Graph, Outlook API)
+- No OAuth2 authentication
+- No background/scheduled polling and no `IDLE` connection -- every
+  operation opens one short-lived connection and closes it before
+  returning
+- No EventBus integration
+- No Tool Engine integration (deferred, matching EP-039/040/041)
+- No upper bound on retrieved message size -- `get_message` fetches
+  the full message body for the requested UID; this was not part of
+  the owner-confirmed scope
+- `email.enabled` defaults to `false`, unlike EP-039/040/041's `true`
+  default (see "Changed" above for rationale)
+
+### Validation
+
+EP042 Service : 55 passed / 0 failed / 0 skipped
+EP042 Module  : 28 passed / 0 failed / 0 skipped
+EP041         : 39 passed / 0 failed / 0 skipped (regression, unchanged)
+EP040         : 25 passed / 0 failed / 0 skipped (regression, unchanged)
+EP039         : 36 passed / 0 failed / 0 skipped (regression, unchanged)
+EP038         : 30 passed / 0 failed / 0 skipped (regression, unchanged)
+EP037         : 87 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036         : 101 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP2   : 48 passed / 0 failed / 0 skipped (regression, unchanged)
+EP036-STEP3   : 53 passed / 0 failed / 0 skipped (regression, unchanged)
+EP035         : 143 passed / 0 failed / 0 skipped (regression, unchanged)
+EP034         : 113 passed / 0 failed / 0 skipped (regression, unchanged)
+EP033         : 182 passed / 0 failed / 0 skipped (regression, unchanged)
+EP001         : 20 passed / 0 failed / 0 skipped (regression, unchanged)
+
+`test all` was run: 5376 passed / 0 failed / 0 skipped.
+
+### STEP 3 — Deep Audit / Verification / Hardening
+
+Final Verdict: EP042 STEP 3 -- PASS WITH NOTES. Three defects found
+and fixed (see "Fixed" above), one Bootstrap-level test-coverage gap
+closed (real `Bootstrap().initialize()` enabled/disabled wiring
+tests, matching the EP-041 precedent), no P0 (security/data-mutation)
+issues found. One pre-existing, out-of-scope technical-debt item was
+identified and deliberately left unfixed: `TestRegistry` keys test
+suites by `NAME.upper()`, so of the two EP-042 test classes sharing
+`NAME = "EP042"` (`EmailServiceTest`, `EmailModuleTest`), only the
+one imported last is reachable through the CLI `test EP042` command.
+This predates EP-042 (the same collision exists for every prior
+integration EP's Service/Module test pair since at least EP-038) and
+should be addressed by a separate future maintenance EP, not here.
+
+EP-042 is now fully complete through STEP 4.
+
+---
+
 ## v0.1.8-ep041
 
 Released: 2026-08-19

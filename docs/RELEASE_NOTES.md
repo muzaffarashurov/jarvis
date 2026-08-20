@@ -1550,6 +1550,250 @@ EP-040 (Telegram Info) made for their own Tool Engine registration.
 
 ---
 
+# EP-042 — Email Integration
+
+Status: COMPLETE. STEP 1-4 complete -- design, implementation, and
+Deep Audit (Final Verdict: EP042 STEP 3 -- PASS WITH NOTES; see
+CHANGELOG.md v0.1.9-ep042 for the defects found and fixed during the
+audit).
+
+## Overview
+
+Gives Jarvis a way to read email via a standard, provider-independent
+IMAP server -- list mailboxes/folders, list recent messages, retrieve
+a specific message, and search a mailbox. Before this EP, no
+email-related implementation, dependency, or configuration existed
+anywhere in the codebase.
+
+## Scope
+
+Implements exactly four read-only IMAP operations:
+
+- `list_folders()`
+- `list_messages(folder, limit)`
+- `get_message(folder, uid)`
+- `search_messages(folder, criteria)`
+
+**Not implemented** -- explicitly, not merely deferred:
+
+- sending email / SMTP message submission of any kind
+- reply, forward, delete, move, or flag/mark (read/unread) operations
+- attachment content download (attachment *metadata* -- filename,
+  content type, size -- is included; attachment *content* is not)
+- Gmail API, Microsoft Graph, Outlook API, or any other
+  provider-specific API
+- OAuth2 or any provider-specific authentication flow
+- background/scheduled polling or any `IDLE` connection
+- any other IMAP mutation
+
+None of the above exist anywhere in `EmailService` or `EmailModule`'s
+code -- confirmed by a dedicated grep-based scope audit during STEP 3
+(searching for `SELECT`/`STORE`/`EXPUNGE`/`APPEND`/`COPY`/`MOVE`/
+`DELETE`/`SMTP`/`sendmail`/`oauth`/`gmail`/`graph.microsoft` across
+every EP-042 file).
+
+## Architecture
+
+Core -> Service -> Module -> Bootstrap, matching the EP-038/039/040/041
+precedent, with one necessary protocol-driven adaptation (see below):
+
+- Core (`src/core/email/`): `EmailFolder`, `EmailAttachment`,
+  `EmailMessageSummary`, `EmailMessage` (frozen dataclasses describing
+  normalized IMAP data -- never raw IMAP/RFC 822 structures) and
+  `EmailResult`, plus a flat `EmailError` exception hierarchy
+  (`EmailAuthenticationError`, `EmailConnectionError`,
+  `EmailTimeoutError`, `EmailTLSError`, `EmailMailboxError`,
+  `EmailMessageNotFoundError`, `EmailSearchError`,
+  `EmailProtocolError`) -- pure data, no IMAP call
+- Service (`src/services/email_service.py`): `EmailService` owns the
+  one place IMAP connections are opened in this subsystem, mirroring
+  the "one component owns the one real invocation" discipline
+  `DiscordService` (EP-041) established. Unlike a single stateless
+  HTTP call per operation, IMAP is inherently connection-oriented, so
+  each public method opens one short-lived connection
+  (connect -> login -> read-only select -> operate -> logout) and
+  always closes it before returning -- no connection is ever stored
+  on `self`, keeping the service conceptually stateless between calls
+  the same way `DiscordService`/`GitHubService` are
+- Module (`src/modules/email_module.py`): the `email` CLI namespace
+  (`folders`, `list`, `message`, `search`, `help`), a pure
+  `CommandResult` translation layer over `EmailService`'s four public
+  methods, matching `DiscordModule`'s shape exactly
+- Bootstrap constructs `EmailService` and registers `EmailModule`,
+  gated by `email.enabled`, mirroring the EP-039/040/041 wiring block
+- No third-party dependency was added: the Python standard library
+  (`imaplib` + `email`) is sufficient. `requirements.txt` is unchanged
+
+## IMAP protocol usage
+
+All four operations use IMAP `UID` command variants (`UID SEARCH`,
+`UID FETCH`) rather than message sequence numbers, so UIDs remain
+stable identifiers across separate calls. Every mailbox is selected
+read-only (`SELECT ... readonly=True`, i.e. IMAP `EXAMINE` semantics)
+-- this subsystem cannot set the `\Seen` flag or otherwise mutate a
+mailbox as a side effect of any operation. `SEARCH` results are
+explicitly sorted by numeric UID before use, since RFC 3501 does not
+guarantee server-returned order.
+
+## Read-only operations
+
+Supported:
+
+- `list_folders` -- IMAP `LIST`
+- `list_messages` -- IMAP `UID SEARCH ALL` + `UID FETCH ... (BODY.PEEK[HEADER])`
+- `get_message` -- IMAP `UID FETCH ... (RFC822)`, normalized via the
+  standard-library `email` package
+- `search_messages` -- IMAP `UID SEARCH <criteria>` (a raw IMAP
+  search-key expression, passed through as-is) + the same header-only
+  fetch `list_messages` uses
+
+Unsupported (not implemented anywhere in this subsystem):
+
+- send / reply / forward
+- delete / move / flag / mark read-unread
+- attachment content download
+- Gmail API / Microsoft Graph / Outlook API
+- OAuth2
+- background polling / `IDLE`
+
+## CLI commands
+
+```text
+email folders
+email list [folder] [limit]
+email message <folder> <uid>
+email search <folder> <criteria...>
+email help
+```
+
+No other command exists in `EmailModule`'s dispatch table.
+
+## Configuration
+
+```yaml
+email:
+  enabled: false
+  imap_host: ""
+  imap_port: 993
+  tls_mode: "ssl"
+  imap_username_env_var: "EMAIL_IMAP_USERNAME"
+  imap_password_env_var: "EMAIL_IMAP_PASSWORD"
+  default_mailbox: "INBOX"
+  default_message_limit: 50
+  timeout_seconds: 30
+```
+
+There is **no** credential value key in configuration -- only the two
+environment-variable *names* are configurable. Authentication uses
+those two environment variables only. `email.enabled` defaults to
+`false`, unlike EP-039/040/041's `true` default, because IMAP has no
+safe universal default host (unlike a fixed REST API root) -- an
+operator must supply `imap_host` and explicitly enable the subsystem.
+When `email.enabled` is `false`, Bootstrap never constructs
+`EmailService` and never registers `EmailModule` -- `email <anything>`
+falls through to "Unknown command," matching every other disabled
+subsystem in this project.
+
+## Security
+
+- IMAP username/password are read from `os.environ` at the start of
+  every operation call -- never at `__init__`, never cached on `self`
+  beyond the duration of a single call, never logged
+- Credentials are sent only inside the IMAP `LOGIN` command; they
+  never appear in a log line, an exception message, or an
+  `EmailResult` -- every error message in this subsystem is built
+  from fixed text and/or non-secret server response text, never the
+  credential values
+- `EmailModule` never reads or handles credentials at all, and never
+  imports `imaplib` -- it has no code path that could reference them
+- TLS is mandatory -- `email.tls_mode` only accepts `"ssl"` (implicit
+  TLS/IMAPS) or `"starttls"`; no code path connects over plaintext
+  IMAP. Certificate validation uses `ssl.create_default_context()`,
+  with no configuration option to disable it
+- No new secret storage mechanism and no new third-party dependency
+  were introduced
+
+## Error handling
+
+`EmailService` maps IMAP/protocol-layer failures onto the
+`EmailError` hierarchy: missing/blank credentials or a rejected login
+raise `EmailAuthenticationError`, connection-level failures raise
+`EmailConnectionError`, timeouts raise `EmailTimeoutError`,
+TLS/certificate failures raise `EmailTLSError`, an unselectable
+folder raises `EmailMailboxError`, a missing UID raises
+`EmailMessageNotFoundError`, rejected search criteria raise
+`EmailSearchError`, and any other protocol failure or unparseable
+response raises `EmailProtocolError`. Message/header decoding
+additionally falls back to a best-effort UTF-8 decode rather than
+raising on a malformed/unrecognized MIME charset (fixed during STEP 3
+-- see CHANGELOG.md). `EmailModule` catches `EmailError` uniformly and
+formats every failure as `CommandResult(success=False, ...)`, never
+letting an exception propagate to the CLI layer.
+
+## Testing strategy
+
+`tests/EP042/test_email_service.py` and
+`tests/EP042/test_email_module.py` never make a real IMAP network
+call and never require a real mailbox. Every test constructs
+`EmailService` with a small duck-typed stub `connection` object
+mimicking `imaplib.IMAP4_SSL`/`IMAP4`'s tuple-response interface.
+Coverage includes the successful call for each of the four
+operations (including a real multipart message with an attachment,
+parsed by the standard-library `email` package), every
+connection/authentication/TLS/timeout/mailbox/search failure mapping,
+missing/blank credential handling, invalid configuration, CLI
+dispatch/argument validation, real `Bootstrap` enabled/disabled
+wiring, a dedicated read-only-boundary assertion, a dedicated
+assertion that a fixed fake credential value never appears in any
+exception message, and (added during STEP 3) dedicated regression
+tests for malformed-charset handling, RFC 2047-decoded To/Cc headers,
+and numeric UID ordering.
+
+## Regression verification
+
+The EP042 test suite and the full project test suite were run via
+the project's actual test runner as part of both STEP 3 and STEP 4.
+Results (STEP 4, final):
+
+```
+EP042 Service : 55 passed / 0 failed / 0 skipped
+EP042 Module  : 28 passed / 0 failed / 0 skipped
+```
+
+`test all`: 5376 passed / 0 failed / 0 skipped.
+
+Every regression count matches its last recorded baseline -- no
+regression was introduced by EP042. Source, test, and configuration
+files outside the files listed as modified for this EP were verified
+unchanged.
+
+## Known limitations
+
+- No SMTP / message-sending capability anywhere in this subsystem
+- No reply, forward, delete, move, or flag/mark operation
+- No provider-specific API (Gmail API, Microsoft Graph, Outlook API)
+- No OAuth2 authentication
+- No background/scheduled polling and no `IDLE` connection
+- No upper bound on retrieved message size (`get_message` fetches the
+  full message body for the requested UID)
+- No Tool Engine integration (deferred, matching EP-039/040/041)
+- `email.enabled` defaults to `false`, unlike EP-039/040/041's `true`
+  default (see "Configuration" above for rationale)
+
+## Known technical debt (pre-existing, not introduced by EP-042)
+
+`TestRegistry` keys test suites by `NAME.upper()`. Both
+`EmailServiceTest` and `EmailModuleTest` use `NAME = "EP042"`, so only
+the class imported last in `src/modules/test_module.py` is reachable
+through the CLI `test EP042` command -- the other suite's assertions
+are only run when invoked directly. This condition predates EP-042
+(the identical collision exists for every prior integration EP's
+Service/Module test pair, back to at least EP-038) and was
+deliberately left unfixed, per this EP's boundary, for a separate
+future maintenance EP to address.
+
+---
+
 ---
 
 End of document.

@@ -96,6 +96,7 @@ from src.modules.git_module import GitModule
 from src.modules.github_module import GitHubModule
 from src.modules.telegram_info_module import TelegramInfoModule
 from src.modules.discord_module import DiscordModule
+from src.modules.email_module import EmailModule
 from src.modules.conversation_module import ConversationModule
 from src.modules.embedding_module import EmbeddingModule
 from src.modules.fast_response_module import FastResponseModule
@@ -135,6 +136,7 @@ from src.services.git_service import GitService, GitServiceError
 from src.services.github_service import GitHubService, GitHubServiceError
 from src.services.telegram_info_service import TelegramInfoService, TelegramInfoServiceError
 from src.services.discord_service import DiscordService, DiscordServiceError
+from src.services.email_service import EmailService, EmailServiceError
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -234,6 +236,7 @@ class Bootstrap:
         self._github_service: GitHubService | None = None
         self._telegram_info_service: TelegramInfoService | None = None
         self._discord_service: DiscordService | None = None
+        self._email_service: EmailService | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -1436,6 +1439,37 @@ class Bootstrap:
             logger.info("Discord Service disabled ('discord.enabled: false').")
             self._discord_service = None
 
+        # EP-042 Email Integration. Read-only IMAP-only email access.
+        # Like DiscordService/GitHubService, EmailService has no
+        # dependency on any other Engineering Package's service or
+        # engine. Credentials are never read here or anywhere in
+        # Bootstrap -- EmailService reads them directly from the
+        # environment (via the two configured environment-variable
+        # names) at call time. EmailService opens/closes one
+        # short-lived IMAP connection per operation call -- no
+        # persistent connection, background thread, or polling is
+        # started at construction time.
+        #
+        # Unlike discord/github/telegram_info above, "email.enabled"
+        # defaults to false: IMAP has no safe universal default host
+        # (unlike a fixed REST API root), so this subsystem stays off
+        # until an operator supplies 'email.imap_host' and explicitly
+        # enables it (see EP042_DESIGN.md, section 10).
+        if bool(config.get("email.enabled", False)):
+            try:
+                email_service = EmailService(config=config)
+                self._email_service = email_service
+                router.register(EmailModule(email_service))
+            except EmailServiceError as exc:
+                logger.error(
+                    f"Email Service disabled: invalid 'email.*' configuration "
+                    f"({exc}). Fix config/config.yaml and restart to re-enable it."
+                )
+                self._email_service = None
+        else:
+            logger.info("Email Service disabled ('email.enabled: false').")
+            self._email_service = None
+
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
 
@@ -2039,3 +2073,16 @@ class Bootstrap:
             `_build_command_router`'s EP-041 wiring).
         """
         return self._discord_service
+
+    @property
+    def email_service(self) -> EmailService | None:
+        """Return the EmailService built for EP-042, if available.
+
+        Returns:
+            The EmailService instance, or None if
+            `run()`/`initialize()` has not completed (or the Email
+            Service subsystem was disabled this run -- disabled by
+            default -- or invalid 'email.*' configuration was supplied
+            -- see `_build_command_router`'s EP-042 wiring).
+        """
+        return self._email_service

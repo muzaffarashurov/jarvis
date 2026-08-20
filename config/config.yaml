@@ -163,6 +163,47 @@ discord:
   api_base_url: "https://discord.com/api/v10"
   timeout_seconds: 30
 
+email:
+  # EP-042 Email Integration. Read-only IMAP access (list folders,
+  # list messages, get message, search) against a standard,
+  # provider-independent IMAP server, using the Python standard
+  # library ('imaplib' + 'email') only -- no third-party dependency,
+  # no provider-specific API (Gmail API / Microsoft Graph / Outlook
+  # API), no OAuth. No send/reply/forward/delete/move/flag operation
+  # is implemented -- this subsystem can only ever read from the
+  # configured mailbox. This subsystem has no dependency on any other
+  # Engineering Package's service or engine, and is stateless between
+  # calls -- each operation opens one short-lived IMAP connection and
+  # always closes it before returning; no persistent connection,
+  # background thread, or polling exists anywhere in this subsystem.
+  #
+  # IMPORTANT: authentication uses environment variables ONLY -- the
+  # two names below (defaults shown) tell EmailService which
+  # environment variables to read the username/password from. The
+  # actual credential values must never be placed here or in any
+  # other config file.
+  #
+  # "enabled" defaults to false, unlike discord/github/telegram_info
+  # above -- IMAP has no safe universal default host (unlike a fixed
+  # REST API root), so this subsystem stays off until an operator
+  # supplies "imap_host" and explicitly enables it.
+  #
+  # "tls_mode" must be "ssl" (implicit TLS, IMAPS, the default) or
+  # "starttls" (plaintext connection upgraded via STARTTLS). Plaintext,
+  # unencrypted IMAP is not supported by this subsystem.
+  #
+  # "timeout_seconds" bounds every IMAP call, so a hung/slow network
+  # request cannot hang the calling thread indefinitely.
+  enabled: false
+  imap_host: ""
+  imap_port: 993
+  tls_mode: "ssl"
+  imap_username_env_var: "EMAIL_IMAP_USERNAME"
+  imap_password_env_var: "EMAIL_IMAP_PASSWORD"
+  default_mailbox: "INBOX"
+  default_message_limit: 50
+  timeout_seconds: 30
+
 ai:
   # EP-014 AI Provider Manager. Disabled provider selection by default
   # ("none") -- the rest of Jarvis never needs to know which provider

@@ -39,6 +39,8 @@ import tests.EP040.test_telegram_info_service
 import tests.EP040.test_telegram_info_module
 import tests.EP041.test_discord_service
 import tests.EP041.test_discord_module
+import tests.EP042.test_email_service
+import tests.EP042.test_email_module
 
 class TestModule(CommandModule):
 

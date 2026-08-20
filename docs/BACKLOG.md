@@ -10,33 +10,40 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-042 — Email Integration
+### EP-043 — REST API
 
 Not yet started. STEP 1 (Design) has not begun.
 
-Note: EP-041 — Discord Integration is now fully complete through
-STEP 4 (see CHANGELOG.md / docs/RELEASE_NOTES.md /
-docs/architecture/audits/EP041_ARCHITECTURE_AUDIT.md), and is now
-marked complete in docs/architecture/JARVIS_ROADMAP.md. It is a new,
+Note: EP-042 — Email Integration is now fully complete through
+STEP 4 (see CHANGELOG.md / docs/RELEASE_NOTES.md), and is now marked
+complete in docs/architecture/JARVIS_ROADMAP.md. It is a new,
 independent Core -> Service -> Module subsystem
-(`src/core/discord/`, `src/services/discord_service.py`,
-`src/modules/discord_module.py`) exposing exactly five read-only
-operations -- `get_guild(guild_id)`, `list_guild_channels(guild_id)`,
-`get_channel(channel_id)`, `get_guild_member(guild_id, user_id)`,
-`get_message(channel_id, message_id)` -- against the Discord REST
-API v10, using the project's existing `requests` dependency directly.
-No message history/bulk retrieval, and no write, moderation, role,
-webhook, reaction, or invite operation exists anywhere in this
-subsystem, and no Discord Gateway/WebSocket connection is opened.
-Authentication uses the `DISCORD_TOKEN` environment variable only,
-read per-call and never placed in config. `DiscordService` has no
-dependency on any other Engineering Package's service or engine.
+(`src/core/email/`, `src/services/email_service.py`,
+`src/modules/email_module.py`) exposing exactly four read-only
+operations -- `list_folders()`, `list_messages(folder, limit)`,
+`get_message(folder, uid)`, `search_messages(folder, criteria)` --
+against a standard, provider-independent IMAP server, using the
+Python standard library (`imaplib` + `email`) directly. No
+send/reply/forward/delete/move/flag operation, no provider-specific
+API (Gmail API, Microsoft Graph, Outlook API), no OAuth, and no
+background polling exists anywhere in this subsystem.
+Authentication uses two configurable environment-variable names
+(default `EMAIL_IMAP_USERNAME`/`EMAIL_IMAP_PASSWORD`), read per-call
+and never placed in config. `email.enabled` defaults to `false`
+(unlike EP-039/040/041's `true` default), since IMAP has no safe
+universal default host. `EmailService` has no dependency on any
+other Engineering Package's service or engine.
 
-SCOPE NOTE: EP-041 STEP 4 was a read-only Architecture Audit and
-returned a final verdict of PASS. No scope violation, layering
-leakage, security leak, or documentation inconsistency was
-identified. Exactly one authoritative `DiscordService`/`DiscordModule`
-implementation was confirmed, with no duplicate/parallel client.
+SCOPE NOTE: EP-042 STEP 3 was a Deep Audit and returned a final
+verdict of PASS WITH NOTES. Three defects were found and fixed (see
+CHANGELOG.md "Fixed" section for v0.1.9-ep042), and no P0
+(security/data-mutation) issue was identified. One pre-existing,
+out-of-scope technical-debt item was recorded but deliberately left
+unfixed: `TestRegistry`'s `NAME.upper()` keying means only one of
+`EmailServiceTest`/`EmailModuleTest` is reachable via the CLI
+`test EP042` command -- this predates EP-042, affects every prior
+integration EP's Service/Module test pair as well, and should be
+handled by a separate future maintenance EP.
 
 ---
 

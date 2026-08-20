@@ -116,12 +116,13 @@ Completed sub-packages:
 - EP-039 GitHub Integration
 - EP-040 Telegram Integration
 - EP-041 Discord Integration
+- EP-042 Email Integration
 
 ---
 
 ## Current
 
-EP-042 Email Integration
+EP-043 REST API
 
 ---
 
@@ -231,7 +232,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-041 Discord Integration
 
-EP-042 Email Integration
+✓ EP-042 Email Integration
 
 EP-043 REST API
 

@@ -48,6 +48,7 @@ def main() -> int:
         return 1
 
     shell.run()
+    bootstrap.shutdown()
     _save_memory_on_shutdown(bootstrap)
     return 0
 

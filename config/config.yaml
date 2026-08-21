@@ -204,6 +204,30 @@ email:
   default_message_limit: 50
   timeout_seconds: 30
 
+api:
+  # EP-043 REST API. A local programmatic interface exposing the same
+  # CommandRouter every CLI command already dispatches through (see
+  # src/core/api/api_router.py) -- no separate business logic, no
+  # duplicated Service/Core/Module layer. Implemented with the Python
+  # standard library ('http.server') only -- no third-party HTTP
+  # framework dependency.
+  #
+  # "enabled" defaults to false, unlike Discord/GitHub/Telegram Info's
+  # "true" default: unlike those stateless outbound clients, starting
+  # this subsystem binds and listens on a real network socket as a
+  # side effect of application startup, so it stays off until an
+  # operator explicitly opts in.
+  #
+  # "host" defaults to the loopback interface only (127.0.0.1) -- this
+  # is EP-043 v1's primary security boundary. Do not set this to
+  # "0.0.0.0" or a LAN-reachable address without adding real
+  # authentication first; see docs/architecture/designs/EP043_DESIGN.md.
+  #
+  # "port" is the TCP port the REST API listens on when enabled.
+  enabled: false
+  host: "127.0.0.1"
+  port: 8080
+
 ai:
   # EP-014 AI Provider Manager. Disabled provider selection by default
   # ("none") -- the rest of Jarvis never needs to know which provider

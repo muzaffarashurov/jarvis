@@ -1794,6 +1794,170 @@ future maintenance EP to address.
 
 ---
 
+# EP-043 — REST API
+
+STEP 1 (Investigation), STEP 2 (Implementation), STEP 3 (API Contract
+Hardening), and STEP 4 (Finalization & Release Readiness) all
+complete. **EP-043 is COMPLETE.** Scope was confirmed directly by the
+project owner (the STEP 1 investigation stopped on an under-specified
+title-only roadmap entry -- see `EP043_STEP1_REPORT.md`). Full design
+and rationale: `docs/architecture/designs/EP043_DESIGN.md`.
+Implementation report: `EP043_STEP2_REPORT.md`. Hardening report:
+`EP043_STEP3_REPORT.md`. Finalization report: `EP043_STEP4_REPORT.md`.
+
+## Summary
+
+A REST API, `RestApiServer` (`src/core/api/rest_api_server.py`),
+built entirely on the Python standard library (`http.server`) -- no
+new `requirements.txt` dependency. Architecturally a Bootstrap-level
+sibling of `InteractiveShell`, not a Core -> Service -> Module
+subsystem: it holds no business logic and dispatches every request
+through `ApiRouter` (`src/core/api/api_router.py`) into the exact
+same `CommandRouter` instance `InteractiveShell` and `TelegramRouter`
+already use.
+
+## Endpoints
+
+- `GET /health` -- liveness check.
+- `GET /api/v1/status` -- equivalent of the CLI's `system status`.
+- `POST /api/v1/commands` -- generic `{module, action, arguments}`
+  command dispatch: any command the CLI itself could run.
+
+Transport-level problems (malformed JSON, missing `module`, wrong
+field types, an unknown path, an unsupported method, or a
+`Content-Type` explicitly set to something other than
+`application/json`) return `400`/`404`/`405`/`415` with a structured
+`{"error": {"code", "message"}}` body. A missing `Content-Type` header
+is treated leniently (still parsed as JSON) -- added in STEP 3, see
+`EP043_STEP3_REPORT.md`, "Content-Type Handling". A successfully
+*routed* request always returns `200`, even if the underlying
+command's own result is `success: false` -- clients check the JSON
+body's `success` field for the command's business outcome (reviewed
+and explicitly retained, unchanged, in STEP 3 -- see `EP043_DESIGN.md`
+section 9/10 and `EP043_STEP3_REPORT.md`, "HTTP Semantics").
+
+## Configuration
+
+```yaml
+api:
+  enabled: false
+  host: "127.0.0.1"
+  port: 8080
+```
+
+`api.enabled` defaults to `false`, unlike EP-039/040/041's `true`
+default -- unlike those stateless outbound clients, enabling this
+subsystem binds and listens on a real network socket as a side effect
+of `Bootstrap.initialize()`, so it stays off until an operator opts
+in. Absence of the `api` section is handled identically to
+`enabled: false`. STEP 3 hardened this further: a malformed `api.port`
+(wrong type, e.g. a string, or out of the 0-65535 range) is now caught
+and degrades safely to "REST API disabled" rather than crashing
+`Bootstrap.initialize()` -- see `EP043_STEP3_REPORT.md`, "Configuration
+Hardening".
+
+## Security
+
+`127.0.0.1` is the default and only supported v1 bind host. No
+authentication, TLS, CORS, or rate limiting exists in v1 -- the full
+command surface is reachable by anything that can reach the bound
+loopback port. Deferred to a future EP (see `docs/BACKLOG.md`).
+
+## Lifecycle
+
+Built and (if enabled) started inside `Bootstrap.initialize()`, after
+`CommandRouter`/`InteractiveShell` are built. Runs on a daemon
+background thread, independent of `InteractiveShell`'s blocking main
+loop. `Bootstrap.shutdown()` (new) stops it cleanly; `src/main.py`
+calls it once the shell exits.
+
+## Testing strategy
+
+Single combined suite, `tests/EP043/test_rest_api.py`
+(`NAME = "EP043"`) -- deliberately not split into a same-named
+Service/Module pair, sidestepping the pre-existing `TestRegistry`
+collision (see below) entirely rather than triggering it. Covers
+`ApiRouter` dispatch (including argument shell-quoting), all three
+endpoints over real HTTP against an OS-assigned ephemeral port,
+malformed JSON, missing `module`, 404/405 routing, server start/stop
+idempotency, real `Bootstrap` wiring for `api.enabled: true` /
+`false` / absent, `Bootstrap.shutdown()`, and a direct check that
+`InteractiveShell`/`CommandRouter` still work with `RestApiServer`
+running. STEP 3 added: the `415` Content-Type policy (wrong type,
+`charset` parameter tolerance, and true header-absence leniency via a
+raw `http.client` request), wrong-field-type and unexpected-field
+validation, a DTO shape assertion for `/api/v1/status`, five repeated
+start/stop cycles with a thread-leak check, malformed-`api.port`
+Bootstrap robustness (bad type and out-of-range), and one end-to-end
+"external client" test exercising the full documented contract only
+(health -> status -> command -> clean shutdown).
+
+## Regression verification
+
+```
+EP043 : 83 passed / 0 failed / 0 skipped
+```
+
+`test all`: 5459 passed / 0 failed / 0 skipped (previous baseline
+5414 + STEP 3's 45 new assertions; every prior EP's count is
+unchanged). `ruff check` on every new/changed file: clean (0
+findings). Compile check (`py_compile`) across the full `src/` +
+`tests/` tree: clean. No leaked `jarvis-rest-api` threads and port
+`8080` confirmed free after a full regression run.
+
+## Known limitations
+
+- No authentication/authorization, TLS, CORS, or rate limiting (v1
+  scope boundary -- reviewed again and explicitly retained in STEP 3
+  -- see "Security" above and `EP043_DESIGN.md` section 5/19)
+- No per-subsystem REST resources -- v1 ships one generic
+  `/api/v1/commands` endpoint rather than e.g. dedicated
+  `/api/v1/email/...` routes
+- No OpenAPI/Swagger schema -- no existing project convention for one
+  was found in STEP 3's audit, so this remains a documented future
+  extension rather than newly introduced tooling
+- No WebSocket/streaming support
+- A command that sets `CommandResult.should_exit` (e.g. `system
+  exit`) has no effect when dispatched over the REST API -- only
+  `InteractiveShell`'s own loop reads that field
+- `api.enabled` defaults to `false`, unlike EP-039/040/041's `true`
+  default (see "Configuration" above for rationale)
+- No code-level guard prevents an operator from setting `api.host` to
+  a non-loopback address without also configuring authentication --
+  documented as an operator responsibility, not enforced
+
+## Known technical debt
+
+Sidestepped rather than fixed for this EP: `TestRegistry`'s
+`NAME.upper()` keying (pre-existing since at least EP-038 -- see the
+EP-042 section above). EP-043 avoids triggering it by registering a
+single `EP043` suite instead of a same-named Service/Module pair.
+
+## STEP 4 — Finalization
+
+A final architecture/contract/configuration/lifecycle audit found no
+blocking defect and no discrepancy between documentation and the live
+implementation, so no code change was required or made. `VERSION`
+(`0.1.0-alpha`) and `PROJECT_MANIFEST.md` were checked against
+established convention (neither has ever been updated per-EP, for any
+prior EP) and deliberately left unchanged. Final validation:
+
+```
+EP043 : 83 passed / 0 failed / 0 skipped (unchanged from STEP 3 -- no
+        new test was added, since no code changed)
+test all : 5459 passed / 0 failed / 0 skipped (unchanged from STEP 3)
+ruff check src/core/api/ tests/EP043/: 0 findings
+py_compile (full src/ + tests/ tree): clean
+```
+
+Final archive: `jarvis-ep043-complete.zip` (the STEP 3 archive,
+`jarvis-ep043-step3-complete.zip`, was retained unmodified as a prior
+recovery point). Full detail: `EP043_STEP4_REPORT.md`.
+
+**EP-043 is COMPLETE.**
+
+---
+
 ---
 
 End of document.

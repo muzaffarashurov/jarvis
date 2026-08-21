@@ -12,7 +12,48 @@ Status: Active
 
 ### EP-043 — REST API
 
-Not yet started. STEP 1 (Design) has not begun.
+STEP 1 (Investigation), STEP 2 (Implementation), STEP 3 (API Contract
+Hardening), and STEP 4 (Finalization & Release Readiness) all
+complete. EP-043 is now marked COMPLETE. Scope was confirmed directly
+by the project owner (the STEP 1 investigation stopped because the
+repository established only the title "REST API," with no purpose,
+consumers, endpoint surface, security model, dependency, or lifecycle
+integration defined anywhere -- see `EP043_STEP1_REPORT.md`). Full
+design: `docs/architecture/designs/EP043_DESIGN.md`.
+
+As built: `RestApiServer` (`src/core/api/rest_api_server.py`) is a
+Bootstrap-level sibling of `InteractiveShell` -- not a
+Core -> Service -> Module subsystem -- built entirely on the Python
+standard library (`http.server`), with no new `requirements.txt`
+dependency. It binds `127.0.0.1:8080` by default and exposes three
+endpoints: `GET /health`, `GET /api/v1/status`, `POST
+/api/v1/commands`. `ApiRouter` (`src/core/api/api_router.py`)
+dispatches every command request through the exact same
+`CommandRouter` instance `InteractiveShell` and `TelegramRouter`
+already use -- no business logic was added or duplicated.
+`api.enabled` defaults to `false` (unlike EP-039/040/041's `true`
+default), a deliberate deviation from the implementation prompt's
+illustrative `enabled: true` example: unlike those stateless outbound
+clients, enabling this subsystem binds and listens on a real network
+socket as a side effect of `Bootstrap.initialize()`, so it stays off
+by default for safety and to avoid port conflicts in the many existing
+EP-001..042 tests that construct a real `Bootstrap` for wiring checks
+alone.
+
+DEFERRED (see Non-goals in `EP043_DESIGN.md`, and Future Ideas below):
+authentication/authorization, TLS, CORS, rate limiting, OpenAPI/Swagger
+generation, WebSocket support, per-subsystem REST resources (v1 has
+one generic command endpoint instead of e.g. dedicated
+`/api/v1/email/...` routes).
+
+STEP 3 (contract hardening, see `EP043_STEP3_REPORT.md`) added a
+`415 Unsupported Media Type` response for `POST /api/v1/commands`
+when `Content-Type` is present and not `application/json` (a missing
+header is still treated leniently), and fixed a robustness gap where a
+malformed `api.port` (wrong type or out of range) could raise an
+uncaught exception during `Bootstrap.initialize()` instead of
+degrading safely to "REST API disabled." No endpoint, status-code
+policy, or configuration default changed.
 
 Note: EP-042 — Email Integration is now fully complete through
 STEP 4 (see CHANGELOG.md / docs/RELEASE_NOTES.md), and is now marked
@@ -43,7 +84,9 @@ unfixed: `TestRegistry`'s `NAME.upper()` keying means only one of
 `EmailServiceTest`/`EmailModuleTest` is reachable via the CLI
 `test EP042` command -- this predates EP-042, affects every prior
 integration EP's Service/Module test pair as well, and should be
-handled by a separate future maintenance EP.
+handled by a separate future maintenance EP. EP-043 deliberately
+sidesteps this collision by registering a single `EP043` test suite
+rather than a same-named Service/Module pair.
 
 ---
 
@@ -95,6 +138,13 @@ Priority may change.
 - Git integration improvements
 - Local file watcher
 - Background indexing
+- REST API authentication/authorization (API keys, JWT, OAuth, RBAC) -- deferred from EP-043 v1
+- REST API TLS/HTTPS support -- deferred from EP-043 v1
+- REST API CORS configuration -- deferred from EP-043 v1
+- REST API rate limiting -- deferred from EP-043 v1
+- REST API OpenAPI/Swagger schema generation -- deferred from EP-043 v1
+- Per-subsystem REST resources (e.g. dedicated /api/v1/email/... routes) -- deferred from EP-043 v1, which ships one generic /api/v1/commands endpoint instead
+- TestRegistry NAME-collision fix (Service/Module test pairs sharing a NAME are only partially reachable via `test EP0NN`) -- pre-existing since EP-038, tracked again during EP-042 and EP-043
 
 ---
 

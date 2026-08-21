@@ -6,6 +6,167 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.10-ep043
+
+Released: 2026-08-20
+
+Status: EP-043 COMPLETE (STEP 1 stopped pending owner scope
+confirmation, per `EP043_STEP1_REPORT.md`; owner confirmed scope,
+STEP 2 implemented it, STEP 3 hardened the API contract, STEP 4
+finalized and archived it)
+
+### Added
+
+- src/core/api/api_error.py: `ApiError` base and four subclasses
+  (`ApiValidationError` 400, `ApiNotFoundError` 404,
+  `ApiMethodNotAllowedError` 405, `ApiInternalError` 500), each
+  carrying its own HTTP status code and machine-readable `code`
+- src/core/api/dto.py: `CommandRequest`, `CommandResponse`,
+  `HealthResponse`, `ErrorPayload` -- the REST API's external JSON
+  contract, independent of any internal domain object
+- src/core/api/api_router.py: `ApiRouter`, a thin bridge from a
+  `(module, action, arguments)` triple to the existing, shared
+  `CommandRouter.dispatch()` -- the exact same entry point
+  `InteractiveShell` and `TelegramRouter` already use. No business
+  logic, no command parsing of its own; arguments are shell-quoted
+  before being rejoined so values containing spaces round-trip safely
+- src/core/api/rest_api_server.py: `RestApiServer`, an HTTP transport
+  built entirely on the Python standard library
+  (`http.server.ThreadingHTTPServer`) -- no new third-party
+  dependency. Binds `127.0.0.1` by default, serves on a background
+  daemon thread, and exposes `GET /health`, `GET /api/v1/status`, and
+  `POST /api/v1/commands`. Centralized error handling maps every
+  `ApiError` to its status code and converts any unexpected exception
+  to a generic `ApiInternalError` -- no stack trace is ever returned
+  to a client
+  - EP-043 test suite (tests/EP043/test_rest_api.py), `NAME = "EP043"`
+    (single combined suite; not split into a same-named Service/Module
+    pair, to avoid triggering the pre-existing `TestRegistry`
+    NAME-collision technical debt -- see "Known technical debt" below)
+- src/bootstrap.py: `_build_rest_api_server()`, `shutdown()`, and the
+  `rest_api_server` property. `RestApiServer` is built and (if
+  `api.enabled`) started inside `initialize()`, after
+  `CommandRouter`/`InteractiveShell` are built, so `ApiRouter` always
+  receives the fully-populated router
+- config/config.yaml: new `api:` section (`enabled: false`,
+  `host: "127.0.0.1"`, `port: 8080`)
+- docs/architecture/designs/EP043_DESIGN.md: full design document,
+  including the owner-confirmed scope, the deliberate `api.enabled`
+  default deviation from the implementation prompt's illustrative
+  example, and the no-new-dependency decision
+
+### Changed
+
+- src/main.py: one line added -- `bootstrap.shutdown()` is now called
+  after `shell.run()` returns, so a clean CLI exit also stops a
+  running `RestApiServer` and releases its bound port. No-op whenever
+  `rest_api_server` is `None` (the default)
+
+### Design decisions worth noting
+
+- `api.enabled` defaults to `false`, unlike EP-039/040/041's `true`
+  default. Every prior EP-038..042 subsystem is a stateless, per-call
+  outbound client with no observable effect when idle; `RestApiServer`
+  is Jarvis's first component that binds and listens on a real network
+  socket as a side effect of `Bootstrap.initialize()`. Defaulting to
+  `false` keeps every existing EP-001..042 test that constructs a real
+  `Bootstrap` for wiring checks alone (none of which include an `api`
+  section) unaffected, and avoids introducing port-conflict flakiness
+- No new dependency was added. `RestApiServer` uses only
+  `http.server`/`json`/`threading` from the standard library --
+  `requirements.txt` is unchanged. This mirrors EP-042's
+  `EmailService` precedent (`imaplib`/`email` only) and resolves the
+  STEP 1 investigation's open "framework/library" ambiguity in the
+  lowest-risk way available given no design document specified one
+- A successfully routed command request always returns HTTP `200`,
+  even when the command's own result is `success: false`. Only
+  REST-transport-level problems (malformed JSON, missing `module`, an
+  unknown path, an unsupported method) produce a non-2xx status. See
+  `EP043_DESIGN.md` section 9 for the full rationale
+- `RestApiServer` is architecturally a Bootstrap-level sibling of
+  `InteractiveShell`, not a `Core -> Service -> Module` subsystem --
+  it is Jarvis's first inbound listener, a different architectural
+  role from every prior integration EP's outbound, per-call client
+
+### STEP 3 — API Contract Hardening (Added)
+
+- src/core/api/api_error.py: `ApiUnsupportedMediaTypeError` (415) --
+  new error for a `POST /api/v1/commands` request whose `Content-Type`
+  header is present and not `application/json`
+- src/core/api/rest_api_server.py: `Content-Type` policy -- a present
+  `Content-Type` other than `application/json` (parameters like
+  `; charset=utf-8` are ignored) now returns 415; a missing header is
+  still treated leniently and parsed as JSON (documented, not
+  changed)
+- tests/EP043/test_rest_api.py: 45 new assertions -- Content-Type
+  policy (415, charset tolerance, true header-absence leniency via a
+  raw `http.client` request), wrong-field-type and unexpected-field
+  validation, a `/api/v1/status` DTO shape assertion, five repeated
+  start/stop cycles with a thread-leak check, malformed-`api.port`
+  Bootstrap robustness (bad type and out-of-range), and one
+  end-to-end "external client" test (health -> status -> command ->
+  clean shutdown) using only the documented public contract
+- EP043_STEP3_REPORT.md, docs/architecture/designs/EP043_DESIGN.md
+  (contract-hardening addendum)
+
+### STEP 3 — Fixed
+
+- src/core/api/rest_api_server.py: `RestApiServer.start()` previously
+  caught only `OSError` when binding; a malformed `api.port` (wrong
+  type, e.g. a string, or out of the 0-65535 range) raised an
+  uncaught `TypeError`/`OverflowError` that would have crashed
+  `Bootstrap.initialize()` instead of degrading to "REST API
+  disabled" like every other invalid-configuration case. Now catches
+  `OSError`/`TypeError`/`ValueError`/`OverflowError` uniformly
+
+### STEP 3 — Explicitly reviewed, unchanged
+
+- The `success: false` -> HTTP `200` status-code policy (STEP 2's
+  decision, `EP043_DESIGN.md` section 10) was re-reviewed against
+  STEP 3's HTTP-semantics requirement and retained as-is; no
+  business-outcome-to-status mapping was introduced
+- `api.enabled` default (`false`) and `api.host` default
+  (`"127.0.0.1"`) are unchanged
+
+### Known technical debt (pre-existing, not introduced by EP-043)
+
+Same `TestRegistry` `NAME.upper()` collision documented for EP-042
+below. EP-043 sidesteps it entirely by registering a single `EP043`
+suite rather than a same-named Service/Module pair.
+
+### Validation
+
+```
+EP043 : 83 passed / 0 failed / 0 skipped
+```
+
+`test all`: 5459 passed / 0 failed / 0 skipped (previous baseline
+5414 + STEP 3's 45 new assertions). `ruff check` on every new/changed
+file: clean. `py_compile` across the full `src/` + `tests/` tree:
+clean. No leaked `jarvis-rest-api` threads and port `8080` confirmed
+free after a full regression run.
+
+### STEP 4 — Finalization & Release Readiness
+
+Audit-only step: re-verified architecture, API contract,
+configuration, and lifecycle against the live code (not assumed from
+prior reports) and found no discrepancy and no blocking defect, so no
+source file was changed. `docs/architecture/designs/EP043_DESIGN.md`
+gained a `## 22. STEP 4 Addendum` consolidating the Implemented/
+Deferred split into one explicit reference. `VERSION` and
+`PROJECT_MANIFEST.md` were checked against every prior EP's actual
+convention (neither has ever been updated per-EP) and deliberately
+left unchanged — see `EP043_STEP4_REPORT.md` §8-9. Test/regression/
+ruff/compile results are unchanged from STEP 3 (83/5459/clean/clean),
+confirmed by re-execution rather than assumed. Final archive:
+`jarvis-ep043-complete.zip` (`jarvis-ep043-step3-complete.zip`
+retained, untouched, as the prior recovery point). Full detail:
+`EP043_STEP4_REPORT.md`.
+
+**EP-043 is COMPLETE.**
+
+---
+
 ## v0.1.9-ep042
 
 Released: 2026-08-20

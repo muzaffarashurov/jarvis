@@ -41,6 +41,7 @@ import tests.EP041.test_discord_service
 import tests.EP041.test_discord_module
 import tests.EP042.test_email_service
 import tests.EP042.test_email_module
+import tests.EP043.test_rest_api
 
 class TestModule(CommandModule):
 

@@ -18,6 +18,8 @@ from src.core.ai.provider_registry import ProviderRegistry as AIProviderRegistry
 from src.core.agent.agent_engine import AgentEngine
 from src.core.agent.agent_manager import AgentManager
 from src.core.agent.agent_provider import AgentFrameworkError
+from src.core.api.api_router import ApiRouter
+from src.core.api.rest_api_server import RestApiServer, RestApiServerError
 from src.core.collaboration.collaboration_engine import CollaborationEngine
 from src.core.collaboration.collaboration_manager import CollaborationManager
 from src.core.collaboration.collaboration_provider import CollaborationError
@@ -237,6 +239,7 @@ class Bootstrap:
         self._telegram_info_service: TelegramInfoService | None = None
         self._discord_service: DiscordService | None = None
         self._email_service: EmailService | None = None
+        self._rest_api_server: RestApiServer | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -268,6 +271,7 @@ class Bootstrap:
 
         self._command_router = self._build_command_router(self._orchestrator, self._config)
         self._shell = InteractiveShell(router=self._command_router)
+        self._rest_api_server = self._build_rest_api_server(self._command_router, self._config)
 
         self._initialized = True
         return self._orchestrator
@@ -1567,6 +1571,68 @@ class Bootstrap:
         router.register(TestModule())
         return router
 
+    def _build_rest_api_server(
+        self, command_router: CommandRouter, config: Config
+    ) -> RestApiServer | None:
+        """Build and, if enabled, start the EP-043 REST API server.
+
+        Follows the same '<name>.enabled' config-gating convention as
+        every EP-038..EP-042 subsystem, but 'api.enabled' defaults to
+        False -- unlike Discord/GitHub/Telegram Info's 'true' default.
+        Those subsystems are stateless, per-call outbound clients with
+        no observable effect when idle; RestApiServer is Jarvis's
+        first component that binds and listens on a real network
+        socket as a side effect of `initialize()`. Many existing tests
+        across EP-001..EP-042 construct a real Bootstrap purely to
+        verify dependency-injection wiring (calling `initialize()`
+        without `run()`, and without ever calling `shutdown()`); none
+        of their configs include an 'api' section, so they are
+        unaffected either way, but defaulting new subsystems that open
+        a socket to 'off' is the safe default going forward too.
+
+        Args:
+            command_router: The fully populated CommandRouter, shared
+                unchanged with InteractiveShell and (if applicable)
+                TelegramRouter -- see ApiRouter.
+            config: The loaded application configuration.
+
+        Returns:
+            The started RestApiServer, or None if 'api.enabled' is
+            False (the default) or the configured host/port could not
+            be bound.
+        """
+        if not bool(config.get("api.enabled", False)):
+            logger.info("REST API Server disabled ('api.enabled: false').")
+            return None
+
+        host = config.get("api.host", "127.0.0.1")
+        port = config.get("api.port", 8080)
+        api_router = ApiRouter(command_router=command_router)
+        server = RestApiServer(api_router=api_router, host=host, port=port)
+        try:
+            server.start()
+        except RestApiServerError as exc:
+            logger.error(
+                f"REST API Server disabled: invalid 'api.*' configuration or the "
+                f"configured host/port could not be bound ({exc}). Fix "
+                f"config/config.yaml and restart to re-enable it."
+            )
+            return None
+        return server
+
+    def shutdown(self) -> None:
+        """Stop any background component started by this Bootstrap.
+
+        Currently only the EP-043 REST API server needs an explicit
+        stop -- every other subsystem built by `initialize()` is a
+        stateless, per-call client with no background thread or open
+        socket. Safe to call multiple times, and safe to call even if
+        the REST API server was never started/enabled.
+        """
+        if self._rest_api_server is not None:
+            self._rest_api_server.stop()
+            self._rest_api_server = None
+
     @staticmethod
     def _default_processes() -> list[Process]:
         """Return the default Process Catalog entries registered at startup.
@@ -2086,3 +2152,16 @@ class Bootstrap:
             -- see `_build_command_router`'s EP-042 wiring).
         """
         return self._email_service
+
+    @property
+    def rest_api_server(self) -> RestApiServer | None:
+        """Return the RestApiServer built for EP-043, if available.
+
+        Returns:
+            The RestApiServer instance, or None if
+            `run()`/`initialize()` has not completed, the REST API
+            subsystem was disabled this run (disabled by default --
+            see `_build_rest_api_server`), or the configured
+            host/port could not be bound.
+        """
+        return self._rest_api_server

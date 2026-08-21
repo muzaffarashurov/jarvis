@@ -122,7 +122,16 @@ Completed sub-packages:
 
 ## Current
 
-EP-043 REST API
+EP-043 REST API — **COMPLETE** (STEP 1 Investigation, STEP 2
+Implementation, STEP 3 API Contract Hardening, and STEP 4
+Finalization & Release Readiness all complete -- see
+docs/architecture/designs/EP043_DESIGN.md and docs/RELEASE_NOTES.md.
+Note: EP-043's STEP 3/STEP 4 were scoped as contract
+hardening/integration and finalization respectively, rather than the
+standard 4-step method's "Documentation"/"Architecture Audit" steps
+defined in AI_DEVELOPMENT_PLAYBOOK.md -- following the same per-EP
+custom step-numbering precedent EP-036 used for its own STEP 2/STEP
+3.)
 
 ---
 
@@ -234,7 +243,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-042 Email Integration
 
-EP-043 REST API
+✓ EP-043 REST API
 
 EP-044 Desktop UI
 

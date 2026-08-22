@@ -139,6 +139,9 @@ from src.services.github_service import GitHubService, GitHubServiceError
 from src.services.telegram_info_service import TelegramInfoService, TelegramInfoServiceError
 from src.services.discord_service import DiscordService, DiscordServiceError
 from src.services.email_service import EmailService, EmailServiceError
+from src.skills.voice.audio_capture import AudioCapture, AudioCaptureError
+from src.skills.voice.speech_to_text import SpeechToTextEngineError, VoskSpeechToTextEngine
+from src.skills.voice.skill import VoiceModule
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -240,6 +243,7 @@ class Bootstrap:
         self._discord_service: DiscordService | None = None
         self._email_service: EmailService | None = None
         self._rest_api_server: RestApiServer | None = None
+        self._voice_engine: VoskSpeechToTextEngine | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -1474,6 +1478,45 @@ class Bootstrap:
             logger.info("Email Service disabled ('email.enabled: false').")
             self._email_service = None
 
+        # EP-046 Speech-to-Text. Offline audio-to-text transcription
+        # (Vosk, see src/skills/voice/speech_to_text.py) feeding
+        # recognized text into the existing CommandRouter -- the same
+        # dispatch() entry point InteractiveShell/TelegramRouter/
+        # ApiRouter already use (see src/core/command_router.py). No
+        # new dispatch mechanism; CommandRouter itself is unchanged.
+        #
+        # "voice.enabled" defaults to false, matching Email/REST API's
+        # precedent: this subsystem claims the microphone as a
+        # hardware resource, so it stays off until an operator
+        # explicitly enables it (EP046_DESIGN.md Section 6, owner
+        # Decision 7). When disabled, no VoiceModule is registered at
+        # all -- mirroring EmailService/DiscordService's own "not
+        # registered when disabled" precedent immediately above --
+        # so an unconfigured installation sees no behavior change.
+        if bool(config.get("voice.enabled", False)):
+            try:
+                voice_engine = VoskSpeechToTextEngine(config=config)
+                voice_audio_capture = AudioCapture(config=config)
+                self._voice_engine = voice_engine
+                router.register(
+                    VoiceModule(
+                        config=config,
+                        command_router=router,
+                        engine=voice_engine,
+                        audio_capture=voice_audio_capture,
+                    )
+                )
+            except (SpeechToTextEngineError, AudioCaptureError) as exc:
+                logger.error(
+                    f"Voice Service disabled: invalid 'voice.*' configuration or "
+                    f"missing model/dependency ({exc}). Fix config/config.yaml, "
+                    f"place the required Vosk models, and restart to re-enable it."
+                )
+                self._voice_engine = None
+        else:
+            logger.info("Voice Service disabled ('voice.enabled: false').")
+            self._voice_engine = None
+
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
 
@@ -2197,3 +2240,17 @@ class Bootstrap:
             host/port could not be bound.
         """
         return self._rest_api_server
+
+    @property
+    def voice_engine(self) -> VoskSpeechToTextEngine | None:
+        """Return the VoskSpeechToTextEngine built for EP-046, if available.
+
+        Returns:
+            The VoskSpeechToTextEngine instance, or None if
+            `run()`/`initialize()` has not completed (or the Voice
+            subsystem was disabled this run -- disabled by default --
+            or the 'vosk'/'sounddevice' dependency or configured
+            'voice.model_dir' was invalid -- see
+            `_build_command_router`'s EP-046 wiring).
+        """
+        return self._voice_engine

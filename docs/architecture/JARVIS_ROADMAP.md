@@ -122,24 +122,35 @@ Completed sub-packages:
 
 ## Current
 
-EP-045 Web Dashboard — **COMPLETE** (STEP 1 Design & Architecture
-Investigation, STEP 2 Implementation, and STEP 3 Documentation &
-Audit Closure all complete -- see
+EP-046 Speech-to-Text — **COMPLETE** (STEP 1 Design & Planning, STEP
+2 Implementation & Verification, and STEP 3 Documentation & Audit
+Closure all complete -- see
+docs/architecture/designs/EP046_DESIGN.md (including its Section
+9a/9b/9c owner-decision record and Section 16 as-built summary) and
+docs/architecture/audits/EP046_AUDIT.md. Verdict: **PASS WITH
+DOCUMENTED LIMITATIONS**. Built as an offline Vosk-based STT engine
+(`src/skills/voice/speech_to_text.py`) plus a separate `sounddevice`
+audio-capture layer (`src/skills/voice/audio_capture.py`), composed
+by a new `voice` `CommandModule` (`src/skills/voice/skill.py`,
+actions: `listen`/`transcribe`/`status`/`help`) that dispatches
+recognized text through the existing, unmodified `CommandRouter` --
+no new dispatch mechanism, no change to `src/core/api/`, Telegram, or
+`desktop/`. Supports Russian, Uzbek, and English (Vosk small models,
+manually installed, none bundled in the repository); `voice.enabled`
+defaults to `false`. Two disclosed, non-blocking gaps remain: no real
+audio has been transcribed by a loaded model, and no real microphone
+capture has been verified, in any environment this project has run
+in (no model files or physical microphone available) -- see the
+audit document's Known Limitations for detail.) EP-045 Web Dashboard
+remains **COMPLETE** (STEP 1-3, unchanged by EP-046, `web/`
+confirmed absent from the EP-046 changeset -- see
 docs/architecture/designs/EP045_DESIGN.md and
-docs/architecture/audits/EP045_AUDIT.md. Verdict: **PASS**. Built as
-a same-origin static-file capability added to the existing
-`RestApiServer` (an optional `static_dir`, gated by the new, opt-in
-`api.web_dashboard_dir` config key, off by default) serving a plain
-HTML/CSS/JS dashboard from `web/public/` -- no build step, no new
-dependency, no CORS policy, no authentication, and no change to
-EP-043's three existing API routes or their behavior. One owner
-decision remains open (target-browser sign-off) and is carried
-forward in the audit document's Open Questions; see the audit
-document for full detail.) EP-044 Desktop UI remains **COMPLETE**
-(STEP 1-3, unchanged by EP-045, `desktop/` confirmed byte-identical
--- see docs/architecture/designs/EP044_DESIGN.md and
+docs/architecture/audits/EP045_AUDIT.md.) EP-044 Desktop UI remains
+**COMPLETE** (STEP 1-3, unchanged by EP-045/EP-046, `desktop/`
+confirmed absent from the EP-046 changeset -- see
+docs/architecture/designs/EP044_DESIGN.md and
 docs/architecture/audits/EP044_AUDIT.md.) EP-043 REST API remains
-**COMPLETE** (STEP 1-4, unchanged by EP-044/EP-045 -- see
+**COMPLETE** (STEP 1-4, unchanged by EP-044/EP-045/EP-046 -- see
 docs/architecture/designs/EP043_DESIGN.md and
 docs/RELEASE_NOTES.md).
 
@@ -263,7 +274,7 @@ EP-013 AI Infrastructure
 
 ## Phase 7 — Voice
 
-EP-046 Speech-to-Text
+✓ EP-046 Speech-to-Text
 
 EP-047 Text-to-Speech
 

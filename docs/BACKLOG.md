@@ -10,6 +10,43 @@ Status: Active
 
 ## Next Engineering Package
 
+### EP-046 — Speech-to-Text
+
+STEP 1 (Design & Planning), STEP 2 (Implementation & Verification),
+and STEP 3 (Documentation & Audit Closure) all complete. EP-046 is
+now marked COMPLETE with verdict **PASS WITH DOCUMENTED
+LIMITATIONS**. Full design: `docs/architecture/designs/EP046_DESIGN.md`
+(including Section 9a/9b/9c's record of the owner decisions that
+resolved STEP 1's open questions, and Section 16's as-built summary).
+Full audit: `docs/architecture/audits/EP046_AUDIT.md`.
+
+Built as an offline Vosk-based STT engine
+(`src/skills/voice/speech_to_text.py`) plus a separate `sounddevice`
+audio-capture layer (`src/skills/voice/audio_capture.py`), composed
+by a new `voice` `CommandModule` (`src/skills/voice/skill.py`) that
+dispatches recognized text through the existing, unmodified
+`CommandRouter` -- no new dispatch mechanism, no `src/core/api/`,
+Telegram, or `desktop/`/`web/` change. Actions: `voice listen`
+(primary -- capture, transcribe, and dispatch if confident enough),
+`voice transcribe` (capture and transcribe only, never dispatch),
+`voice status`, `voice help`. Supports Russian, Uzbek, and English
+via Vosk small models (`vosk-model-small-ru-0.22`,
+`vosk-model-small-uz-0.22`, `vosk-model-small-en-us-0.15`), manually
+installed under `voice.model_dir` -- none bundled in the repository.
+`voice.enabled` defaults to `false`; low-confidence transcripts are
+never auto-executed. Tests: EP-046 57/0/1 (one disclosed, expected
+skip); EP-043 83/83, EP-044 52/52, EP-045 38/38 all unchanged; full
+suite 5,641 passed / 2 failed (EP-039/EP-041, pre-existing and
+independently confirmed unrelated to EP-046) / 1 skipped.
+
+Two disclosed, non-blocking gaps remain, both stemming from the same
+cause -- no Vosk model files and no physical microphone exist in any
+environment this project has run in: no real audio has been
+transcribed by a loaded model, and no real microphone capture has
+been verified. Recommended as the first manual-verification item
+once EP-046 reaches the actual target workstation. See
+`EP046_AUDIT.md` Section 14 for full detail.
+
 ### EP-045 — Web Dashboard
 
 STEP 1 (Design & Architecture Investigation), STEP 2

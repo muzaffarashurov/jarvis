@@ -204,6 +204,55 @@ email:
   default_message_limit: 50
   timeout_seconds: 30
 
+voice:
+  # EP-046 Speech-to-Text. Offline audio-to-text transcription (Vosk,
+  # see src/skills/voice/speech_to_text.py), feeding recognized text
+  # into the existing CommandRouter -- the same dispatch() entry
+  # point the interactive shell, Telegram, and the REST API already
+  # use (see src/core/command_router.py). No new dispatch mechanism,
+  # no duplicated command parsing. Audio capture
+  # (src/skills/voice/audio_capture.py, via 'sounddevice') is kept
+  # architecturally separate from recognition.
+  #
+  # "enabled" defaults to false, matching Email/REST API's precedent:
+  # this subsystem claims the microphone as a hardware resource, so
+  # it stays off until an operator explicitly opts in. When false, no
+  # "voice" command namespace is registered at all.
+  #
+  # "languages" lists every language 'voice listen'/'voice transcribe'
+  # may recognize. Each entry requires its own Vosk model, manually
+  # downloaded and extracted (no automatic downloader in EP-046) to
+  # '<model_dir>/<language>/'. "default_language" (must be one of
+  # "languages") is used when no language argument is given.
+  #
+  # Recommended small models (EP046_DESIGN.md Section 7/9c):
+  #   ru -> vosk-model-small-ru-0.22   (~45 MB)
+  #   uz -> vosk-model-small-uz-0.22   (~49 MB)
+  #   en -> vosk-model-small-en-us-0.15 (~40 MB)
+  # Source: https://alphacephei.com/vosk/models
+  #
+  # "min_confidence" (0.0-1.0, or null to disable the check): a
+  # recognized command below this confidence is never dispatched --
+  # only reported back with its text and confidence (owner Decision 9).
+  # Vosk itself exposes only per-word confidence; VoskSpeechToTextEngine
+  # normalizes an utterance-level value as the mean of per-word scores
+  # (see speech_to_text.py's module docstring).
+  #
+  # "listen_duration_seconds" is v1's fixed recording length for
+  # 'voice listen'/'voice transcribe' (no silence/voice-activity
+  # detection yet -- EP046_DESIGN.md Section 5.1/9a).
+  enabled: false
+  engine: "vosk"
+  languages: ["ru", "uz", "en"]
+  default_language: "en"
+  model_dir: "data/models/voice"
+  offline_only: true
+  device: null
+  sample_rate: 16000
+  listen_duration_seconds: 5
+  timeout_seconds: 10
+  min_confidence: 0.5
+
 api:
   # EP-043 REST API. A local programmatic interface exposing the same
   # CommandRouter every CLI command already dispatches through (see

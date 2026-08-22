@@ -122,16 +122,25 @@ Completed sub-packages:
 
 ## Current
 
-EP-043 REST API — **COMPLETE** (STEP 1 Investigation, STEP 2
-Implementation, STEP 3 API Contract Hardening, and STEP 4
-Finalization & Release Readiness all complete -- see
-docs/architecture/designs/EP043_DESIGN.md and docs/RELEASE_NOTES.md.
-Note: EP-043's STEP 3/STEP 4 were scoped as contract
-hardening/integration and finalization respectively, rather than the
-standard 4-step method's "Documentation"/"Architecture Audit" steps
-defined in AI_DEVELOPMENT_PLAYBOOK.md -- following the same per-EP
-custom step-numbering precedent EP-036 used for its own STEP 2/STEP
-3.)
+EP-044 Desktop UI — **COMPLETE** (STEP 1 Design & Architecture
+Investigation, STEP 2 Implementation, and STEP 3 Final Verification,
+Architectural Audit & Documentation all complete -- see
+docs/architecture/designs/EP044_DESIGN.md and
+docs/architecture/audits/EP044_AUDIT.md. Note: EP-044 used a custom
+3-step sequence (Design -> Implementation -> combined
+Verification/Audit/Documentation) rather than the standard 4-step
+method's separate "Documentation"/"Architecture Audit" steps defined
+in AI_DEVELOPMENT_PLAYBOOK.md -- following the same per-EP
+custom step-numbering precedent EP-036 and EP-043 each used for their
+own STEP sequences. Verdict: PASS WITH DOCUMENTED LIMITATIONS -- one
+non-blocking design-conformance gap (Section 20 Logging not yet
+implemented) and several owner-deferred items (health-check polling
+cadence, target platform(s), packaging scope, ownership of the
+pre-existing empty src/ui/*.py files) remain open; see the audit
+document for full detail. EP-043 REST API remains **COMPLETE**
+(STEP 1-4, unchanged by EP-044 -- see
+docs/architecture/designs/EP043_DESIGN.md and
+docs/RELEASE_NOTES.md).)
 
 ---
 
@@ -245,7 +254,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-043 REST API
 
-EP-044 Desktop UI
+✓ EP-044 Desktop UI
 
 EP-045 Web Dashboard
 

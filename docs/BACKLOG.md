@@ -10,35 +10,88 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-043 — REST API
+### EP-044 — Desktop UI
 
-STEP 1 (Investigation), STEP 2 (Implementation), STEP 3 (API Contract
+STEP 1 (Design & Architecture Investigation), STEP 2
+(Implementation), and STEP 3 (Final Verification, Architectural
+Audit & Documentation) all complete. EP-044 is now marked COMPLETE
+with verdict **PASS WITH DOCUMENTED LIMITATIONS**. Full design:
+`docs/architecture/designs/EP044_DESIGN.md`. Full audit:
+`docs/architecture/audits/EP044_AUDIT.md`.
+
+As built: `desktop/` is a new top-level package (a PySide6 MVVM
+client, not nested under `src/`), consuming EP-043's REST API
+exclusively over HTTP -- `desktop/api/jarvis_api_client.py` (built on
+the already-existing `requests` dependency) is the only component
+that talks to Jarvis, calling `GET /health`, `GET /api/v1/status`,
+and `POST /api/v1/commands` unchanged. No file under `src/core/`,
+`src/services/`, or `src/modules/` is imported by `desktop/`
+business logic. Network calls run on a worker `QThread`
+(`desktop/viewmodels/api_worker.py`) with results delivered back to
+the UI thread via Qt signals, so the GUI event loop is never blocked.
+Desktop configuration (host/port/timeout) is stored separately from
+`config/config.yaml`, in a per-user YAML file
+(`desktop/config/desktop_config.py`), matching the design's required
+separation of client and server configuration. `PySide6==6.11.2` was
+added to `requirements.txt` as the project's first-ever GUI
+dependency; no other dependency changed.
+
+DEFERRED (see Non-Goals in `EP044_DESIGN.md`, and Future Ideas
+below): tray integration, desktop notifications, command history,
+CLI-syntax command input, packaging/installer/executable generation,
+authentication UI, chat/memory/agent browsers, workflow editor,
+voice control, file management.
+
+NON-BLOCKING LIMITATION (see `EP044_AUDIT.md` Section 5 for detail):
+`EP044_DESIGN.md` Section 20 (Logging) specifies reusing the
+project's `loguru` convention for connection attempts, state
+transitions, and command submissions/results; the STEP 2
+implementation does not yet call `loguru` anywhere in `desktop/`.
+This does not affect correctness, security, architecture, or any
+passing test, and is left for a small, separate follow-up rather
+than folded into the STEP 3 audit gate.
+
+OWNER DECISION REQUIRED (carried from STEP 1, still open): automatic
+health-check polling cadence (STEP 2 implemented manual-only,
+consistent with the design leaving this unresolved); target
+platform(s) for future packaging (Windows/Linux/macOS); packaging
+scope (own EP vs. EP-044 sub-package); ownership of the three
+pre-existing, empty `src/ui/dashboard.py` / `tray.py` /
+`notifications.py` placeholder files, which STEP 1, STEP 2, and
+STEP 3 all confirmed remain untouched and byte-identical to their
+pre-EP-044 state.
+
+Note: EP-043 — REST API is now fully complete through STEP 4 (see
+CHANGELOG.md / docs/RELEASE_NOTES.md), and remains marked complete in
+docs/architecture/JARVIS_ROADMAP.md, unchanged by EP-044. STEP 1
+(Investigation), STEP 2 (Implementation), STEP 3 (API Contract
 Hardening), and STEP 4 (Finalization & Release Readiness) all
-complete. EP-043 is now marked COMPLETE. Scope was confirmed directly
-by the project owner (the STEP 1 investigation stopped because the
-repository established only the title "REST API," with no purpose,
-consumers, endpoint surface, security model, dependency, or lifecycle
-integration defined anywhere -- see `EP043_STEP1_REPORT.md`). Full
-design: `docs/architecture/designs/EP043_DESIGN.md`.
+complete. Scope was confirmed directly by the project owner (the
+STEP 1 investigation stopped because the repository established only
+the title "REST API," with no purpose, consumers, endpoint surface,
+security model, dependency, or lifecycle integration defined anywhere
+-- see `EP043_STEP1_REPORT.md`). Full design:
+`docs/architecture/designs/EP043_DESIGN.md`.
 
 As built: `RestApiServer` (`src/core/api/rest_api_server.py`) is a
 Bootstrap-level sibling of `InteractiveShell` -- not a
 Core -> Service -> Module subsystem -- built entirely on the Python
 standard library (`http.server`), with no new `requirements.txt`
-dependency. It binds `127.0.0.1:8080` by default and exposes three
-endpoints: `GET /health`, `GET /api/v1/status`, `POST
-/api/v1/commands`. `ApiRouter` (`src/core/api/api_router.py`)
-dispatches every command request through the exact same
-`CommandRouter` instance `InteractiveShell` and `TelegramRouter`
-already use -- no business logic was added or duplicated.
-`api.enabled` defaults to `false` (unlike EP-039/040/041's `true`
-default), a deliberate deviation from the implementation prompt's
-illustrative `enabled: true` example: unlike those stateless outbound
-clients, enabling this subsystem binds and listens on a real network
-socket as a side effect of `Bootstrap.initialize()`, so it stays off
-by default for safety and to avoid port conflicts in the many existing
-EP-001..042 tests that construct a real `Bootstrap` for wiring checks
-alone.
+dependency (at the time of EP-043; EP-044 subsequently added
+`PySide6` for its own, separate Desktop client). It binds
+`127.0.0.1:8080` by default and exposes three endpoints:
+`GET /health`, `GET /api/v1/status`, `POST /api/v1/commands`.
+`ApiRouter` (`src/core/api/api_router.py`) dispatches every command
+request through the exact same `CommandRouter` instance
+`InteractiveShell` and `TelegramRouter` already use -- no business
+logic was added or duplicated. `api.enabled` defaults to `false`
+(unlike EP-039/040/041's `true` default), a deliberate deviation from
+the implementation prompt's illustrative `enabled: true` example:
+unlike those stateless outbound clients, enabling this subsystem
+binds and listens on a real network socket as a side effect of
+`Bootstrap.initialize()`, so it stays off by default for safety and
+to avoid port conflicts in the many existing EP-001..042 tests that
+construct a real `Bootstrap` for wiring checks alone.
 
 DEFERRED (see Non-goals in `EP043_DESIGN.md`, and Future Ideas below):
 authentication/authorization, TLS, CORS, rate limiting, OpenAPI/Swagger

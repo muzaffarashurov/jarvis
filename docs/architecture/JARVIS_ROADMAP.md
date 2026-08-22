@@ -122,25 +122,26 @@ Completed sub-packages:
 
 ## Current
 
-EP-044 Desktop UI — **COMPLETE** (STEP 1 Design & Architecture
-Investigation, STEP 2 Implementation, and STEP 3 Final Verification,
-Architectural Audit & Documentation all complete -- see
-docs/architecture/designs/EP044_DESIGN.md and
-docs/architecture/audits/EP044_AUDIT.md. Note: EP-044 used a custom
-3-step sequence (Design -> Implementation -> combined
-Verification/Audit/Documentation) rather than the standard 4-step
-method's separate "Documentation"/"Architecture Audit" steps defined
-in AI_DEVELOPMENT_PLAYBOOK.md -- following the same per-EP
-custom step-numbering precedent EP-036 and EP-043 each used for their
-own STEP sequences. Verdict: PASS WITH DOCUMENTED LIMITATIONS -- one
-non-blocking design-conformance gap (Section 20 Logging not yet
-implemented) and several owner-deferred items (health-check polling
-cadence, target platform(s), packaging scope, ownership of the
-pre-existing empty src/ui/*.py files) remain open; see the audit
-document for full detail. EP-043 REST API remains **COMPLETE**
-(STEP 1-4, unchanged by EP-044 -- see
+EP-045 Web Dashboard — **COMPLETE** (STEP 1 Design & Architecture
+Investigation, STEP 2 Implementation, and STEP 3 Documentation &
+Audit Closure all complete -- see
+docs/architecture/designs/EP045_DESIGN.md and
+docs/architecture/audits/EP045_AUDIT.md. Verdict: **PASS**. Built as
+a same-origin static-file capability added to the existing
+`RestApiServer` (an optional `static_dir`, gated by the new, opt-in
+`api.web_dashboard_dir` config key, off by default) serving a plain
+HTML/CSS/JS dashboard from `web/public/` -- no build step, no new
+dependency, no CORS policy, no authentication, and no change to
+EP-043's three existing API routes or their behavior. One owner
+decision remains open (target-browser sign-off) and is carried
+forward in the audit document's Open Questions; see the audit
+document for full detail.) EP-044 Desktop UI remains **COMPLETE**
+(STEP 1-3, unchanged by EP-045, `desktop/` confirmed byte-identical
+-- see docs/architecture/designs/EP044_DESIGN.md and
+docs/architecture/audits/EP044_AUDIT.md.) EP-043 REST API remains
+**COMPLETE** (STEP 1-4, unchanged by EP-044/EP-045 -- see
 docs/architecture/designs/EP043_DESIGN.md and
-docs/RELEASE_NOTES.md).)
+docs/RELEASE_NOTES.md).
 
 ---
 
@@ -256,7 +257,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-044 Desktop UI
 
-EP-045 Web Dashboard
+✓ EP-045 Web Dashboard
 
 ---
 

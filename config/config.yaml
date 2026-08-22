@@ -224,9 +224,20 @@ api:
   # authentication first; see docs/architecture/designs/EP043_DESIGN.md.
   #
   # "port" is the TCP port the REST API listens on when enabled.
+  #
+  # "web_dashboard_dir" (EP-045, optional): a directory of static
+  # HTML/CSS/JS files RestApiServer will also serve, same-origin,
+  # for any GET request that isn't one of the three API routes above.
+  # This lets the EP-045 Web Dashboard be reached from the exact same
+  # host:port as the API with no CORS policy needed (see
+  # docs/architecture/designs/EP045_DESIGN.md, Section 21 "Option A").
+  # Empty (the default) disables this entirely -- RestApiServer then
+  # behaves exactly as it did before EP-045, returning 404 for any
+  # unrecognized path.
   enabled: false
   host: "127.0.0.1"
   port: 8080
+  web_dashboard_dir: "web/public"
 
 ai:
   # EP-014 AI Provider Manager. Disabled provider selection by default

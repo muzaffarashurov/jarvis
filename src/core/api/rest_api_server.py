@@ -48,13 +48,30 @@ no content negotiation, no support for alternate media types -- while
 still catching the unambiguous case of a client explicitly declaring
 an incompatible payload (see EP043_STEP3_REPORT.md, "Content-Type
 Handling").
+
+Static File Serving (EP-045, optional): if constructed with a
+``static_dir``, ``RestApiServer`` additionally serves plain static
+files (the EP-045 Web Dashboard's HTML/CSS/JS) for any ``GET`` request
+whose path is not one of the three routes above. This is the same
+socket/process/port ``_ROUTES`` already binds -- no second server, no
+new dependency -- chosen specifically so the Web Dashboard can be
+served **same-origin** with the REST API and avoid needing a CORS
+policy (see EP045_DESIGN.md, Section 21 "Option A" and the EP-045
+STEP 2 report's "Why this change is required" section for the full
+justification). When ``static_dir`` is ``None`` (the default, and the
+only behavior that existed before EP-045), every path outside
+``_ROUTES`` still returns exactly the same ``404`` it always did --
+this capability is purely additive and inert unless explicitly
+configured (``api.web_dashboard_dir`` in ``config/config.yaml``).
 """
 
 from __future__ import annotations
 
 import json
+import mimetypes
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -104,6 +121,7 @@ class _ApiRequestHandler(BaseHTTPRequestHandler):
     """
 
     api_router: ApiRouter  # bound by RestApiServer.start()
+    static_dir: Path | None = None  # bound by RestApiServer.start() -- EP-045
 
     def log_message(self, format: str, *args: Any) -> None:
         """Redirect stdlib's default stderr access log into loguru."""
@@ -171,10 +189,61 @@ class _ApiRequestHandler(BaseHTTPRequestHandler):
         if method not in allowed_methods:
             raise ApiMethodNotAllowedError(f"Method not allowed: {method} {self.path}")
 
+    def _try_serve_static(self) -> bool:
+        """Attempt to serve an EP-045 Web Dashboard static asset.
+
+        Only called for GET requests whose path is not one of the
+        three fixed API routes (see ``_dispatch``). Returns False --
+        doing nothing at all -- whenever ``static_dir`` is unset,
+        which is always true unless ``api.web_dashboard_dir`` is
+        explicitly configured (``Bootstrap._build_rest_api_server``).
+        This preserves EP-043's original 404-for-everything-else
+        behavior exactly when the Web Dashboard capability is not in
+        use.
+
+        Returns:
+            True if a static file was found and sent to the client
+            (response already fully written). False if no
+            ``static_dir`` is configured, the resolved path escapes
+            ``static_dir`` (rejected, not served), or no matching file
+            exists -- in every False case the caller falls through to
+            the existing ``ApiNotFoundError`` (404) handling.
+        """
+        if self.static_dir is None:
+            return False
+
+        request_path = self.path.split("?", 1)[0]
+        relative = "index.html" if request_path in ("", "/") else request_path.lstrip("/")
+
+        try:
+            candidate = (self.static_dir / relative).resolve()
+            candidate.relative_to(self.static_dir)
+        except ValueError:
+            # Path traversal attempt (e.g. "/../config/config.yaml").
+            # Refuse silently -- fall through to the normal 404 path,
+            # rather than a distinct error that would reveal the check
+            # exists.
+            return False
+
+        if not candidate.is_file():
+            return False
+
+        content_type, _ = mimetypes.guess_type(str(candidate))
+        body = candidate.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type or "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return True
+
     # ---------- routing ----------
 
     def _dispatch(self, method: str) -> None:
         try:
+            if self.path not in _ROUTES and method == "GET" and self._try_serve_static():
+                return
+
             self._check_route(method)
 
             if self.path == "/health":
@@ -242,7 +311,13 @@ class RestApiServer:
     shutdown (see ``Bootstrap.shutdown()``).
     """
 
-    def __init__(self, api_router: ApiRouter, host: str = "127.0.0.1", port: int = 8080) -> None:
+    def __init__(
+        self,
+        api_router: ApiRouter,
+        host: str = "127.0.0.1",
+        port: int = 8080,
+        static_dir: Path | None = None,
+    ) -> None:
         """Initialize the RestApiServer without binding a socket yet.
 
         Args:
@@ -252,10 +327,16 @@ class RestApiServer:
                 interface only -- see module docstring and
                 EP043_STEP2_REPORT.md, "Security".
             port: The TCP port to bind to.
+            static_dir: Optional directory to serve EP-045 Web
+                Dashboard static files from, for any GET request whose
+                path is not one of the three fixed API routes. None
+                (the default) preserves EP-043's original behavior
+                exactly -- every such path returns 404.
         """
         self._api_router = api_router
         self._host = host
         self._port = port
+        self._static_dir = static_dir
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -276,6 +357,11 @@ class RestApiServer:
         if self._httpd is not None:
             return self._httpd.server_address[1]
         return self._port
+
+    @property
+    def static_dir(self) -> Path | None:
+        """Return the configured Web Dashboard static-file directory, if any."""
+        return self._static_dir
 
     @property
     def is_running(self) -> bool:
@@ -303,7 +389,7 @@ class RestApiServer:
         handler_class = type(
             "_BoundApiRequestHandler",
             (_ApiRequestHandler,),
-            {"api_router": self._api_router},
+            {"api_router": self._api_router, "static_dir": self._static_dir},
         )
 
         try:

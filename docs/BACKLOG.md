@@ -10,8 +10,58 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-044 — Desktop UI
+### EP-045 — Web Dashboard
 
+STEP 1 (Design & Architecture Investigation), STEP 2
+(Implementation), and STEP 3 (Documentation & Audit Closure) all
+complete. EP-045 is now marked COMPLETE with verdict **PASS**. Full
+design: `docs/architecture/designs/EP045_DESIGN.md` (including
+Section 22a's record of the owner decisions that resolved STEP 1's
+open questions). Full audit:
+`docs/architecture/audits/EP045_AUDIT.md`.
+
+As built: `web/public/{index.html, app.js, styles.css}` is a plain
+HTML/CSS/JavaScript dashboard -- no framework, no build step, no new
+dependency -- consuming EP-043's REST API exclusively, over
+same-origin `fetch()` calls to `GET /health`, `GET /api/v1/status`,
+and `POST /api/v1/commands` using relative URLs (no dashboard-side
+API base URL configuration is needed, a direct consequence of
+same-origin serving). Same-origin serving was implemented by adding
+an **optional** `static_dir` capability to the existing
+`RestApiServer` (`src/core/api/rest_api_server.py`) -- off by
+default, gated by a new, opt-in `api.web_dashboard_dir` config key
+(`config/config.yaml`) resolved in `src/bootstrap.py`. This was the
+one `src/core/api/` change made in this EP, demonstrated as
+technically necessary before being made (only one process can bind
+`api.host:api.port`, and a CORS policy was ruled out by owner
+decision) -- see `EP045_AUDIT.md` Section 6/7 for the verification.
+No CORS policy, no authentication, and no network-exposure change
+were introduced; EP-043's three existing routes and their behavior
+are byte-identical to before this EP.
+
+DEFERRED (see Non-Goals in `EP045_DESIGN.md`, and Future Ideas
+below): chat, memory browser, agent management, workflow editor,
+voice control, file management, notifications, authentication UI,
+periodic health-check polling, command history, CLI-syntax command
+input.
+
+NON-BLOCKING LIMITATION (see `EP045_AUDIT.md` Section 5/14 for
+detail): `web/public/app.js` and `styles.css` have no dedicated
+automated unit test -- no JavaScript test runner exists in this
+project. Both were verified working via a manual functional smoke
+test during STEP 2. This does not affect correctness, security,
+architecture, or any passing `test EP045` assertion.
+
+OWNER DECISION REQUIRED (carried from STEP 1, still open): explicit
+target-browser sign-off (STEP 1 proposed "current evergreen browsers
+only"; STEP 2 implemented against that assumption but the owner has
+not explicitly re-confirmed it as final).
+
+Note: EP-044 — Desktop UI is now fully complete through STEP 3 (see
+`docs/architecture/designs/EP044_DESIGN.md` and
+`docs/architecture/audits/EP044_AUDIT.md`), and remains marked
+complete in `docs/architecture/JARVIS_ROADMAP.md`, unchanged by
+EP-045 (`desktop/` confirmed byte-identical to its pre-EP-045 state).
 STEP 1 (Design & Architecture Investigation), STEP 2
 (Implementation), and STEP 3 (Final Verification, Architectural
 Audit & Documentation) all complete. EP-044 is now marked COMPLETE

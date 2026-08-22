@@ -1607,8 +1607,9 @@ class Bootstrap:
 
         host = config.get("api.host", "127.0.0.1")
         port = config.get("api.port", 8080)
+        static_dir = self._resolve_web_dashboard_dir(config)
         api_router = ApiRouter(command_router=command_router)
-        server = RestApiServer(api_router=api_router, host=host, port=port)
+        server = RestApiServer(api_router=api_router, host=host, port=port, static_dir=static_dir)
         try:
             server.start()
         except RestApiServerError as exc:
@@ -1619,6 +1620,37 @@ class Bootstrap:
             )
             return None
         return server
+
+    def _resolve_web_dashboard_dir(self, config: Config) -> Path | None:
+        """Resolve the EP-045 Web Dashboard's static-file directory, if configured.
+
+        Returns None -- RestApiServer then behaves exactly as it did
+        before EP-045, serving no static files -- when
+        'api.web_dashboard_dir' is absent/empty, or when the
+        configured directory does not exist on disk. A missing or
+        misconfigured value degrades safely rather than crashing
+        Bootstrap.initialize(), mirroring the same tolerant-degrade
+        convention already used for 'api.enabled'/'api.port'
+        (see `_build_rest_api_server`).
+
+        Args:
+            config: The loaded application configuration.
+
+        Returns:
+            The resolved, existing static-file directory, or None.
+        """
+        raw = config.get("api.web_dashboard_dir", "")
+        if not raw:
+            return None
+
+        candidate = (self._project_root / raw).resolve()
+        if not candidate.is_dir():
+            logger.warning(
+                f"'api.web_dashboard_dir' ({raw!r}) does not exist; the EP-045 "
+                f"Web Dashboard will not be served."
+            )
+            return None
+        return candidate
 
     def shutdown(self) -> None:
         """Stop any background component started by this Bootstrap.

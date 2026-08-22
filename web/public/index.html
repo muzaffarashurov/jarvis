@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jarvis — Web Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="app__header">
+      <div class="app__brand">
+        <span class="app__brand-mark" aria-hidden="true">J</span>
+        <div class="app__brand-text">
+          <h1>Jarvis</h1>
+          <p>Web Dashboard &mdash; EP-045</p>
+        </div>
+      </div>
+      <div class="connection" id="connection-indicator" data-state="disconnected">
+        <span class="connection__dot" aria-hidden="true"></span>
+        <span class="connection__label" id="connection-label">Checking connection&hellip;</span>
+        <button type="button" class="btn btn--ghost" id="reconnect-button">Check connection</button>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card" aria-labelledby="status-heading">
+        <div class="card__head">
+          <h2 id="status-heading">Jarvis status</h2>
+          <button type="button" class="btn btn--ghost" id="refresh-status-button">Refresh</button>
+        </div>
+        <div class="card__body">
+          <p class="status-line" id="status-line">Not checked yet.</p>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="command-heading">
+        <div class="card__head">
+          <h2 id="command-heading">Run a command</h2>
+        </div>
+        <div class="card__body">
+          <form id="command-form" novalidate>
+            <label class="field">
+              <span class="field__label">Module <span class="field__required">*</span></span>
+              <input type="text" id="module-input" name="module" placeholder="system" autocomplete="off" required />
+            </label>
+            <label class="field">
+              <span class="field__label">Action</span>
+              <input type="text" id="action-input" name="action" placeholder="status" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span class="field__label">Arguments <span class="field__hint">(space-separated)</span></span>
+              <input type="text" id="arguments-input" name="arguments" placeholder="" autocomplete="off" />
+            </label>
+            <button type="submit" class="btn btn--primary" id="execute-button">Execute</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="card card--wide" aria-labelledby="result-heading">
+        <div class="card__head">
+          <h2 id="result-heading">Result</h2>
+        </div>
+        <div class="card__body">
+          <pre class="result-pane" id="result-pane" data-empty="true">No command has been run yet.</pre>
+        </div>
+      </section>
+
+      <section class="card card--wide card--error" id="error-card" hidden aria-labelledby="error-heading">
+        <div class="card__head">
+          <h2 id="error-heading">Error</h2>
+          <button type="button" class="btn btn--ghost" id="dismiss-error-button">Dismiss</button>
+        </div>
+        <div class="card__body">
+          <p class="error-line" id="error-line"></p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app__footer">
+      <p>
+        Served same-origin from the EP-043 REST API. No authentication in
+        this version &mdash; see <code>docs/architecture/designs/EP045_DESIGN.md</code>.
+      </p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

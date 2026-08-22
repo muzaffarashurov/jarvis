@@ -43,6 +43,7 @@ import tests.EP042.test_email_service
 import tests.EP042.test_email_module
 import tests.EP043.test_rest_api
 import tests.EP044.test_desktop_ui
+import tests.EP045.test_web_dashboard
 
 class TestModule(CommandModule):
 

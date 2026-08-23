@@ -122,37 +122,50 @@ Completed sub-packages:
 
 ## Current
 
-EP-046 Speech-to-Text — **COMPLETE** (STEP 1 Design & Planning, STEP
+EP-047 Text-to-Speech — **COMPLETE** (STEP 1 Design & Research, STEP
 2 Implementation & Verification, and STEP 3 Documentation & Audit
 Closure all complete -- see
-docs/architecture/designs/EP046_DESIGN.md (including its Section
-9a/9b/9c owner-decision record and Section 16 as-built summary) and
-docs/architecture/audits/EP046_AUDIT.md. Verdict: **PASS WITH
-DOCUMENTED LIMITATIONS**. Built as an offline Vosk-based STT engine
-(`src/skills/voice/speech_to_text.py`) plus a separate `sounddevice`
-audio-capture layer (`src/skills/voice/audio_capture.py`), composed
-by a new `voice` `CommandModule` (`src/skills/voice/skill.py`,
-actions: `listen`/`transcribe`/`status`/`help`) that dispatches
-recognized text through the existing, unmodified `CommandRouter` --
-no new dispatch mechanism, no change to `src/core/api/`, Telegram, or
-`desktop/`. Supports Russian, Uzbek, and English (Vosk small models,
-manually installed, none bundled in the repository); `voice.enabled`
-defaults to `false`. Two disclosed, non-blocking gaps remain: no real
-audio has been transcribed by a loaded model, and no real microphone
-capture has been verified, in any environment this project has run
-in (no model files or physical microphone available) -- see the
-audit document's Known Limitations for detail.) EP-045 Web Dashboard
-remains **COMPLETE** (STEP 1-3, unchanged by EP-046, `web/`
-confirmed absent from the EP-046 changeset -- see
+docs/architecture/designs/EP047_DESIGN.md (including its Section 9a
+owner-decision record and Section 17 as-built summary) and
+docs/architecture/audits/EP047_AUDIT.md. Verdict: **PASS WITH
+DOCUMENTED LIMITATIONS**. Built as an offline `pyttsx3`-based TTS
+engine (`src/skills/voice/text_to_speech.py`) that speaks text
+through the OS's native speech driver (SAPI5 on Windows), composed
+into the *existing* `voice` `CommandModule`
+(`src/skills/voice/skill.py`) as an additive `speak` action -- no
+second namespace, no new dispatch mechanism, no change to
+`src/core/command_router.py`, `src/core/api/`, Telegram, `desktop/`,
+or `web/`. Supports English and Russian (subject to a matching OS
+voice being installed); Uzbek is explicitly out of scope (no offline
+TTS engine evaluated has a first-class Uzbek voice) and is not
+special-cased anywhere in code -- it fails the same generic
+"unsupported language"/"no installed voice" path any other
+unconfigured language would. `voice.tts.enabled` defaults to
+`false`, independent of the pre-existing `voice.enabled` (STT) flag
+for failure-mode purposes, though the `voice` namespace itself
+remains gated on `voice.enabled` (a disclosed, as-built limitation --
+see the audit document's Known Limitations). No automatic speaking of
+command results was implemented. Playback is blocking
+(`engine.say()`/`engine.runAndWait()`). Real Windows/SAPI5 audible
+speech has not been verified by a human in any environment this
+project has run in -- see the audit document's Known Limitations for
+detail.) EP-046 Speech-to-Text remains **COMPLETE** (STEP 1-3,
+unchanged by EP-047 -- `src/skills/voice/speech_to_text.py` and
+`src/skills/voice/audio_capture.py` confirmed byte-identical to their
+EP-046-shipped state -- see
+docs/architecture/designs/EP046_DESIGN.md and
+docs/architecture/audits/EP046_AUDIT.md.) EP-045 Web Dashboard
+remains **COMPLETE** (STEP 1-3, unchanged by EP-046/EP-047, `web/`
+confirmed absent from the EP-047 changeset -- see
 docs/architecture/designs/EP045_DESIGN.md and
 docs/architecture/audits/EP045_AUDIT.md.) EP-044 Desktop UI remains
-**COMPLETE** (STEP 1-3, unchanged by EP-045/EP-046, `desktop/`
-confirmed absent from the EP-046 changeset -- see
+**COMPLETE** (STEP 1-3, unchanged by EP-045/EP-046/EP-047, `desktop/`
+confirmed absent from the EP-047 changeset -- see
 docs/architecture/designs/EP044_DESIGN.md and
 docs/architecture/audits/EP044_AUDIT.md.) EP-043 REST API remains
-**COMPLETE** (STEP 1-4, unchanged by EP-044/EP-045/EP-046 -- see
-docs/architecture/designs/EP043_DESIGN.md and
-docs/RELEASE_NOTES.md).
+**COMPLETE** (STEP 1-4, unchanged by EP-044/EP-045/EP-046/EP-047 --
+see docs/architecture/designs/EP043_DESIGN.md and
+docs/RELEASE_NOTES.md.)
 
 ---
 
@@ -276,7 +289,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-046 Speech-to-Text
 
-EP-047 Text-to-Speech
+✓ EP-047 Text-to-Speech
 
 EP-048 Wake Word
 

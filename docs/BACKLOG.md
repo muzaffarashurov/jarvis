@@ -10,6 +10,63 @@ Status: Active
 
 ## Next Engineering Package
 
+### EP-048 — Wake Word
+
+**NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 7
+sequencing, EP-048 (Wake Word) is the next Engineering Package after
+EP-047's completion. No design, research, or implementation work has
+begun. `src/skills/voice/wake_word.py` remains the empty,
+pre-existing placeholder EP-046's own design already identified for
+it -- confirmed byte-identical to its EP-046-shipped (empty) state
+throughout EP-047 STEP 1-3.
+
+### EP-047 — Text-to-Speech
+
+STEP 1 (Design & Research), STEP 2 (Implementation & Verification),
+and STEP 3 (Documentation & Audit Closure) all complete. EP-047 is
+now marked COMPLETE with verdict **PASS WITH DOCUMENTED
+LIMITATIONS**. Full design: `docs/architecture/designs/EP047_DESIGN.md`
+(including Section 9a's record of the owner decisions that resolved
+STEP 1's open questions, and Section 17's as-built summary). Full
+audit: `docs/architecture/audits/EP047_AUDIT.md`.
+
+Built as an offline `pyttsx3`-based TTS engine
+(`src/skills/voice/text_to_speech.py`) that speaks text through the
+OS's native speech driver (SAPI5 on Windows), composed into the
+*existing* `voice` `CommandModule` (`src/skills/voice/skill.py`) as
+an additive `speak` action -- no new dispatch mechanism, no second
+namespace, no change to `src/core/command_router.py`,
+`src/core/api/`, Telegram, `desktop/`, or `web/`. Action: `voice
+speak <text>`, joined from its arguments and spoken via a blocking
+`engine.say()`/`engine.runAndWait()` call; never dispatches through
+`CommandRouter` and never automatically speaks another command's
+result. Supports English and Russian, contingent on a matching OS
+voice being installed -- Uzbek is explicitly out of scope (no offline
+TTS engine evaluated has a first-class Uzbek voice) and receives no
+special-case handling anywhere in code: an unconfigured or
+voice-less language always fails the same generic path, whether
+that language is Uzbek or any other. `voice.tts.enabled` defaults to
+`false`, independent of `voice.enabled` (STT) for failure-mode
+purposes (a TTS construction failure never disables STT, and vice
+versa) -- though the `voice` namespace itself remains registered only
+when `voice.enabled` (STT) is also true, a disclosed, as-built
+limitation (see `EP047_AUDIT.md` Known Limitations). Tests: EP-047
+49/0/0; EP-043 83/83, EP-044 52/52, EP-045 38/38, EP-046 57/0/1 all
+unchanged; full suite 5,655 passed / 0 failed / 1 skipped in this
+verification run (an earlier-documented two-failure baseline for
+EP-039/EP-041 was re-investigated and found to be an
+environment-dependent, network-availability difference, not a code
+regression -- see `EP047_AUDIT.md` Section 11 for detail).
+
+Two disclosed, non-blocking gaps remain: no real Windows/SAPI5
+audible speech has been confirmed by a human in any environment this
+project has run in, and TTS-only operation (with STT/microphone
+fully disabled) is not currently supported, due to the
+registration-gating limitation above. Recommended as the first
+manual-verification item, and a candidate small follow-up design
+decision, once EP-047 reaches the actual target Windows workstation.
+See `EP047_AUDIT.md` Section 13 for full detail.
+
 ### EP-046 — Speech-to-Text
 
 STEP 1 (Design & Planning), STEP 2 (Implementation & Verification),

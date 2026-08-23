@@ -26,12 +26,14 @@ from src.core.command_router import CommandResult, CommandRouter
 from src.core.config import Config
 from src.skills.voice.audio_capture import AudioCapture
 from src.skills.voice.speech_to_text import SpeechToTextEngine
+from src.skills.voice.text_to_speech import TextToSpeechEngine
 
 HELP_TEXT: str = (
     "Available voice commands\n\n"
     "voice listen [language]\n"
     "voice transcribe [language]\n"
-    "voice status"
+    "voice status\n"
+    "voice speak <text>"
 )
 
 ActionHandler = Callable[[list[str]], CommandResult]
@@ -49,10 +51,15 @@ class VoiceModule:
         - `voice transcribe`: capture and transcribe only, never
           dispatch -- a safe way to inspect recognition quality.
         - `voice status`: report engine/model/microphone readiness.
+        - `voice speak <text>` (EP-047, additive): speak `<text>`
+          aloud via a `TextToSpeechEngine`. Never dispatches through
+          `CommandRouter` (owner Decision D4, EP047_DESIGN.md Section
+          9a) -- it only speaks its own literal argument text.
 
     Never contains recognition logic (that is `SpeechToTextEngine`'s
-    job) or microphone logic (that is `AudioCapture`'s job) -- this
-    class only orchestrates the two and talks to `CommandRouter`.
+    job), microphone logic (that is `AudioCapture`'s job), or
+    synthesis logic (that is `TextToSpeechEngine`'s job) -- this
+    class only orchestrates them and talks to `CommandRouter`.
     """
 
     def __init__(
@@ -61,6 +68,7 @@ class VoiceModule:
         command_router: CommandRouter,
         engine: SpeechToTextEngine,
         audio_capture: AudioCapture,
+        tts_engine: TextToSpeechEngine | None = None,
     ) -> None:
         """Initialize the VoiceModule.
 
@@ -79,10 +87,19 @@ class VoiceModule:
             audio_capture: The microphone capture component used by
                 `voice listen`/`voice transcribe` when no explicit
                 language-only argument path applies.
+            tts_engine: The TTS engine used by `voice speak` (EP-047).
+                Optional and defaults to None so every existing
+                EP-046 call site (and every existing EP-046 test)
+                keeps working unmodified -- `voice speak` reports a
+                clear failure (never a crash) when this is None,
+                exactly as when 'voice.tts.enabled' is false or
+                text-to-speech engine construction failed (see
+                `_speak`, EP047_DESIGN.md Section 5.3).
         """
         self._command_router = command_router
         self._engine = engine
         self._audio_capture = audio_capture
+        self._tts_engine = tts_engine
         self._min_confidence = engine.min_confidence if hasattr(engine, "min_confidence") else (
             config.get("voice.min_confidence", None)
         )
@@ -91,6 +108,7 @@ class VoiceModule:
             "listen": self._listen,
             "transcribe": self._transcribe,
             "status": self._status,
+            "speak": self._speak,
         }
 
     @property
@@ -237,6 +255,49 @@ class VoiceModule:
             f"Minimum confidence : {threshold_text}"
         )
         return CommandResult(success=True, message=message)
+
+    def _speak(self, arguments: list[str]) -> CommandResult:
+        """Speak `arguments` (joined) aloud via the configured TTS engine.
+
+        EP-047, owner Decisions D3/D4/D8 (EP047_DESIGN.md Section
+        9a): additive to the existing "voice" namespace, explicit
+        user-supplied text only, never automatically speaks a
+        dispatched `CommandResult` and never itself calls
+        `CommandRouter.dispatch()`.
+
+        Args:
+            arguments: The words to speak, joined with a single space
+                -- e.g. `voice speak hello there` speaks "hello
+                there". Matches the existing `" ".join(arguments)`
+                convention already used elsewhere in the project for
+                free-text command arguments (e.g.
+                `src/skills/system/skill.py`).
+
+        Returns:
+            A CommandResult. `success=False` (never a crash, never a
+            dispatch) if text-to-speech is not enabled/available, no
+            text was given, or synthesis failed for any reason (see
+            `TextToSpeechEngine.synthesize`).
+        """
+        if self._tts_engine is None:
+            return CommandResult(
+                success=False,
+                message=(
+                    "Text-to-Speech is not enabled or not available. "
+                    "Set 'voice.tts.enabled: true' in config/config.yaml and "
+                    "ensure a text-to-speech engine (pyttsx3) is installed."
+                ),
+            )
+
+        text = " ".join(arguments).strip()
+        if not text:
+            return CommandResult(success=False, message="Usage: voice speak <text>")
+
+        result = self._tts_engine.synthesize(text)
+        if not result.success:
+            return CommandResult(success=False, message=f"Speech failed: {result.error}")
+
+        return CommandResult(success=True, message=f'Spoke: "{text}"')
 
     def _below_confidence_threshold(self, confidence: float | None) -> bool:
         """Return whether `confidence` is below the configured minimum.

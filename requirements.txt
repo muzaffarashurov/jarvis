@@ -13,9 +13,12 @@ pyttsx3
 
 # EP-046 Speech-to-Text. Vosk (offline STT engine) + sounddevice
 # (microphone capture). Neither uses SpeechRecognition/pyttsx3 above --
-# those remain unused per EP046_DESIGN.md Section 9a Decision 4 (kept,
-# not removed; not EP-046's dependency; any future cleanup is a
-# separate task).
+# SpeechRecognition remains unused per EP046_DESIGN.md Section 9a
+# Decision 4 (kept, not removed; not EP-046's dependency; any future
+# cleanup is a separate task). pyttsx3 above is now used by EP-047
+# Text-to-Speech (src/skills/voice/text_to_speech.py) -- offline,
+# wraps the OS's native speech engine (SAPI5 on Windows); no model
+# download, no network access.
 vosk
 sounddevice
 

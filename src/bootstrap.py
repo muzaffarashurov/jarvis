@@ -141,6 +141,11 @@ from src.services.discord_service import DiscordService, DiscordServiceError
 from src.services.email_service import EmailService, EmailServiceError
 from src.skills.voice.audio_capture import AudioCapture, AudioCaptureError
 from src.skills.voice.speech_to_text import SpeechToTextEngineError, VoskSpeechToTextEngine
+from src.skills.voice.text_to_speech import (
+    Pyttsx3TextToSpeechEngine,
+    TextToSpeechEngine,
+    TextToSpeechEngineError,
+)
 from src.skills.voice.skill import VoiceModule
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
@@ -244,6 +249,7 @@ class Bootstrap:
         self._email_service: EmailService | None = None
         self._rest_api_server: RestApiServer | None = None
         self._voice_engine: VoskSpeechToTextEngine | None = None
+        self._voice_tts_engine: TextToSpeechEngine | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -1493,17 +1499,53 @@ class Bootstrap:
         # all -- mirroring EmailService/DiscordService's own "not
         # registered when disabled" precedent immediately above --
         # so an unconfigured installation sees no behavior change.
+        # EP-047 Text-to-Speech. Offline text-to-audio (pyttsx3, see
+        # src/skills/voice/text_to_speech.py), wired into the same
+        # "voice" CommandModule above as an additive "speak" action --
+        # no second namespace, no new dispatch mechanism
+        # (EP047_DESIGN.md Section 5.3/9a, owner Decision D3).
+        #
+        # "voice.tts.enabled" defaults to false and is independent of
+        # "voice.enabled" above (owner Decision D6): a Text-to-Speech
+        # failure never disables Speech-to-Text, and vice versa -- each
+        # is constructed in its own try/except. As currently wired,
+        # however, "voice.tts.enabled: true" only takes effect when
+        # "voice.enabled" (STT) above is also true, since the "voice"
+        # namespace itself is only registered inside that outer check
+        # (EP047_DESIGN.md Section 6 as-built addendum) -- TTS-only
+        # operation with STT fully disabled is not yet supported.
         if bool(config.get("voice.enabled", False)):
             try:
                 voice_engine = VoskSpeechToTextEngine(config=config)
                 voice_audio_capture = AudioCapture(config=config)
                 self._voice_engine = voice_engine
+
+                voice_tts_engine: TextToSpeechEngine | None = None
+                if bool(config.get("voice.tts.enabled", False)):
+                    try:
+                        voice_tts_engine = Pyttsx3TextToSpeechEngine(config=config)
+                    except TextToSpeechEngineError as tts_exc:
+                        logger.error(
+                            f"Voice Text-to-Speech disabled: invalid 'voice.tts.*' "
+                            f"configuration or missing engine/dependency ({tts_exc}). "
+                            f"'voice speak' will report failure until this is fixed; "
+                            f"Speech-to-Text ('voice listen'/'voice transcribe') is "
+                            f"unaffected."
+                        )
+                        voice_tts_engine = None
+                else:
+                    logger.info(
+                        "Voice Text-to-Speech disabled ('voice.tts.enabled: false')."
+                    )
+                self._voice_tts_engine = voice_tts_engine
+
                 router.register(
                     VoiceModule(
                         config=config,
                         command_router=router,
                         engine=voice_engine,
                         audio_capture=voice_audio_capture,
+                        tts_engine=voice_tts_engine,
                     )
                 )
             except (SpeechToTextEngineError, AudioCaptureError) as exc:
@@ -1513,9 +1555,11 @@ class Bootstrap:
                     f"place the required Vosk models, and restart to re-enable it."
                 )
                 self._voice_engine = None
+                self._voice_tts_engine = None
         else:
             logger.info("Voice Service disabled ('voice.enabled: false').")
             self._voice_engine = None
+            self._voice_tts_engine = None
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
@@ -2254,3 +2298,17 @@ class Bootstrap:
             `_build_command_router`'s EP-046 wiring).
         """
         return self._voice_engine
+
+    @property
+    def voice_tts_engine(self) -> TextToSpeechEngine | None:
+        """Return the TextToSpeechEngine built for EP-047, if available.
+
+        Returns:
+            The Pyttsx3TextToSpeechEngine instance, or None if
+            `run()`/`initialize()` has not completed, 'voice.enabled'
+            (STT) or 'voice.tts.enabled' is false -- both default to
+            false -- or the 'pyttsx3' dependency or configured
+            'voice.tts.*' settings were invalid (see
+            `_build_command_router`'s EP-047 wiring).
+        """
+        return self._voice_tts_engine

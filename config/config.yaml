@@ -253,6 +253,57 @@ voice:
   timeout_seconds: 10
   min_confidence: 0.5
 
+  # ---------------------------------------------------------------
+  # EP-047 Text-to-Speech (EP047_DESIGN.md, Section 8/9a).
+  #
+  # Independent of the STT settings above (owner Decision D6): an
+  # operator can enable spoken output without ever enabling the
+  # microphone, and vice versa. "enabled" defaults to false -- Jarvis
+  # must start normally, with 'voice speak' simply reporting "not
+  # enabled", whether or not 'pyttsx3' or a matching OS voice happens
+  # to be installed.
+  #
+  # NOTE: as currently wired (Bootstrap, EP047_DESIGN.md Section 6
+  # as-built note), the "voice" namespace itself is only registered
+  # when "voice.enabled" (the STT flag) above is also true --
+  # "voice.tts.enabled: true" alone, with "voice.enabled: false",
+  # does not make "voice speak" reachable. See EP047_DESIGN.md
+  # Section 6's as-built addendum.
+  #
+  # "engine": only "pyttsx3" is implemented (owner Decision D1). It
+  # wraps the OS's own native offline speech engine (SAPI5 on
+  # Windows) -- no model download, no network access.
+  #
+  # "languages": which language codes 'voice speak' may be asked to
+  # use. Unlike STT's per-language Vosk models, pyttsx3 has no model
+  # files to install -- a language here only works if a matching
+  # voice is already installed in Windows itself (Control Panel /
+  # Settings > Time & Language > Speech, or a language pack).
+  # Requesting a language with no matching installed voice always
+  # fails explicitly -- it is never silently spoken in a different
+  # language.
+  #
+  # Uzbek ("uz") is deliberately NOT listed below and is out of
+  # scope for EP-047 (owner Decision D2): no offline text-to-speech
+  # engine evaluated for this project has a first-class Uzbek voice
+  # (EP047_DESIGN.md Section 7). This is a disclosed limitation, not
+  # an oversight -- do not add "uz" here without first confirming an
+  # actual installed/working Uzbek voice, and do not add a
+  # workaround (e.g. speaking Uzbek text with a Russian or English
+  # voice) instead.
+  #
+  # "default_language" must be one of "languages".
+  #
+  # "rate" (words per minute) and "volume" (0.0-1.0) are optional
+  # engine overrides. Leave them null to use pyttsx3's own defaults.
+  tts:
+    enabled: false
+    engine: "pyttsx3"
+    languages: ["en", "ru"]
+    default_language: "en"
+    rate: null
+    volume: null
+
 api:
   # EP-043 REST API. A local programmatic interface exposing the same
   # CommandRouter every CLI command already dispatches through (see

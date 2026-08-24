@@ -10,15 +10,101 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-048 — Wake Word
+### EP-049 — Voice Assistant
 
 **NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 7
-sequencing, EP-048 (Wake Word) is the next Engineering Package after
-EP-047's completion. No design, research, or implementation work has
-begun. `src/skills/voice/wake_word.py` remains the empty,
-pre-existing placeholder EP-046's own design already identified for
-it -- confirmed byte-identical to its EP-046-shipped (empty) state
-throughout EP-047 STEP 1-3.
+sequencing, EP-049 (Voice Assistant) is the next Engineering Package
+after EP-048's completion. No design, research, or implementation
+work has begun. Per EP-048's own explicit scope boundary
+(`docs/architecture/designs/EP048_DESIGN.md` Section 2/9a, Owner
+Decision D5), EP-049 is expected to build the wake word → STT →
+command dispatch loop on top of EP-048's detection-only output --
+`voice wake listen` currently only reports a detection and never
+triggers STT, dispatch, or TTS on its own.
+
+### EP-048 — Wake Word
+
+STEP 1 (Design & Research), STEP 2 (Implementation & Verification),
+and STEP 3 (Documentation & Audit Closure) all complete, plus a
+post-STEP-3 bug fix from real Windows hardware verification (see
+below). EP-048 is marked COMPLETE with verdict **PASS** (updated from
+STEP 3's original **PASS WITH DOCUMENTED LIMITATIONS** once real
+hardware verification closed the one limitation that was actually
+EP-048's own — see `EP048_AUDIT.md` Section 17). Full design:
+`docs/architecture/designs/EP048_DESIGN.md` (including Section 9a's
+record of the owner decisions that resolved STEP 1's open questions,
+Section 17's as-built summary, and Section 17.7's account of the
+post-STEP-3 fix). Full audit: `docs/architecture/audits/EP048_AUDIT.md`
+(Section 17, "Post-Audit Bug Fix / Final Verification").
+
+Built as offline, `openWakeWord`-based wake-phrase detection
+(`src/skills/voice/wake_word.py`) fed by a new, separate
+`StreamingAudioCapture` component
+(`src/skills/voice/streaming_audio_capture.py`, kept apart from
+EP-046's existing, fixed-duration `AudioCapture`, which was not
+modified), composed into the *existing* `voice` `CommandModule`
+(`src/skills/voice/skill.py`) as additive `wake listen`/`wake status`
+actions -- no new dispatch mechanism, no second namespace, no change
+to `src/core/command_router.py`, `src/core/api/`, Telegram,
+`desktop/`, or `web/`. Actions: `voice wake listen` (starts
+continuous detection, reports a single detection or a graceful
+failure -- never dispatches, never starts STT, never speaks via TTS,
+never runs as a background listener or daemon), `voice wake status`.
+Supports English ("Hey Jarvis") only -- Russian and Uzbek wake-word
+detection are explicitly out of scope (no offline wake-word model
+evaluated has first-class support for either) and receive no
+special-case handling anywhere in code. Model files are never
+downloaded automatically -- manual placement under
+`voice.wake.model_dir` only, mirroring EP-046's own Vosk precedent.
+`voice.wake.enabled` defaults to `false`. This EP also fully resolved
+EP-047's own disclosed registration-gating limitation
+(Owner Decision D6): `Bootstrap` now registers the `voice` namespace
+whenever any of `voice.enabled` (STT) / `voice.tts.enabled` /
+`voice.wake.enabled` is true, so STT-only, TTS-only, and
+Wake-Word-only operation are all independently reachable -- this
+required widening `VoiceModule`'s `engine`/`audio_capture`
+constructor parameters to `Optional`, with `voice listen`/`voice
+transcribe`/`voice status` each reporting a clear failure (never a
+crash) when STT is disabled. Tests: EP-048 112/0/1 (one disclosed,
+expected skip -- see below); EP-043 83/83, EP-044 52/52, EP-045
+38/38, EP-047 49/0/0 all unchanged.
+
+**Post-STEP-3 bug fix (real Windows hardware verification):** the
+first real-microphone/real-model verification of EP-048 found that
+`OpenWakeWordEngine` looked only for a bare `<wake_word>.onnx` model
+filename, while openWakeWord's own official pretrained models are
+published with a version suffix (e.g. `hey_jarvis_v0.1.onnx`) -- so a
+correctly installed, real model directory was still reported as
+unavailable. A second, latent issue was found in the same pass:
+prediction lookup needs the resolved model file's own key
+(`"hey_jarvis_v0.1"`), not the shorter configured `wake_word`
+(`"hey_jarvis"`). Both are fixed in `src/skills/voice/wake_word.py`
+via a new, deterministic `resolve_wakeword_model_path()` (exact name
+preferred, else exactly one versioned candidate; zero or multiple
+candidates raise a clear error -- never a silent guess), with 9 new
+regression tests. The configured logical wake word
+(`voice.wake.wake_word: "hey_jarvis"`) did not change, and owner
+Decision D3 (manual model placement, no automatic download) remains
+fully honored. Real Windows verification subsequently confirmed
+`voice wake status` reporting `Enabled: Yes`/`Model: available` and
+`voice wake listen` correctly detecting "hey_jarvis" (scores 0.80 and
+0.64 across two runs) -- the first genuine real-hardware confirmation
+of EP-048 in this project's history. Only `src/skills/voice/wake_word.py`
+and `tests/EP048/test_wake_word.py` were modified for this fix.
+
+The one limitation that remains disclosed is unrelated to EP-048's
+own implementation: `openwakeword==0.6.0` required a Linux-specific
+installation workaround in the automated-testing environment used
+across STEP 1-3 (its own PyPI metadata hard-requires `tflite-runtime`
+on Linux, unavailable there); the actual Windows target never depends
+on `tflite-runtime` and installed and ran correctly. See
+`EP048_AUDIT.md` Section 17.6 for the updated final verdict and full
+detail.
+
+*(A separate, unrelated environment-dependent test issue was also
+found and fixed in `tests/EP046/test_voice.py` during the same
+real-hardware verification pass -- it is not an EP-048 regression and
+is tracked under EP-046's own entry below, not here.)*
 
 ### EP-047 — Text-to-Speech
 

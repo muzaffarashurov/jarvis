@@ -11,11 +11,15 @@ required. `SpeechToTextEngine`/`AudioCapture` are exercised through
 fakes wherever a real model/microphone would otherwise be needed (see
 `_FakeSpeechToTextEngine`/`_FakeAudioCapture` below); the *real*
 `VoskSpeechToTextEngine`/`AudioCapture` classes are exercised directly
-wherever their behavior does not require a loaded model or a physical
-device (construction validation, missing-model-directory handling,
-confidence normalization, and -- since `sounddevice`'s underlying
-PortAudio runtime library is genuinely present in this environment --
-real "no device available" graceful-failure handling).
+wherever their behavior does not require a loaded model
+(construction validation, missing-model-directory handling,
+confidence normalization). `AudioCapture.capture()`'s real,
+physical-device behavior is exercised environment-independently: this
+suite makes no assumption about whether a microphone is present in
+the environment it runs in (a device-less CI sandbox and a real
+workstation with a working microphone are both valid, and both are
+asserted against correctly -- see
+`_test_audio_capture_reports_no_device_gracefully`).
 
 One scenario (an actual audio clip transcribed by a real Vosk model)
 is not exercised here: no Vosk model files exist in this environment
@@ -30,7 +34,10 @@ Covers:
     - VoskSpeechToTextEngine construction validation and per-language
       lazy model loading/error handling.
     - Vosk confidence normalization (mean of per-word `conf` values).
-    - AudioCapture construction and real "no input device" handling.
+    - AudioCapture construction and real device-availability handling
+      (environment-independent: accepts either a real device's
+      successful capture or a real "no input device" failure --
+      never a raised exception either way).
     - VoiceModule: listen / transcribe / status / unknown action.
     - Low-confidence transcripts are reported, never dispatched.
     - Integration: a dispatched voice transcript produces the exact
@@ -265,16 +272,36 @@ class VoiceTest(BaseTest):
         self.assert_equal(capture.sample_rate, 16000)
 
     def _test_audio_capture_reports_no_device_gracefully(self) -> None:
-        # This environment has zero audio input devices -- exactly the
-        # "microphone unavailable" condition EP046_DESIGN.md Section 5.4
-        # requires be reported, never raised.
+        # Environment-independent: this suite makes no assumption
+        # about whether a microphone is physically present. Real
+        # hardware verification (Windows/Realtek microphone) confirmed
+        # a genuine input device makes capture() succeed
+        # (result.success=True, result.error=None, non-empty
+        # result.pcm_data); a device-less sandbox makes it fail
+        # gracefully instead (result.success=False, result.error is
+        # not None, result.pcm_data empty). Both are the same
+        # underlying contract (EP046_DESIGN.md Section 5.4: never
+        # raise) -- this test asserts whichever real outcome this
+        # environment's real sounddevice/PortAudio call actually
+        # produces, rather than assuming one. Mirrors the identical,
+        # already-applied fix for EP-048's
+        # `_test_streaming_audio_capture_reports_no_device_gracefully`.
         config = _config_with(
             {"voice": {"sample_rate": 16000, "listen_duration_seconds": 0.1, "device": None}}
         )
         capture = AudioCapture(config=config)
         result = capture.capture()
-        self.assert_false(result.success, "Expected capture() to fail gracefully with no input device")
-        self.assert_not_none(result.error)
+
+        if result.success:
+            # A real input device is available in this environment.
+            self.assert_true(result.success)
+            self.assert_equal(result.error, None)
+            self.assert_true(len(result.pcm_data) > 0, "Successful capture must return non-empty PCM data")
+        else:
+            # No input device is available in this environment.
+            self.assert_false(result.success)
+            self.assert_not_none(result.error)
+            self.assert_equal(result.pcm_data, b"")
 
     # ---------- VoiceModule ----------
 

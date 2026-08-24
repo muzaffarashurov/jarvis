@@ -22,6 +22,18 @@ pyttsx3
 vosk
 sounddevice
 
+# EP-048 Wake Word. openWakeWord (offline, ONNX-based wake-phrase
+# detection, see src/skills/voice/wake_word.py) + the onnxruntime
+# dependency it pulls in transitively. Reuses 'sounddevice' above for
+# microphone access (src/skills/voice/streaming_audio_capture.py) --
+# no second audio library. Pinned (mirroring PySide6's own pinned
+# precedent below) since this is a model-format-sensitive dependency:
+# 0.6.0 is openWakeWord's latest PyPI release as of EP-048 STEP 2
+# (EP048_DESIGN.md Section 9a, owner Decision D1). Model files
+# ('voice.wake.model_dir') are never downloaded automatically by this
+# project -- manual installation only (owner Decision D3).
+openwakeword==0.6.0
+
 openpyxl
 pandas
 

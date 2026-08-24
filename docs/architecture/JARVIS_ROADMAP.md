@@ -122,50 +122,80 @@ Completed sub-packages:
 
 ## Current
 
-EP-047 Text-to-Speech — **COMPLETE** (STEP 1 Design & Research, STEP
-2 Implementation & Verification, and STEP 3 Documentation & Audit
-Closure all complete -- see
-docs/architecture/designs/EP047_DESIGN.md (including its Section 9a
-owner-decision record and Section 17 as-built summary) and
-docs/architecture/audits/EP047_AUDIT.md. Verdict: **PASS WITH
-DOCUMENTED LIMITATIONS**. Built as an offline `pyttsx3`-based TTS
-engine (`src/skills/voice/text_to_speech.py`) that speaks text
-through the OS's native speech driver (SAPI5 on Windows), composed
-into the *existing* `voice` `CommandModule`
-(`src/skills/voice/skill.py`) as an additive `speak` action -- no
-second namespace, no new dispatch mechanism, no change to
-`src/core/command_router.py`, `src/core/api/`, Telegram, `desktop/`,
-or `web/`. Supports English and Russian (subject to a matching OS
-voice being installed); Uzbek is explicitly out of scope (no offline
-TTS engine evaluated has a first-class Uzbek voice) and is not
-special-cased anywhere in code -- it fails the same generic
-"unsupported language"/"no installed voice" path any other
-unconfigured language would. `voice.tts.enabled` defaults to
-`false`, independent of the pre-existing `voice.enabled` (STT) flag
-for failure-mode purposes, though the `voice` namespace itself
-remains gated on `voice.enabled` (a disclosed, as-built limitation --
-see the audit document's Known Limitations). No automatic speaking of
-command results was implemented. Playback is blocking
-(`engine.say()`/`engine.runAndWait()`). Real Windows/SAPI5 audible
-speech has not been verified by a human in any environment this
-project has run in -- see the audit document's Known Limitations for
-detail.) EP-046 Speech-to-Text remains **COMPLETE** (STEP 1-3,
-unchanged by EP-047 -- `src/skills/voice/speech_to_text.py` and
+EP-048 Wake Word — **COMPLETE** (STEP 1 Design & Research, STEP 2
+Implementation & Verification, STEP 3 Documentation & Audit Closure,
+and a post-STEP-3 real-Windows-hardware bug fix all complete -- see
+docs/architecture/designs/EP048_DESIGN.md (including its Section 9a
+owner-decision record, Section 17 as-built summary, and Section 17.7
+post-STEP-3 bug-fix account) and
+docs/architecture/audits/EP048_AUDIT.md (Section 17, "Post-Audit Bug
+Fix / Final Verification"). Verdict: **PASS** (updated from STEP 3's
+original "PASS WITH DOCUMENTED LIMITATIONS" once real Windows
+hardware verification closed the one limitation that was actually
+EP-048's own -- an `openwakeword==0.6.0` Linux packaging quirk in the
+automated-testing environment remains disclosed, unrelated to the
+Windows target). Built as offline, `openWakeWord`-based
+wake-phrase detection (`src/skills/voice/wake_word.py`) fed by a new,
+separate `StreamingAudioCapture` component
+(`src/skills/voice/streaming_audio_capture.py`, kept apart from
+EP-046's existing fixed-duration `AudioCapture`, which was not
+modified), composed into the *existing* `voice` `CommandModule`
+(`src/skills/voice/skill.py`) as additive `wake listen`/`wake status`
+actions -- no second namespace, no new dispatch mechanism, no change
+to `src/core/command_router.py`, `src/core/api/`, Telegram,
+`desktop/`, or `web/`. `voice wake listen` only ever reports a
+detection: it never dispatches through `CommandRouter`, never starts
+an STT (`voice listen`) cycle, never speaks via TTS, and never runs
+as a background listener or daemon -- confirmed by dedicated
+call-counting tests, not only by design. Supports English ("Hey
+Jarvis") only; Russian and Uzbek wake-word detection are explicitly
+out of scope (no offline wake-word model evaluated has first-class
+support for either) and receive no special-case handling anywhere in
+code. Model files are never downloaded automatically -- manual
+placement only, mirroring EP-046's own Vosk precedent.
+`voice.wake.enabled` defaults to `false`. This EP also **fully**
+closed EP-047's own disclosed registration-gating limitation: STT,
+TTS, and Wake Word can now each be enabled independently, with the
+`voice` namespace registering whenever any one of the three is
+enabled (previously, TTS-only operation was not reachable -- see the
+audit document's Known Limitations for what remains disclosed).
+Real microphone/real-loaded-model wake-word detection has since been
+verified by a human on the actual target Windows workstation --
+`voice wake status` reported the model available and `voice wake
+listen` correctly detected "hey_jarvis" (scores 0.80 and 0.64 across
+two runs). That same verification pass also surfaced and led to the
+correction of a real model-filename-resolution defect (the
+implementation originally looked only for a bare `hey_jarvis.onnx`
+file; openWakeWord's own official models ship as
+`hey_jarvis_v0.1.onnx` -- now resolved deterministically without any
+automatic download) -- see the audit document's Section 17 for full
+detail.) EP-047
+Text-to-Speech remains **COMPLETE** (STEP 1-3, unchanged by EP-048 --
+`src/skills/voice/text_to_speech.py` confirmed byte-identical to its
+EP-047-shipped state; its own disclosed TTS-only registration
+limitation is now resolved by EP-048's D6 fix, recorded in both EPs'
+audit documents -- see docs/architecture/designs/EP047_DESIGN.md and
+docs/architecture/audits/EP047_AUDIT.md.) EP-046 Speech-to-Text
+remains **COMPLETE** (STEP 1-3, unchanged by EP-047/EP-048 --
+`src/skills/voice/speech_to_text.py` and
 `src/skills/voice/audio_capture.py` confirmed byte-identical to their
 EP-046-shipped state -- see
 docs/architecture/designs/EP046_DESIGN.md and
 docs/architecture/audits/EP046_AUDIT.md.) EP-045 Web Dashboard
-remains **COMPLETE** (STEP 1-3, unchanged by EP-046/EP-047, `web/`
-confirmed absent from the EP-047 changeset -- see
+remains **COMPLETE** (STEP 1-3, unchanged by EP-046/EP-047/EP-048,
+`web/` confirmed absent from the EP-048 changeset -- see
 docs/architecture/designs/EP045_DESIGN.md and
 docs/architecture/audits/EP045_AUDIT.md.) EP-044 Desktop UI remains
-**COMPLETE** (STEP 1-3, unchanged by EP-045/EP-046/EP-047, `desktop/`
-confirmed absent from the EP-047 changeset -- see
+**COMPLETE** (STEP 1-3, unchanged by EP-045/EP-046/EP-047/EP-048,
+`desktop/` confirmed absent from the EP-048 changeset -- see
 docs/architecture/designs/EP044_DESIGN.md and
 docs/architecture/audits/EP044_AUDIT.md.) EP-043 REST API remains
-**COMPLETE** (STEP 1-4, unchanged by EP-044/EP-045/EP-046/EP-047 --
-see docs/architecture/designs/EP043_DESIGN.md and
+**COMPLETE** (STEP 1-4, unchanged by EP-044/EP-045/EP-046/EP-047/
+EP-048 -- see docs/architecture/designs/EP043_DESIGN.md and
 docs/RELEASE_NOTES.md.)
+
+**Next Engineering Package: EP-049 Voice Assistant — NOT STARTED.**
+No EP-049 design, research, or implementation work has begun.
 
 ---
 
@@ -291,7 +321,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-047 Text-to-Speech
 
-EP-048 Wake Word
+✓ EP-048 Wake Word
 
 EP-049 Voice Assistant
 

@@ -141,11 +141,16 @@ from src.services.discord_service import DiscordService, DiscordServiceError
 from src.services.email_service import EmailService, EmailServiceError
 from src.skills.voice.audio_capture import AudioCapture, AudioCaptureError
 from src.skills.voice.speech_to_text import SpeechToTextEngineError, VoskSpeechToTextEngine
+from src.skills.voice.streaming_audio_capture import (
+    StreamingAudioCapture,
+    StreamingAudioCaptureError,
+)
 from src.skills.voice.text_to_speech import (
     Pyttsx3TextToSpeechEngine,
     TextToSpeechEngine,
     TextToSpeechEngineError,
 )
+from src.skills.voice.wake_word import OpenWakeWordEngine, WakeWordEngine, WakeWordEngineError
 from src.skills.voice.skill import VoiceModule
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
@@ -250,6 +255,8 @@ class Bootstrap:
         self._rest_api_server: RestApiServer | None = None
         self._voice_engine: VoskSpeechToTextEngine | None = None
         self._voice_tts_engine: TextToSpeechEngine | None = None
+        self._voice_wake_engine: WakeWordEngine | None = None
+        self._voice_wake_capture: StreamingAudioCapture | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -1491,75 +1498,130 @@ class Bootstrap:
         # ApiRouter already use (see src/core/command_router.py). No
         # new dispatch mechanism; CommandRouter itself is unchanged.
         #
-        # "voice.enabled" defaults to false, matching Email/REST API's
-        # precedent: this subsystem claims the microphone as a
-        # hardware resource, so it stays off until an operator
-        # explicitly enables it (EP046_DESIGN.md Section 6, owner
-        # Decision 7). When disabled, no VoiceModule is registered at
-        # all -- mirroring EmailService/DiscordService's own "not
-        # registered when disabled" precedent immediately above --
-        # so an unconfigured installation sees no behavior change.
         # EP-047 Text-to-Speech. Offline text-to-audio (pyttsx3, see
         # src/skills/voice/text_to_speech.py), wired into the same
         # "voice" CommandModule above as an additive "speak" action --
         # no second namespace, no new dispatch mechanism
         # (EP047_DESIGN.md Section 5.3/9a, owner Decision D3).
         #
-        # "voice.tts.enabled" defaults to false and is independent of
-        # "voice.enabled" above (owner Decision D6): a Text-to-Speech
-        # failure never disables Speech-to-Text, and vice versa -- each
-        # is constructed in its own try/except. As currently wired,
-        # however, "voice.tts.enabled: true" only takes effect when
-        # "voice.enabled" (STT) above is also true, since the "voice"
-        # namespace itself is only registered inside that outer check
-        # (EP047_DESIGN.md Section 6 as-built addendum) -- TTS-only
-        # operation with STT fully disabled is not yet supported.
-        if bool(config.get("voice.enabled", False)):
-            try:
-                voice_engine = VoskSpeechToTextEngine(config=config)
-                voice_audio_capture = AudioCapture(config=config)
-                self._voice_engine = voice_engine
+        # EP-048 Wake Word. Offline wake-phrase detection
+        # (openWakeWord, see src/skills/voice/wake_word.py +
+        # src/skills/voice/streaming_audio_capture.py), wired into the
+        # same "voice" CommandModule as additive "wake listen"/
+        # "wake status" actions -- again no second namespace, no new
+        # dispatch mechanism, and no automatic dispatch/STT/TTS
+        # triggered by a detection (EP048_DESIGN.md Section 5.4/9a,
+        # owner Decision D5).
+        #
+        # Each of "voice.enabled" (STT), "voice.tts.enabled" (TTS),
+        # and "voice.wake.enabled" (Wake Word) defaults to false and
+        # is constructed independently, in its own try/except: a
+        # failure or a disabled flag in one subsystem never disables
+        # another, mirroring Email/DiscordService's own "not
+        # registered when disabled" precedent. Each subsystem claims
+        # a hardware resource (microphone) or a real dependency, so
+        # each stays off until explicitly enabled (EP046_DESIGN.md
+        # Section 6, owner Decision 7).
+        #
+        # The "voice" CommandModule itself is registered as soon as
+        # *any* of the three flags is true (EP048_DESIGN.md Section
+        # 9a, owner Decision D6) -- this widens EP-047's own as-built
+        # gate, which required "voice.enabled" (STT) to also be true
+        # before TTS-only operation was reachable at all
+        # (EP047_DESIGN.md Section 6 as-built addendum). A subsystem
+        # that is disabled or failed to construct is passed into
+        # VoiceModule as None; every "voice" action already reports a
+        # clear, non-crashing failure for its own None collaborator
+        # (see skill.py) -- EP-046's and EP-047's existing, already-
+        # shipped behavior is unchanged when their own flags are
+        # enabled exactly as before.
+        voice_enabled = bool(config.get("voice.enabled", False))
+        voice_tts_enabled = bool(config.get("voice.tts.enabled", False))
+        voice_wake_enabled = bool(config.get("voice.wake.enabled", False))
 
-                voice_tts_engine: TextToSpeechEngine | None = None
-                if bool(config.get("voice.tts.enabled", False)):
-                    try:
-                        voice_tts_engine = Pyttsx3TextToSpeechEngine(config=config)
-                    except TextToSpeechEngineError as tts_exc:
-                        logger.error(
-                            f"Voice Text-to-Speech disabled: invalid 'voice.tts.*' "
-                            f"configuration or missing engine/dependency ({tts_exc}). "
-                            f"'voice speak' will report failure until this is fixed; "
-                            f"Speech-to-Text ('voice listen'/'voice transcribe') is "
-                            f"unaffected."
-                        )
-                        voice_tts_engine = None
-                else:
-                    logger.info(
-                        "Voice Text-to-Speech disabled ('voice.tts.enabled: false')."
+        if voice_enabled or voice_tts_enabled or voice_wake_enabled:
+            voice_engine: VoskSpeechToTextEngine | None = None
+            voice_audio_capture: AudioCapture | None = None
+            if voice_enabled:
+                try:
+                    voice_engine = VoskSpeechToTextEngine(config=config)
+                    voice_audio_capture = AudioCapture(config=config)
+                except (SpeechToTextEngineError, AudioCaptureError) as exc:
+                    logger.error(
+                        f"Voice Speech-to-Text disabled: invalid 'voice.*' "
+                        f"configuration or missing model/dependency ({exc}). "
+                        f"Fix config/config.yaml, place the required Vosk "
+                        f"models, and restart to re-enable it. "
+                        f"Text-to-Speech/Wake Word are unaffected."
                     )
-                self._voice_tts_engine = voice_tts_engine
+                    voice_engine = None
+                    voice_audio_capture = None
+            else:
+                logger.info("Voice Speech-to-Text disabled ('voice.enabled: false').")
+            self._voice_engine = voice_engine
 
-                router.register(
-                    VoiceModule(
-                        config=config,
-                        command_router=router,
-                        engine=voice_engine,
-                        audio_capture=voice_audio_capture,
-                        tts_engine=voice_tts_engine,
+            voice_tts_engine: TextToSpeechEngine | None = None
+            if voice_tts_enabled:
+                try:
+                    voice_tts_engine = Pyttsx3TextToSpeechEngine(config=config)
+                except TextToSpeechEngineError as tts_exc:
+                    logger.error(
+                        f"Voice Text-to-Speech disabled: invalid 'voice.tts.*' "
+                        f"configuration or missing engine/dependency ({tts_exc}). "
+                        f"'voice speak' will report failure until this is fixed; "
+                        f"Speech-to-Text/Wake Word are unaffected."
                     )
+                    voice_tts_engine = None
+            else:
+                logger.info(
+                    "Voice Text-to-Speech disabled ('voice.tts.enabled: false')."
                 )
-            except (SpeechToTextEngineError, AudioCaptureError) as exc:
-                logger.error(
-                    f"Voice Service disabled: invalid 'voice.*' configuration or "
-                    f"missing model/dependency ({exc}). Fix config/config.yaml, "
-                    f"place the required Vosk models, and restart to re-enable it."
+            self._voice_tts_engine = voice_tts_engine
+
+            voice_wake_engine: WakeWordEngine | None = None
+            voice_wake_capture: StreamingAudioCapture | None = None
+            if voice_wake_enabled:
+                try:
+                    voice_wake_engine = OpenWakeWordEngine(config=config)
+                    voice_wake_capture = StreamingAudioCapture(config=config)
+                except (WakeWordEngineError, StreamingAudioCaptureError) as wake_exc:
+                    logger.error(
+                        f"Voice Wake Word disabled: invalid 'voice.wake.*' "
+                        f"configuration or missing model/dependency "
+                        f"({wake_exc}). Fix config/config.yaml, place the "
+                        f"required openWakeWord model files under "
+                        f"'voice.wake.model_dir', and restart to re-enable "
+                        f"it. Speech-to-Text/Text-to-Speech are unaffected."
+                    )
+                    voice_wake_engine = None
+                    voice_wake_capture = None
+            else:
+                logger.info(
+                    "Voice Wake Word disabled ('voice.wake.enabled: false')."
                 )
-                self._voice_engine = None
-                self._voice_tts_engine = None
+            self._voice_wake_engine = voice_wake_engine
+            self._voice_wake_capture = voice_wake_capture
+
+            router.register(
+                VoiceModule(
+                    config=config,
+                    command_router=router,
+                    engine=voice_engine,
+                    audio_capture=voice_audio_capture,
+                    tts_engine=voice_tts_engine,
+                    wake_engine=voice_wake_engine,
+                    wake_capture=voice_wake_capture,
+                )
+            )
         else:
-            logger.info("Voice Service disabled ('voice.enabled: false').")
+            logger.info(
+                "Voice disabled ('voice.enabled', 'voice.tts.enabled', and "
+                "'voice.wake.enabled' are all false)."
+            )
             self._voice_engine = None
             self._voice_tts_engine = None
+            self._voice_wake_engine = None
+            self._voice_wake_capture = None
 
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
@@ -2312,3 +2374,28 @@ class Bootstrap:
             `_build_command_router`'s EP-047 wiring).
         """
         return self._voice_tts_engine
+
+    @property
+    def voice_wake_engine(self) -> WakeWordEngine | None:
+        """Return the WakeWordEngine built for EP-048, if available.
+
+        Returns:
+            The OpenWakeWordEngine instance (behind the WakeWordEngine
+            interface -- owner Decision D1), or None if
+            `run()`/`initialize()` has not completed,
+            'voice.wake.enabled' is false (defaults to false), or the
+            'openwakeword' dependency or configured 'voice.wake.*'
+            settings/model files were invalid (see
+            `_build_command_router`'s EP-048 wiring).
+        """
+        return self._voice_wake_engine
+
+    @property
+    def voice_wake_capture(self) -> StreamingAudioCapture | None:
+        """Return the StreamingAudioCapture built for EP-048, if available.
+
+        Returns:
+            The StreamingAudioCapture instance, or None under the
+            same conditions as `voice_wake_engine`.
+        """
+        return self._voice_wake_capture

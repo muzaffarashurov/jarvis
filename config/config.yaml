@@ -263,12 +263,12 @@ voice:
   # enabled", whether or not 'pyttsx3' or a matching OS voice happens
   # to be installed.
   #
-  # NOTE: as currently wired (Bootstrap, EP047_DESIGN.md Section 6
-  # as-built note), the "voice" namespace itself is only registered
-  # when "voice.enabled" (the STT flag) above is also true --
-  # "voice.tts.enabled: true" alone, with "voice.enabled: false",
-  # does not make "voice speak" reachable. See EP047_DESIGN.md
-  # Section 6's as-built addendum.
+  # NOTE (EP-048, owner Decision D6, EP048_DESIGN.md Section 9a): the
+  # "voice" namespace is now registered as soon as *any* of
+  # "voice.enabled" (STT) / "voice.tts.enabled" / "voice.wake.enabled"
+  # is true -- "voice.tts.enabled: true" alone, with "voice.enabled:
+  # false", now does make "voice speak" reachable. This closes the
+  # EP-047-era limitation this note used to describe.
   #
   # "engine": only "pyttsx3" is implemented (owner Decision D1). It
   # wraps the OS's own native offline speech engine (SAPI5 on
@@ -303,6 +303,65 @@ voice:
     default_language: "en"
     rate: null
     volume: null
+
+  # ---------------------------------------------------------------
+  # EP-048 Wake Word (EP048_DESIGN.md, Section 8/9a).
+  #
+  # Independent of the STT/TTS settings above (owner Decision D6): an
+  # operator can enable wake-word detection without ever enabling the
+  # STT/TTS subsystems, and vice versa. "enabled" defaults to false --
+  # this subsystem claims the microphone as a hardware resource for
+  # as long as 'voice wake listen' runs, exactly as STT's "enabled"
+  # flag does for 'voice listen'/'voice transcribe'.
+  #
+  # Detection only (owner Decision D5): 'voice wake listen' only ever
+  # reports a detection. It never dispatches through CommandRouter,
+  # never starts an STT ('voice listen') cycle, never speaks via TTS,
+  # and never runs as a background/always-on listener or daemon --
+  # that full wake -> listen -> dispatch loop is EP-049's scope, not
+  # this one's.
+  #
+  # "engine": only "openwakeword" is implemented (owner Decision D1),
+  # offline, ONNX-based (see src/skills/voice/wake_word.py). Sits
+  # behind the WakeWordEngine interface -- VoiceModule is never
+  # coupled directly to openWakeWord's own API.
+  #
+  # "wake_word": the configured wake phrase/model name. Only the
+  # English-language pretrained "hey_jarvis" model is in scope for
+  # EP-048 v1 (owner Decision D2). Russian and Uzbek wake-word
+  # detection are explicitly OUT OF SCOPE for EP-048 -- no
+  # translation layer, cloud fallback, hidden multilingual
+  # workaround, or custom model training. This is a disclosed
+  # limitation, not an oversight, matching EP-047's own Uzbek
+  # text-to-speech gap above -- do not change "wake_word" to a
+  # non-English phrase without first training and evaluating a real
+  # model for it.
+  #
+  # "model_dir" must contain openWakeWord's shared feature-extraction
+  # models ("melspectrogram.onnx", "embedding_model.onnx") plus a
+  # "<wake_word>.onnx" classifier head, all placed there manually
+  # (owner Decision D3) -- openWakeWord's models are never downloaded
+  # automatically by this project, mirroring "voice.model_dir"'s own
+  # manual-installation precedent for Vosk above.
+  #
+  # "threshold" (0.0-1.0): the minimum per-frame detection score
+  # openWakeWord must report before 'voice wake listen' reports a
+  # detection.
+  #
+  # "sample_rate"/"frame_length" match openWakeWord's own expected
+  # input shape (16kHz, ~80ms/1280-sample frames) -- do not change
+  # these without also confirming the configured model(s) support the
+  # new values.
+  wake:
+    enabled: true
+    engine: "openwakeword"
+    wake_word: "hey_jarvis"
+    model_dir: "data/models/wake"
+    offline_only: true
+    device: null
+    sample_rate: 16000
+    frame_length: 1280
+    threshold: 0.5
 
 api:
   # EP-043 REST API. A local programmatic interface exposing the same

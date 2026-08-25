@@ -122,9 +122,59 @@ Completed sub-packages:
 
 ## Current
 
-EP-048 Wake Word — **COMPLETE** (STEP 1 Design & Research, STEP 2
-Implementation & Verification, STEP 3 Documentation & Audit Closure,
-and a post-STEP-3 real-Windows-hardware bug fix all complete -- see
+EP-049 Voice Assistant — **COMPLETE** (STEP 1 Design & Owner
+Decisions, STEP 2 Implementation & Verification, STEP 3 Architecture
+Audit / Final Verification all complete -- see
+docs/architecture/designs/EP049_DESIGN.md (including its Section 23a
+final owner-decision record) and
+docs/architecture/audits/EP049_AUDIT.md. Verdict: **PASS WITH
+PRE-EXISTING ENVIRONMENT LIMITATION** (the limitation being an
+EP-048-owned, sandbox-only `openwakeword`/`tflite-runtime` Linux
+packaging quirk, unrelated to and unmodified by EP-049 -- see below).
+Built as a strictly one-shot `voice wake assist` action, composed
+into the *existing* `voice` `CommandModule`
+(`src/skills/voice/skill.py`) alongside EP-048's `wake
+listen`/`wake status` -- no second namespace, no new dispatch
+mechanism, no change to `src/core/command_router.py`,
+`src/core/api/`, Telegram, `desktop/`, or `web/`. On a wake-word
+detection, `voice wake assist` stops the existing
+`StreamingAudioCapture` wake stream and calls the existing, unmodified
+`_listen()` directly -- the same method `voice listen` already
+calls -- which owns EP-046's `AudioCapture`/STT, EP-046's existing
+confidence gate, and `CommandRouter.dispatch()`. An optional TTS step
+(EP-047's existing `TextToSpeechEngine`) may speak the dispatched
+result. `_listen()`, `CommandRouter`, and `Bootstrap` are all
+confirmed byte-identical to their pre-EP-049 state -- EP-049
+introduces no second STT/wake/dispatch implementation, no new
+`VoiceModule` constructor parameter, and no new dependency
+(`requirements.txt` unchanged). Strictly one-shot by owner decision:
+exactly one wake -> command -> result cycle per invocation, with no
+loop, no repeat/continuous-listening configuration, no
+Bootstrap-managed background thread or daemon, and no automatic
+re-arming of wake listening -- a new invocation of `voice wake
+assist` is required for another cycle. New configuration:
+`voice.wake.assist.enabled` and `voice.wake.assist.speak_result`,
+both defaulting to `false`; no `one_shot` key exists. Automated
+tests: EP-049 87/0/1 (one disclosed skip -- the real-hardware
+scenario, see below); EP-046 58/0/1 and EP-047 49/0/0 both fully
+unchanged. On the real target Windows workstation, where
+`openwakeword`'s `tflite-runtime` Linux-only constraint does not
+apply, EP-048's own suite has been independently verified by the
+project owner at **112 passed / 0 failed / 1 skipped** -- the two
+failures seen in the Linux sandbox used for STEP 1-3 development
+(`tflite-runtime` has no published distribution for that
+platform/Python combination, confirmed unfixable from within the
+sandbox) do not reproduce on the actual target machine and are not
+an EP-049 regression. Manual, real-microphone/real-loaded-model
+wake-to-dispatch verification (the full `voice wake assist` pipeline
+end to end, not just EP-048's own wake-detection step) remains an
+outstanding, disclosed item -- see `EP049_AUDIT.md` Section 14 for
+the exact checklist.) EP-048
+Wake Word remains **COMPLETE** (STEP 1-3 plus a post-STEP-3 real-
+Windows-hardware bug fix, unchanged by EP-049 --
+`src/skills/voice/wake_word.py` and
+`src/skills/voice/streaming_audio_capture.py` confirmed byte-identical
+to their EP-048-shipped state -- see
 docs/architecture/designs/EP048_DESIGN.md (including its Section 9a
 owner-decision record, Section 17 as-built summary, and Section 17.7
 post-STEP-3 bug-fix account) and
@@ -170,32 +220,36 @@ file; openWakeWord's own official models ship as
 `hey_jarvis_v0.1.onnx` -- now resolved deterministically without any
 automatic download) -- see the audit document's Section 17 for full
 detail.) EP-047
-Text-to-Speech remains **COMPLETE** (STEP 1-3, unchanged by EP-048 --
-`src/skills/voice/text_to_speech.py` confirmed byte-identical to its
-EP-047-shipped state; its own disclosed TTS-only registration
-limitation is now resolved by EP-048's D6 fix, recorded in both EPs'
-audit documents -- see docs/architecture/designs/EP047_DESIGN.md and
+Text-to-Speech remains **COMPLETE** (STEP 1-3, unchanged by
+EP-048/EP-049 -- `src/skills/voice/text_to_speech.py` confirmed
+byte-identical to its EP-047-shipped state; its own disclosed
+TTS-only registration limitation is now resolved by EP-048's D6 fix,
+recorded in both EPs' audit documents -- see
+docs/architecture/designs/EP047_DESIGN.md and
 docs/architecture/audits/EP047_AUDIT.md.) EP-046 Speech-to-Text
-remains **COMPLETE** (STEP 1-3, unchanged by EP-047/EP-048 --
+remains **COMPLETE** (STEP 1-3, unchanged by EP-047/EP-048/EP-049 --
 `src/skills/voice/speech_to_text.py` and
 `src/skills/voice/audio_capture.py` confirmed byte-identical to their
 EP-046-shipped state -- see
 docs/architecture/designs/EP046_DESIGN.md and
 docs/architecture/audits/EP046_AUDIT.md.) EP-045 Web Dashboard
-remains **COMPLETE** (STEP 1-3, unchanged by EP-046/EP-047/EP-048,
-`web/` confirmed absent from the EP-048 changeset -- see
+remains **COMPLETE** (STEP 1-3, unchanged by
+EP-046/EP-047/EP-048/EP-049, `web/` confirmed absent from the EP-049
+changeset -- see
 docs/architecture/designs/EP045_DESIGN.md and
 docs/architecture/audits/EP045_AUDIT.md.) EP-044 Desktop UI remains
-**COMPLETE** (STEP 1-3, unchanged by EP-045/EP-046/EP-047/EP-048,
-`desktop/` confirmed absent from the EP-048 changeset -- see
+**COMPLETE** (STEP 1-3, unchanged by
+EP-045/EP-046/EP-047/EP-048/EP-049, `desktop/` confirmed absent from
+the EP-049 changeset -- see
 docs/architecture/designs/EP044_DESIGN.md and
 docs/architecture/audits/EP044_AUDIT.md.) EP-043 REST API remains
-**COMPLETE** (STEP 1-4, unchanged by EP-044/EP-045/EP-046/EP-047/
-EP-048 -- see docs/architecture/designs/EP043_DESIGN.md and
+**COMPLETE** (STEP 1-4, unchanged by
+EP-044/EP-045/EP-046/EP-047/EP-048/EP-049 -- see
+docs/architecture/designs/EP043_DESIGN.md and
 docs/RELEASE_NOTES.md.)
 
-**Next Engineering Package: EP-049 Voice Assistant — NOT STARTED.**
-No EP-049 design, research, or implementation work has begun.
+**Next Engineering Package: EP-050 Computer Use — NOT STARTED.**
+No EP-050 design, research, or implementation work has begun.
 
 ---
 
@@ -323,7 +377,7 @@ EP-013 AI Infrastructure
 
 ✓ EP-048 Wake Word
 
-EP-049 Voice Assistant
+✓ EP-049 Voice Assistant
 
 ---
 

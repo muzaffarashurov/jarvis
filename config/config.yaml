@@ -363,6 +363,19 @@ voice:
     frame_length: 1280
     threshold: 0.5
 
+    # EP-049 (Voice Assistant). Strictly one-shot: wake detection ->
+    # one command capture -> STT -> CommandRouter.dispatch() ->
+    # optional TTS -> return. No loop/repeat configuration exists
+    # (owner Decision D2) -- see docs/architecture/designs/EP049_DESIGN.md.
+    assist:
+      enabled: false        # Master switch for "voice wake assist".
+                             # Also requires voice.wake.enabled and
+                             # voice.enabled (STT) to be true.
+      speak_result: false   # Speak the dispatched command's result
+                             # via the existing TTS engine. Requires
+                             # voice.tts.enabled to be true; otherwise
+                             # inert (owner Decision D6).
+
 api:
   # EP-043 REST API. A local programmatic interface exposing the same
   # CommandRouter every CLI command already dispatches through (see

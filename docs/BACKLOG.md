@@ -10,17 +10,112 @@ Status: Active
 
 ## Next Engineering Package
 
+### EP-050 — Computer Use
+
+**NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 8
+sequencing, EP-050 (Computer Use) is the next Engineering Package
+after EP-049's completion. No design, research, or implementation
+work has begun.
+
 ### EP-049 — Voice Assistant
 
-**NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 7
-sequencing, EP-049 (Voice Assistant) is the next Engineering Package
-after EP-048's completion. No design, research, or implementation
-work has begun. Per EP-048's own explicit scope boundary
-(`docs/architecture/designs/EP048_DESIGN.md` Section 2/9a, Owner
-Decision D5), EP-049 is expected to build the wake word → STT →
-command dispatch loop on top of EP-048's detection-only output --
-`voice wake listen` currently only reports a detection and never
-triggers STT, dispatch, or TTS on its own.
+STEP 1 (Design & Owner Decisions), STEP 2 (Implementation &
+Verification), and STEP 3 (Architecture Audit / Final Verification)
+all complete. EP-049 is marked COMPLETE with verdict **PASS WITH
+PRE-EXISTING ENVIRONMENT LIMITATION** (the limitation being an
+EP-048-owned, sandbox-only `openwakeword`/`tflite-runtime` Linux
+packaging quirk -- see below; not an EP-049 defect). Full design:
+`docs/architecture/designs/EP049_DESIGN.md` (including Section 23a's
+record of the seven owner decisions, D1-D7, that resolved STEP 1's
+open questions). Full audit:
+`docs/architecture/audits/EP049_AUDIT.md`.
+
+Built as a strictly one-shot `voice wake assist` action, composed
+into the *existing* `voice` `CommandModule`
+(`src/skills/voice/skill.py`) as an additive sub-action alongside
+EP-048's `wake listen`/`wake status` -- no new dispatch mechanism, no
+second namespace, no change to `src/core/command_router.py`,
+`src/core/api/`, Telegram, `desktop/`, or `web/`. On a wake-word
+detection, `voice wake assist` stops EP-048's existing
+`StreamingAudioCapture` wake stream (mandatory hand-off, confirmed by
+a dedicated ordering test, not just by design) and calls the
+existing, unmodified `_listen()` method directly -- the exact same
+method `voice listen` already calls -- which owns EP-046's
+`AudioCapture`/STT, EP-046's existing confidence gate, and
+`CommandRouter.dispatch()`. An optional final step speaks the
+dispatched result aloud via EP-047's existing `TextToSpeechEngine`,
+off by default. `_listen()`, `CommandRouter`, and `Bootstrap` are all
+confirmed byte-identical to their pre-EP-049 state by direct diff --
+EP-049 introduces no second STT/wake/dispatch implementation, no new
+`VoiceModule` constructor parameter (EP-049 configuration is read
+directly from the existing `config` object), and no new dependency
+(`requirements.txt` unchanged).
+
+Strictly one-shot by owner decision (D2): exactly one wake -> command
+-> result cycle per invocation, with no loop, no repeat/continuous-
+listening configuration, no Bootstrap-managed background thread or
+daemon (D1), and no automatic re-arming of wake listening -- a new
+invocation of `voice wake assist` is required for another cycle. New
+configuration: `voice.wake.assist.enabled` and
+`voice.wake.assist.speak_result`, both defaulting to `false`; no
+`one_shot` key exists (a loop/repeat mode was explicitly considered
+and explicitly rejected for v1 -- see Owner Decision D2). A failed,
+rejected, misunderstood, or low-confidence command is handled purely
+through the existing `CommandResult`/`TranscriptionResult` error
+mechanisms already established by EP-046 -- no retry loop,
+confirmation dialog, or failure counter was added (Owner Decision
+D7).
+
+Tests: EP-049 87/0/1 (one disclosed, expected skip -- the real
+end-to-end hardware scenario, no physical microphone or loaded model
+available in the Linux sandbox used for STEP 1-3 development, exactly
+mirroring EP-046/047/048's own precedent for their own real-hardware
+scenarios); EP-046 58/0/1 and EP-047 49/0/0 both unchanged.
+
+**Target-environment vs. sandbox test results.** All EP-049 STEP 1-3
+work was performed in a Linux (Python 3.12) sandbox in which
+`openwakeword==0.6.0` cannot be installed at all: its PyPI metadata
+hard-requires `tflite-runtime` on Linux, and no distribution of
+`tflite-runtime` exists for this platform/Python combination
+(confirmed unfixable from within the sandbox, both via `pip install`
+and via `pip index versions`). This causes exactly 2 of EP-048's own,
+pre-existing tests (`test_wake_word.py`'s two model-file-error-message
+assertions) to fail in that sandbox with 110/2/1 instead of clean --
+a condition that already existed before any EP-049 code was written
+and is fully unrelated to EP-049's own changeset (`requirements.txt`,
+`wake_word.py`, and `streaming_audio_capture.py` are all confirmed
+byte-identical to their pre-EP-049 state). On the real target Windows
+workstation, where `tflite-runtime`'s Linux-only platform marker does
+not apply, `openwakeword` installs and runs cleanly, and the project
+owner has independently verified EP-048's suite there at **112 passed
+/ 0 failed / 1 skipped** -- matching EP-048's own original,
+pre-sandbox-limitation verified state (see `EP048_DESIGN.md`'s
+"Current verified state" and `EP048_AUDIT.md`). A full-project
+regression count on that same target environment has not yet been
+independently reported to reconcile against this project's own
+sandbox-verified full-suite count (5853 passed / 2 failed / 3
+skipped, all 5853 successes and all 3 skips identical across both
+environments, with the difference confined entirely to the same 2
+EP-048 assertions above); arithmetically, closing those 2 on the
+target environment would be expected to yield 5855 passed / 0 failed
+/ 3 skipped, but this specific figure is a derived expectation, not
+an owner-verified target-environment measurement, and is recorded
+here as such rather than as a confirmed result.
+
+Manual, real-microphone/real-loaded-model wake-to-dispatch
+verification -- the full `voice wake assist` pipeline end to end (a
+real "Hey Jarvis" utterance leading to a real transcribed command,
+real dispatch, and optionally real spoken output), not just
+EP-048's own already-verified wake-detection step in isolation --
+remains an outstanding, disclosed item. See `EP049_AUDIT.md` Section
+14 for the exact manual verification checklist.
+
+*(EP-049's test suite (`tests/EP049/test_voice_assistant.py`) uses
+deterministic fakes exclusively for wake-word scoring and audio
+capture, precisely so its own 87/0/1 result is entirely unaffected by
+the sandbox's `openwakeword` limitation described above -- none of
+EP-049's own passing assertions depend on a real, loaded wake-word or
+STT model.)*
 
 ### EP-048 — Wake Word
 

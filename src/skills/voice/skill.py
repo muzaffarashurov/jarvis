@@ -25,6 +25,19 @@ Decision D5 it never calls `CommandRouter.dispatch()`, never starts
 an STT cycle, and never runs as a background/always-on listener --
 that full wake -> listen -> dispatch loop is explicitly EP-049's
 scope, not this module's.
+
+EP-049 (Voice Assistant) additive extension: `voice wake assist`,
+wired into the existing `_wake()` sub-dispatcher alongside `wake
+listen`/`wake status`. On a wake-word detection it stops the wake
+stream and calls the existing `_listen()` method directly, unmodified
+(EP049_DESIGN.md Section 23a, Owner Decision D3) -- it never
+duplicates audio capture, transcription, confidence-gating, or
+`CommandRouter.dispatch()`. Strictly one-shot (Owner Decision D2):
+exactly one wake -> command -> result cycle per invocation, with no
+loop, no background thread, and no automatic re-arming of wake
+listening (Owner Decision D1). Reads its own configuration
+(`voice.wake.assist.*`) directly from the existing `config` object;
+no new constructor parameter was added (Owner Decision D4).
 """
 
 from __future__ import annotations
@@ -48,7 +61,8 @@ HELP_TEXT: str = (
     "voice status\n"
     "voice speak <text>\n"
     "voice wake listen\n"
-    "voice wake status"
+    "voice wake status\n"
+    "voice wake assist [language]"
 )
 
 ActionHandler = Callable[[list[str]], CommandResult]
@@ -100,11 +114,14 @@ class VoiceModule:
         """Initialize the VoiceModule.
 
         Args:
-            config: The application Config, used only to read
-                'voice.min_confidence' at dispatch time (already read
-                once by `engine`, kept here too since `engine`
-                exposes it as a read-only property -- see
-                `_min_confidence`).
+            config: The application Config. Read once at dispatch time
+                for 'voice.min_confidence' (already read once by
+                `engine`, kept here too since `engine` exposes it as a
+                read-only property -- see `_min_confidence`). Also
+                stored as `self._config` and read directly by
+                `_wake_assist` for `voice.wake.assist.*` (EP-049,
+                owner Decision D4) -- no new constructor parameter was
+                added for this.
             command_router: The existing, shared CommandRouter every
                 other interface (shell, Telegram, REST API) also
                 dispatches through. `voice listen` hands its
@@ -139,11 +156,12 @@ class VoiceModule:
                 `_wake_listen`/`_wake_status`,
                 EP048_DESIGN.md Section 5.4/9a Decision D5).
             wake_capture: The streaming microphone capture component
-                used by `voice wake listen`. Optional, same reasoning
-                as `wake_engine`. Independent from `audio_capture`
-                (EP-046's fixed-duration capture) -- owner Decision
-                D4.
+                used by `voice wake listen`/`voice wake assist`.
+                Optional, same reasoning as `wake_engine`. Independent
+                from `audio_capture` (EP-046's fixed-duration capture)
+                -- owner Decision D4.
         """
+        self._config = config
         self._command_router = command_router
         self._engine = engine
         self._audio_capture = audio_capture
@@ -385,12 +403,12 @@ class VoiceModule:
         return CommandResult(success=True, message=f'Spoke: "{text}"')
 
     def _wake(self, arguments: list[str]) -> CommandResult:
-        """Dispatch to a `voice wake` sub-action (EP-048).
+        """Dispatch to a `voice wake` sub-action (EP-048/EP-049).
 
         Args:
             arguments: `arguments[0]` selects the sub-action
-                ("listen" or "status"); remaining arguments are
-                passed through to that sub-action, unused today.
+                ("listen", "status", or "assist"); remaining
+                arguments are passed through to that sub-action.
 
         Returns:
             A CommandResult from the selected sub-action, or a usage
@@ -403,10 +421,12 @@ class VoiceModule:
             return self._wake_listen(sub_arguments)
         if sub_action == "status":
             return self._wake_status(sub_arguments)
+        if sub_action == "assist":
+            return self._wake_assist(sub_arguments)
 
         return CommandResult(
             success=False,
-            message='Usage: voice wake listen | voice wake status',
+            message='Usage: voice wake listen | voice wake status | voice wake assist',
         )
 
     def _wake_listen(self, arguments: list[str]) -> CommandResult:
@@ -509,6 +529,121 @@ class VoiceModule:
             "scope for EP-048 (English-only \"Hey Jarvis\")."
         )
         return CommandResult(success=True, message=message)
+
+    def _wake_assist(self, arguments: list[str]) -> CommandResult:
+        """Wake word -> one command capture -> STT -> dispatch -> optional TTS.
+
+        EP-049 (EP049_DESIGN.md, Owner Decisions D1-D7, Section 23a).
+        Strictly one-shot: exactly one wake detection leads to exactly
+        one call to the existing, unmodified `_listen()` (owner
+        Decision D3), then returns. There is no loop, no background
+        thread, and no automatic re-arming of wake listening (owner
+        Decisions D1/D2) -- a new invocation of `voice wake assist` is
+        required for another cycle.
+
+        Audio resource ownership (EP049_DESIGN.md Section 9): the
+        wake stream (`StreamingAudioCapture`) is always fully stopped,
+        via `finally`, before the existing fixed-duration
+        `AudioCapture`/STT/dispatch path (`_listen()`) is ever
+        invoked. The two are never open at the same time, and no new
+        lock/semaphore is introduced -- this method is entirely
+        sequential.
+
+        Args:
+            arguments: An optional single language code, forwarded
+                unchanged to `_listen()` (same meaning as `voice
+                listen [language]`).
+
+        Returns:
+            A CommandResult. `success=False` (never a crash) if
+            EP-049 is disabled, wake-word detection or STT is not
+            enabled/available, the wake microphone could not be
+            opened, or wake listening ended without a detection.
+            Otherwise, the exact CommandResult `_listen()` produced
+            for the one captured command (dispatched result, or a
+            reported failure such as empty/low-confidence
+            transcription) -- optionally spoken first via the
+            existing TTS engine if `voice.wake.assist.speak_result`
+            is true (owner Decision D6).
+        """
+        if not self._config.get("voice.wake.assist.enabled", False):
+            return CommandResult(
+                success=False,
+                message=(
+                    "Wake Word Assist is not enabled. Set "
+                    "'voice.wake.assist.enabled: true' in "
+                    "config/config.yaml."
+                ),
+            )
+
+        if self._wake_engine is None or self._wake_capture is None:
+            return CommandResult(
+                success=False,
+                message=(
+                    "Wake Word detection is not enabled or not available. "
+                    "Set 'voice.wake.enabled: true' in config/config.yaml and "
+                    "ensure openWakeWord model files are installed under "
+                    "'voice.wake.model_dir'."
+                ),
+            )
+
+        if self._engine is None or self._audio_capture is None:
+            return CommandResult(
+                success=False,
+                message=(
+                    "Speech-to-Text is not enabled or not available. "
+                    "Set 'voice.enabled: true' in config/config.yaml and "
+                    "ensure a Vosk model is installed."
+                ),
+            )
+
+        start_result = self._wake_capture.start()
+        if not start_result.success:
+            return CommandResult(success=False, message=f"Microphone error: {start_result.error}")
+
+        detected = False
+        detection_message = ""
+        try:
+            for frame in self._wake_capture.frames():
+                detection = self._wake_engine.process_frame(frame)
+                if detection.detected:
+                    detected = True
+                    detection_message = (
+                        f'Wake word detected: "{detection.wake_word}" '
+                        f"(score {detection.score:.2f})"
+                    )
+                    break
+        except KeyboardInterrupt:
+            return CommandResult(success=False, message="Wake word listening interrupted.")
+        finally:
+            # Mandatory hand-off (EP049_DESIGN.md Section 9): the wake
+            # stream must be fully stopped before _listen() -- which
+            # owns AudioCapture -- is ever called below.
+            self._wake_capture.stop()
+
+        if not detected:
+            return CommandResult(
+                success=False,
+                message="Wake word listening ended without a detection.",
+            )
+
+        logger.info(detection_message)
+
+        # Reuse the existing _listen() directly and unmodified (owner
+        # Decision D3) -- it already owns AudioCapture, STT,
+        # confidence-gating, and CommandRouter.dispatch(). EP-049 does
+        # not duplicate any of that here.
+        listen_result = self._listen(arguments)
+
+        if self._tts_engine is not None and self._config.get("voice.wake.assist.speak_result", False):
+            # TTS-on-result is strictly optional (owner Decision D6):
+            # a synthesis failure must never affect the command's own
+            # outcome, so its result is intentionally not inspected.
+            self._tts_engine.synthesize(listen_result.message)
+
+        # One-shot termination (owner Decision D2): return immediately.
+        # No restart of self._wake_capture, no loop.
+        return listen_result
 
     def _below_confidence_threshold(self, confidence: float | None) -> bool:
         """Return whether `confidence` is below the configured minimum.

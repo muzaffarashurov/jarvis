@@ -122,6 +122,72 @@ Completed sub-packages:
 
 ## Current
 
+EP-050 Computer Use — **COMPLETE** (STEP 1 Architecture Research,
+Design & Owner Decisions, STEP 2 Implementation & Testing, STEP 3
+Architecture Audit, STEP 4 Documentation Completion all complete --
+see docs/architecture/designs/EP050_DESIGN.md (including its Section
+30 owner-decision record, D1-D6, and its Section 32 STEP 1 Final
+Review of the CommandRouter-vs-Tool-Engine decision) and
+docs/architecture/audits/EP050_AUDIT.md. Verdict: **PASS WITH
+FINDINGS** (one HIGH, one MEDIUM, four LOW, four INFO -- see below;
+none blocking, none fixed during STEP 4 per the audit's own "document,
+do not fix" rule). Built as a new `desktop` `CommandModule`
+(`src/skills/desktop/skill.py`) providing raw, local, offline OS-level
+input control -- `help`, `move`, `click`, `scroll`, `type`, `key`,
+`read-clipboard`, `write-clipboard`, `screenshot`, `cursor`,
+`screen-size`, `active-window`, `focus` -- dispatched through the
+*existing*, unmodified `CommandRouter.dispatch()`, exactly as every
+prior skill (`voice`, `system`, ...) already is: no second dispatch
+mechanism, no change to `src/core/command_router.py`. A new
+`ComputerUseBackend` protocol (`src/skills/desktop/backend.py`)
+defines the OS-input contract; `WindowsComputerUseBackend`
+(`src/skills/desktop/windows_backend.py`, PyAutoGUI-based, Owner
+Decision D3) is the sole real implementation, honestly scoped as
+Windows v1 (Owner Decision D5) rather than claiming cross-platform
+support. `desktop.enabled` defaults to `false`, re-checked on every
+dispatched action (not only at registration), guaranteeing zero
+backend interaction -- including no `screen_size()` call for bounds
+validation -- while disabled; a general per-action human-confirmation
+framework was deliberately not built (no such mechanism exists
+anywhere in the project today), a disclosed limitation carried
+forward from Owner Decision D2, not fixed by EP-050. Tool Engine
+(`src/core/tool/`), Agent Framework, Planning Engine, Plan Execution
+Engine, `src/core/execution/` (EP-003's process/application launcher),
+the EP-044 `desktop/` PySide6 GUI client (a distinct, unrelated
+directory from `src/skills/desktop/` -- the two are never merged), and
+`src/skills/browser/` (still empty, confirmed reserved for EP-051) are
+all confirmed byte-identical to their pre-EP-050 state. `CommandRouter`
+was deliberately chosen over Tool Engine for v1 because Tool Engine's
+`Tool.handler` is zero-argument-only for every action already
+registered in the project (a pre-existing, already-disclosed
+limitation, not introduced by EP-050) -- this is documented as a
+deferred architectural evolution (a future, dedicated "parameterized
+Tool support" Engineering Package, left unscheduled and unnumbered by
+this EP), not a permanent rejection. Tests: EP-050 112/0/0, entirely
+deterministic against a fake backend, no real mouse/keyboard/screen/
+PyAutoGUI/display required; a separate, intentionally unregistered
+`tests/EP050/test_desktop_windows_integration.py` exists for manual,
+real-hardware verification and correctly self-skips in a headless
+environment. The architecture audit's one HIGH finding: `CommandRouter
+.dispatch()`'s own pre-existing, unmodified raw-input logging
+(`src/core/command_router.py`) logs the full command line on every
+dispatch, including `desktop type`/`desktop write-clipboard`'s
+sensitive argument content -- a shared-infrastructure behavior
+pre-dating and extending beyond EP-050 (equally true of, e.g., `email
+send`'s body or `git commit -m`'s message), not a defect in EP-050's
+own code, but one that undermines EP050_DESIGN.md Section 19's
+explicit "never logged" privacy commitment end-to-end; tracked as a
+recommended follow-up (see docs/BACKLOG.md), not fixed during EP-050.
+One MEDIUM finding (`WindowsComputerUseBackend.active_window_title()`
+over-broadly swallows all exceptions into an empty-string return
+rather than raising for genuine failures) and four LOW/four INFO
+findings (click-argument ambiguity, no literal `'+'`-key support, no
+partial-file cleanup on a failed screenshot write, no runtime
+Windows-platform guard, a `runtime_checkable` Protocol signature-
+checking limitation, `desktop.backend`'s intentional omission,
+active-window-title logging) are recorded in full in
+`EP050_AUDIT.md` Section 22 -- none blocking.)
+
 EP-049 Voice Assistant — **COMPLETE** (STEP 1 Design & Owner
 Decisions, STEP 2 Implementation & Verification, STEP 3 Architecture
 Audit / Final Verification all complete -- see
@@ -248,8 +314,8 @@ EP-044/EP-045/EP-046/EP-047/EP-048/EP-049 -- see
 docs/architecture/designs/EP043_DESIGN.md and
 docs/RELEASE_NOTES.md.)
 
-**Next Engineering Package: EP-050 Computer Use — NOT STARTED.**
-No EP-050 design, research, or implementation work has begun.
+**Next Engineering Package: EP-051 Browser Automation — NOT STARTED.**
+No EP-051 design, research, or implementation work has begun.
 
 ---
 
@@ -383,7 +449,7 @@ EP-013 AI Infrastructure
 
 ## Phase 8 — Computer Automation
 
-EP-050 Computer Use
+✓ EP-050 Computer Use
 
 EP-051 Browser Automation
 

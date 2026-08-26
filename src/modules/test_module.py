@@ -48,6 +48,7 @@ import tests.EP046.test_voice
 import tests.EP047.test_voice_tts
 import tests.EP048.test_wake_word
 import tests.EP049.test_voice_assistant
+import tests.EP050.test_desktop
 
 class TestModule(CommandModule):
 

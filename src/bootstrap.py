@@ -152,6 +152,12 @@ from src.skills.voice.text_to_speech import (
 )
 from src.skills.voice.wake_word import OpenWakeWordEngine, WakeWordEngine, WakeWordEngineError
 from src.skills.voice.skill import VoiceModule
+from src.skills.desktop.backend import ComputerUseBackend
+from src.skills.desktop.skill import DesktopModule
+from src.skills.desktop.windows_backend import (
+    WindowsComputerUseBackend,
+    WindowsComputerUseBackendError,
+)
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -257,6 +263,7 @@ class Bootstrap:
         self._voice_tts_engine: TextToSpeechEngine | None = None
         self._voice_wake_engine: WakeWordEngine | None = None
         self._voice_wake_capture: StreamingAudioCapture | None = None
+        self._desktop_backend: ComputerUseBackend | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -1623,6 +1630,42 @@ class Bootstrap:
             self._voice_wake_engine = None
             self._voice_wake_capture = None
 
+        # EP-050 Computer Use. Raw OS-level input control
+        # (mouse/keyboard/clipboard/screenshot/window-focus) via
+        # ComputerUseBackend (src/skills/desktop/backend.py),
+        # dispatched through the same, unmodified
+        # CommandRouter.dispatch() every other skill already uses
+        # (EP050_DESIGN.md Section 9/32.2) -- no new dispatch
+        # mechanism, and Tool Engine is untouched (EP050_DESIGN.md
+        # Section 11/32.1: Tool Engine's Tool.handler is
+        # zero-argument-only for every action already registered in
+        # this project, not a gap EP-050 works around).
+        #
+        # Unlike Voice above, DesktopModule is registered
+        # unconditionally when constructed -- 'desktop.enabled'
+        # (default false) is re-checked on every dispatched action
+        # inside DesktopModule itself (EP050_DESIGN.md Section 16/20,
+        # Owner Decision D2), not only at registration time. The
+        # *backend* is still only constructed when the flag is true,
+        # matching every other subsystem's "don't do the work if it's
+        # off" convention and avoiding an unconditional PyAutoGUI
+        # import attempt on every single startup.
+        if bool(config.get("desktop.enabled", False)):
+            try:
+                desktop_backend: ComputerUseBackend | None = WindowsComputerUseBackend(config=config)
+            except WindowsComputerUseBackendError as exc:
+                logger.error(
+                    f"Computer Use backend unavailable: {exc}. 'desktop' "
+                    f"actions will report failure until this is resolved "
+                    f"and Jarvis is restarted."
+                )
+                desktop_backend = None
+        else:
+            logger.info("Computer Use disabled ('desktop.enabled: false').")
+            desktop_backend = None
+        self._desktop_backend = desktop_backend
+        router.register(DesktopModule(config=config, backend=desktop_backend))
+
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
 
@@ -2399,3 +2442,17 @@ class Bootstrap:
             same conditions as `voice_wake_engine`.
         """
         return self._voice_wake_capture
+
+    @property
+    def desktop_backend(self) -> ComputerUseBackend | None:
+        """Return the ComputerUseBackend built for EP-050, if available.
+
+        Returns:
+            The `WindowsComputerUseBackend` instance, or None if
+            'desktop.enabled' is false, or if construction failed
+            (e.g. no display/windowing environment available) --
+            `DesktopModule` is registered with `CommandRouter`
+            regardless, and reports a clear failure message for every
+            action in either case (EP050_DESIGN.md Section 10/16).
+        """
+        return self._desktop_backend

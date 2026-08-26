@@ -376,6 +376,32 @@ voice:
                              # voice.tts.enabled to be true; otherwise
                              # inert (owner Decision D6).
 
+desktop:
+  # EP-050 Computer Use. Raw, local, offline OS-level input control
+  # (mouse/keyboard/clipboard/screenshot/window-focus) via the
+  # "desktop" CommandRouter namespace (see src/skills/desktop/).
+  #
+  # "enabled" is the single safety gate for the entire namespace
+  # (EP050_DESIGN.md Section 16, Owner Decision D2) -- re-checked on
+  # every dispatched "desktop ..." action, not only at startup, so no
+  # partial execution can occur before this check. Defaults to false,
+  # matching every other risky-by-nature capability's own
+  # off-by-default precedent (voice.wake.enabled,
+  # voice.wake.assist.enabled). Set to true only once you understand
+  # this lets any dispatch surface that can reach CommandRouter
+  # (interactive shell, Telegram, the REST API, voice) move the
+  # mouse, type keystrokes, and read/write the clipboard on this
+  # machine -- there is no per-action confirmation prompt in v1 (see
+  # docs/architecture/designs/EP050_DESIGN.md Section 15/16/32.8).
+  enabled: false
+  screenshot:
+    max_dimension: 4096    # Caps the longest side (in pixels) of any
+                            # image "desktop screenshot" captures --
+                            # larger captures are downscaled before
+                            # being written to the requested path.
+                            # Bounds resource usage only; not a
+                            # security control.
+
 api:
   # EP-043 REST API. A local programmatic interface exposing the same
   # CommandRouter every CLI command already dispatches through (see

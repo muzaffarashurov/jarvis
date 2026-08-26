@@ -10,12 +10,117 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-050 — Computer Use
+### EP-051 — Browser Automation
 
 **NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 8
-sequencing, EP-050 (Computer Use) is the next Engineering Package
-after EP-049's completion. No design, research, or implementation
-work has begun.
+sequencing, EP-051 (Browser Automation) is the next Engineering
+Package after EP-050's completion. No design, research, or
+implementation work has begun.
+
+### EP-050 — Computer Use
+
+STEP 1 (Architecture Research, Design & Owner Decisions), STEP 2
+(Implementation & Testing), STEP 3 (Architecture Audit), and STEP 4
+(Documentation Completion) all complete. EP-050 is marked COMPLETE
+with verdict **PASS WITH FINDINGS** (one HIGH, one MEDIUM, four LOW,
+four INFO -- none blocking; see below and
+`docs/architecture/audits/EP050_AUDIT.md` Section 22 for the full,
+verbatim finding list). Full design:
+`docs/architecture/designs/EP050_DESIGN.md` (including Section 30's
+record of the six owner decisions, D1-D6, and Section 32's dedicated
+STEP 1 Final Review of the CommandRouter-vs-Tool-Engine choice). Full
+audit: `docs/architecture/audits/EP050_AUDIT.md`.
+
+Built as a new `desktop` `CommandModule`
+(`src/skills/desktop/skill.py`) providing 13 actions -- `help`,
+`move`, `click`, `scroll`, `type`, `key`, `read-clipboard`,
+`write-clipboard`, `screenshot`, `cursor`, `screen-size`,
+`active-window`, `focus` -- for raw, local, offline OS-level mouse,
+keyboard, clipboard, screenshot, and window-focus control, dispatched
+through the *existing*, unmodified `CommandRouter.dispatch()` -- no
+new dispatch mechanism, no change to `src/core/command_router.py`,
+`src/core/api/`, Telegram, `desktop/` (the EP-044 PySide6 GUI client,
+a distinct, unrelated directory never merged with
+`src/skills/desktop/`), or `web/`. A new `ComputerUseBackend` protocol
+(`src/skills/desktop/backend.py`, 12 methods, exactly the v1 primitive
+set) is the only interface `DesktopModule` depends on;
+`WindowsComputerUseBackend` (`src/skills/desktop/windows_backend.py`)
+is the sole real implementation, PyAutoGUI-based (Owner Decision D3,
+already declared in `requirements.txt` before EP-050, unused until
+now -- no new top-level dependency added) and honestly scoped as
+Windows v1 (Owner Decision D5) with every PyAutoGUI/pygetwindow/
+pyperclip import deferred to `__init__` (confirmed necessary: a
+top-level import crashes with `KeyError: 'DISPLAY'` in a headless
+sandbox).
+
+`desktop.enabled` defaults to `false` and is re-checked on every
+dispatched action, not only at registration -- confirmed by dedicated
+tests that zero backend calls occur while disabled, including that
+`screen_size()` is never called for bounds validation before the gate
+passes. No general per-action human-confirmation framework exists or
+was added (Owner Decision D2, reaffirmed unfixed) -- disabled-by-
+default is v1's only safety mechanism beyond argument/bounds
+validation. `Tool Engine` (`src/core/tool/`), `Agent Framework`,
+`Planning Engine`, `Plan Execution Engine`, `src/core/execution/`
+(EP-003), and `src/skills/browser/` (confirmed still empty, reserved
+for EP-051) are all confirmed byte-identical to their pre-EP-050
+state -- EP-050 introduces no second Tool-execution path.
+`CommandRouter` was chosen over Tool Engine specifically because
+`Tool.handler` is zero-argument-only for every action already
+registered in the project (a pre-existing, already-disclosed
+limitation predating EP-050, confirmed by `src/core/tool/__init__.py`'s
+own admission about four already-unregistered EP-029 actions) --
+recorded as a deferred architectural evolution (a future, dedicated,
+still-unscheduled "parameterized Tool support" Engineering Package),
+not a permanent rejection.
+
+Tests: EP-050 112/0/0, entirely deterministic against a
+`_FakeComputerUseBackend` (`tests/EP050/test_desktop.py`), no real
+mouse/keyboard/screen/PyAutoGUI/display required anywhere in the
+normal suite; a separate, intentionally unregistered
+`tests/EP050/test_desktop_windows_integration.py` exists for manual,
+real-hardware verification on the actual target Windows workstation
+and correctly self-skips (exit code 0) in a headless environment.
+Focused regression check: EP-031/043/044/045/046/047/049 all pass
+unchanged; EP-048 has 2 pre-existing, sandbox-only failures
+(`openwakeword`'s `tflite-runtime` has no Linux wheel in the
+development sandbox -- the same, already-disclosed condition recorded
+against EP-049 above), confirmed unrelated to and unmodified by
+EP-050.
+
+**Audit findings (verdict PASS WITH FINDINGS, none blocking, none
+fixed during EP-050 -- see `EP050_AUDIT.md` Section 22 for full
+detail and Section 23 for recommended follow-up):**
+
+- **HIGH** -- `CommandRouter.dispatch()`'s own pre-existing,
+  EP-050-unmodified raw-input logging
+  (`src/core/command_router.py`) logs the entire command line on every
+  successful/errored dispatch, including `desktop type`/`desktop
+  write-clipboard`'s sensitive argument content -- undermining
+  EP050_DESIGN.md Section 19's "never logged" privacy commitment
+  end-to-end, even though `DesktopModule` itself never logs this
+  content. Shared-infrastructure behavior, equally true of every other
+  module with a free-text argument (e.g. `email send`, `git commit
+  -m`); tracked as a follow-up item below, not fixed during EP-050.
+- **MEDIUM** -- `WindowsComputerUseBackend.active_window_title()`
+  catches every exception (not only the documented "no active window"
+  case) and silently returns `""`, deviating from `backend.py`'s own
+  documented Protocol contract.
+- **LOW (x4)** -- no literal `'+'`-key support in `desktop key`;
+  `desktop click`'s trailing-argument parser silently resolves
+  conflicting button names instead of rejecting them; no partial-file
+  cleanup if a `desktop screenshot` write fails mid-way; no runtime
+  `platform.system() == "Windows"` guard in
+  `WindowsComputerUseBackend`.
+- **INFO (x4)** -- `runtime_checkable` Protocol conformance checks
+  verify method names only, not signatures (a Python language
+  characteristic); `WindowsComputerUseBackend._call()` lacks an
+  explicit return-type annotation; `desktop.backend` (a config key
+  described in EP050_DESIGN.md Section 22) was intentionally not
+  implemented since v1 has no backend-selection logic for it to feed;
+  active window titles are logged in full (consistent with Section
+  19's actual scope, which never listed window titles as a "never
+  log" category).
 
 ### EP-049 — Voice Assistant
 
@@ -523,6 +628,8 @@ Priority may change.
 - REST API OpenAPI/Swagger schema generation -- deferred from EP-043 v1
 - Per-subsystem REST resources (e.g. dedicated /api/v1/email/... routes) -- deferred from EP-043 v1, which ships one generic /api/v1/commands endpoint instead
 - TestRegistry NAME-collision fix (Service/Module test pairs sharing a NAME are only partially reachable via `test EP0NN`) -- pre-existing since EP-038, tracked again during EP-042 and EP-043
+- `CommandRouter.dispatch()` raw-input logging exposes sensitive command arguments in full (e.g. `desktop type`/`desktop write-clipboard`'s text) -- HIGH finding from `EP050_AUDIT.md`, deferred from EP-050 v1; needs its own architectural decision on how a `CommandModule` can mark specific actions as sensitive before this is fixed at the `CommandRouter` level
+- `WindowsComputerUseBackend.active_window_title()` should distinguish "no active window" from a genuine backend failure instead of swallowing all exceptions into an empty string -- MEDIUM finding from `EP050_AUDIT.md`, deferred from EP-050 v1
 
 ---
 

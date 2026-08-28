@@ -37,7 +37,18 @@ openwakeword==0.6.0
 openpyxl
 pandas
 
-selenium
+# EP-051 Browser Automation. Playwright is pinned to its current
+# latest stable PyPI release as of EP-051 STEP 2 (EP051_DESIGN.md
+# Section 8/22, Owner Decision D1). This replaces the previously-
+# declared 'selenium' entry: that dependency was unpinned and unused
+# (confirmed by repository inspection, EP051_DESIGN.md Section 2/6 --
+# zero imports anywhere in the project), so its removal is not a
+# migration away from working infrastructure. After 'pip install -r
+# requirements.txt', run 'playwright install chromium' once to
+# download the managed browser binary this package itself does not
+# bundle -- this is a one-time setup step, not expressible purely
+# through this file.
+playwright==1.62.0
 
 pyautogui
 

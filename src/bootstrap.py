@@ -158,6 +158,12 @@ from src.skills.desktop.windows_backend import (
     WindowsComputerUseBackend,
     WindowsComputerUseBackendError,
 )
+from src.skills.browser.backend import BrowserBackend
+from src.skills.browser.skill import BrowserModule
+from src.skills.browser.playwright_backend import (
+    PlaywrightBrowserBackend,
+    PlaywrightBrowserBackendError,
+)
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -264,6 +270,7 @@ class Bootstrap:
         self._voice_wake_engine: WakeWordEngine | None = None
         self._voice_wake_capture: StreamingAudioCapture | None = None
         self._desktop_backend: ComputerUseBackend | None = None
+        self._browser_backend: BrowserBackend | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -1666,6 +1673,40 @@ class Bootstrap:
         self._desktop_backend = desktop_backend
         router.register(DesktopModule(config=config, backend=desktop_backend))
 
+        # EP-051 Browser Automation. Controlled browser interaction
+        # (launch, navigate, observe, and drive simple DOM
+        # interactions) via BrowserBackend (src/skills/browser/
+        # backend.py), dispatched through the same, unmodified
+        # CommandRouter.dispatch() every other skill already uses
+        # (EP051_DESIGN.md Section 9/11, Owner Decision D4) -- no new
+        # dispatch mechanism, and Tool Engine is untouched.
+        #
+        # Mirrors DesktopModule's wiring exactly: BrowserModule is
+        # registered unconditionally when constructed --
+        # 'browser.enabled' (default false) is re-checked on every
+        # dispatched action inside BrowserModule itself
+        # (EP051_DESIGN.md Section 14, Owner Decision D2), not only at
+        # registration time. The *backend* is still only constructed
+        # when the flag is true, matching every other subsystem's
+        # "don't do the work if it's off" convention and avoiding an
+        # unconditional Playwright import attempt on every single
+        # startup.
+        if bool(config.get("browser.enabled", False)):
+            try:
+                browser_backend: BrowserBackend | None = PlaywrightBrowserBackend(config=config)
+            except PlaywrightBrowserBackendError as exc:
+                logger.error(
+                    f"Browser Automation backend unavailable: {exc}. 'browser' "
+                    f"actions will report failure until this is resolved "
+                    f"and Jarvis is restarted."
+                )
+                browser_backend = None
+        else:
+            logger.info("Browser Automation disabled ('browser.enabled: false').")
+            browser_backend = None
+        self._browser_backend = browser_backend
+        router.register(BrowserModule(config=config, backend=browser_backend))
+
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
 
@@ -2456,3 +2497,16 @@ class Bootstrap:
             action in either case (EP050_DESIGN.md Section 10/16).
         """
         return self._desktop_backend
+
+    @property
+    def browser_backend(self) -> BrowserBackend | None:
+        """Return the BrowserBackend built for EP-051, if available.
+
+        Returns:
+            The `PlaywrightBrowserBackend` instance, or None if
+            'browser.enabled' is false, or if construction failed --
+            `BrowserModule` is registered with `CommandRouter`
+            regardless, and reports a clear failure message for every
+            action in either case (EP051_DESIGN.md Section 10/14).
+        """
+        return self._browser_backend

@@ -122,6 +122,95 @@ Completed sub-packages:
 
 ## Current
 
+EP-051 Browser Automation — **COMPLETE** (STEP 1 Architecture
+Discovery, Technology Evaluation & Design, STEP 2 Implementation &
+Testing, STEP 3 Architecture Audit, STEP 4 Documentation Completion
+all complete -- see docs/architecture/designs/EP051_DESIGN.md
+(including its Section 21 owner-decision record, D1-D12) and
+docs/architecture/audits/EP051_AUDIT.md. Verdict: **PASS WITH
+FINDINGS** (one HIGH, three MEDIUM, three LOW -- see below; none
+blocking, none fixed during STEP 4 per the audit's own "document, do
+not fix" rule). Built as a new `browser` `CommandModule`
+(`src/skills/browser/skill.py`) providing fifteen actions -- `launch`,
+`close`, `goto`, `back`, `forward`, `reload`, `title`, `current-url`,
+`page-text`, `exists`, `click`, `type`, `clear`, `press`,
+`screenshot` -- plus `help`, for controlled browser lifecycle,
+navigation, and single-element DOM interaction, dispatched through the
+*existing*, unmodified `CommandRouter.dispatch()`, exactly as every
+prior skill (`desktop`, `voice`, `system`, ...) already is: no second
+dispatch mechanism, no change to `src/core/command_router.py`. A new
+`BrowserBackend` protocol (`src/skills/browser/backend.py`) defines
+the browser-automation contract; `PlaywrightBrowserBackend`
+(`src/skills/browser/playwright_backend.py`, Owner Decision D1) is the
+sole real implementation, built on Playwright's synchronous API
+(`playwright==1.62.0`, replacing the previously-declared, unpinned,
+and confirmed-unused `selenium` entry -- zero migration cost, since
+nothing in the repository imported Selenium before EP-051). Genuinely
+cross-platform by design (Owner Decision D11) -- no Windows-only guard
+exists in `PlaywrightBrowserBackend`, unlike EP-050's own
+`WindowsComputerUseBackend`, though Windows remains the intended
+manual-verification target. `browser.enabled` defaults to `false`,
+re-checked on every dispatched action (not only at registration),
+guaranteeing zero backend interaction while disabled -- confirmed by
+dedicated tests. No per-action human-confirmation framework was built
+(Owner Decision D2), no domain allow-list exists (Owner Decision D6,
+a disclosed, accepted v1 limitation), and no JavaScript execution,
+download, upload, multi-session, or multi-tab capability exists
+anywhere (Owner Decisions D7/D8/D5/D12) -- confirmed absent by direct
+code inspection during the architecture audit, not merely by design
+intent. `src/skills/desktop/` (EP-050), Tool Engine (`src/core/tool/`),
+`src/core/command_router.py`, Agent Framework, Planning Engine, and
+Plan Execution Engine are all confirmed byte-identical to their
+pre-EP-051 state. `CommandRouter` was chosen over Tool Engine for the
+same, now twice-independently-confirmed reason EP-050 already
+established: `Tool.handler` remains zero-argument-only for every
+action registered in the project. Tests: EP-051 105/0/0, entirely
+deterministic against a `_FakeBrowserBackend`, no real browser process
+required; a separate, intentionally unregistered
+`tests/EP051/test_browser_integration.py` exists for manual,
+real-browser verification, but the architecture audit found this
+script itself misreports its own skip condition (see findings below)
+and confirmed real Chromium execution remains unverified in the
+development sandbox (`playwright install chromium` cannot complete
+there -- the Playwright CDN is outside the sandbox's allowed network
+egress list). Focused regression check: EP-031/044/045/050 all pass
+unchanged; EP-046/049 reproduce the same pre-existing, sandbox-only
+conditions already disclosed against EP-048/049 above, confirmed
+unrelated to and unmodified by EP-051.
+
+**Audit findings (verdict PASS WITH FINDINGS, none blocking, none
+fixed during EP-051 -- see `EP051_AUDIT.md` Section 17 for full detail
+and Section 21 for recommended follow-up):**
+
+- **HIGH** -- the same pre-existing `CommandRouter.dispatch()` raw-
+  input logging (`src/core/command_router.py`) EP050_AUDIT.md already
+  documented for `desktop type`/`desktop write-clipboard` was
+  independently re-confirmed for `browser type`'s typed text and
+  `browser goto`'s URL (which may embed a token/credential as a query
+  parameter) -- undermining EP051_DESIGN.md Section 12's "never
+  logged" commitment end-to-end, even though `BrowserModule` itself
+  never logs this content. Not introduced by EP-051; tracked as a
+  follow-up item below, not fixed during EP-051.
+- **MEDIUM (x3)** -- `PlaywrightBrowserBackend._call()`'s exception
+  catch is narrower than `launch()`'s own, better-justified broad
+  catch, risking an unnormalized exception on an in-session action
+  failure (contained by `CommandRouter`'s own top-level catch-all, no
+  crash); a `close()` failure may skip stopping the underlying
+  Playwright driver subprocess while internal state is reset
+  regardless; the unregistered real-browser integration script reports
+  "FAILED" rather than "SKIPPED" when Playwright is installed but no
+  browser binary has been downloaded -- the exact state of the
+  development sandbox -- correcting the STEP 2 report's original
+  "skips gracefully" claim.
+- **LOW (x3)** -- no explicitly-named "double close"/"action after
+  close" test scenario (the underlying code path is correct by
+  inspection); raw Playwright exception message text (not type)
+  reaches `CommandResult.message`, mirroring an already-accepted
+  EP-050 precedent; `src/skills/browser/selenium_driver.py` (a 0-byte
+  placeholder predating EP-051) was not deleted as
+  EP051_DESIGN.md Section 22 proposed, and remains present, empty, and
+  unimported.
+
 EP-050 Computer Use — **COMPLETE** (STEP 1 Architecture Research,
 Design & Owner Decisions, STEP 2 Implementation & Testing, STEP 3
 Architecture Audit, STEP 4 Documentation Completion all complete --
@@ -314,8 +403,8 @@ EP-044/EP-045/EP-046/EP-047/EP-048/EP-049 -- see
 docs/architecture/designs/EP043_DESIGN.md and
 docs/RELEASE_NOTES.md.)
 
-**Next Engineering Package: EP-051 Browser Automation — NOT STARTED.**
-No EP-051 design, research, or implementation work has begun.
+**Next Engineering Package: EP-052 File Automation — NOT STARTED.**
+No EP-052 design, research, or implementation work has begun.
 
 ---
 

@@ -402,6 +402,42 @@ desktop:
                             # Bounds resource usage only; not a
                             # security control.
 
+browser:
+  # EP-051 Browser Automation. Controlled browser interaction
+  # (launch, navigate, observe, and drive simple DOM interactions) via
+  # the "browser" CommandRouter namespace (see src/skills/browser/),
+  # implemented with the Playwright Sync API (EP051_DESIGN.md Section
+  # 8, Owner Decision D1).
+  #
+  # "enabled" is the single safety gate for the entire namespace
+  # (EP051_DESIGN.md Section 14, Owner Decision D2) -- re-checked on
+  # every dispatched "browser ..." action, not only at startup, so no
+  # partial execution can occur before this check. Defaults to false,
+  # matching every other risky-by-nature capability's own
+  # off-by-default precedent (voice.wake.enabled, desktop.enabled).
+  # Set to true only once you understand this lets any dispatch
+  # surface that can reach CommandRouter (interactive shell, Telegram,
+  # the REST API, voice) launch a real browser and navigate to any
+  # reachable URL -- there is no per-action confirmation prompt and no
+  # domain allow-list in v1 (a known, accepted limitation -- see
+  # docs/architecture/designs/EP051_DESIGN.md Section 12/14, Owner
+  # Decisions D2/D6).
+  enabled: false
+  headless: false         # Whether the launched browser window is
+                           # visible (false) or headless (true).
+                           # Defaults to visible (Owner Decision D10)
+                           # -- a lightweight, incidental observability
+                           # aid for a new, category-gated-only
+                           # capability.
+  browser_type: "chromium" # Which Playwright-supported engine is
+                            # launched ("chromium"/"firefox"/"webkit").
+                            # Only "chromium" is exercised/verified in
+                            # v1 (EP051_DESIGN.md Section 16).
+  default_timeout_ms: 30000 # Caps how long any single navigation or
+                             # DOM interaction waits before failing.
+                             # Bounds resource/time usage only; not a
+                             # security control.
+
 api:
   # EP-043 REST API. A local programmatic interface exposing the same
   # CommandRouter every CLI command already dispatches through (see

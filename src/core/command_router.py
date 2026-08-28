@@ -103,6 +103,31 @@ class CommandRouter:
         for module in modules:
             self.register(module)
 
+    @staticmethod
+    def _tokenize(raw_input: str) -> list[str]:
+        """Split a raw command line into whitespace-delimited tokens.
+
+        Uses `shlex` in POSIX mode so quoted arguments (e.g. paths
+        containing spaces) are still supported, but with backslash-
+        escape processing disabled. Plain `shlex.split()` treats `\\`
+        as an escape character in POSIX mode, which silently strips
+        every backslash from unquoted Windows paths (e.g.
+        `C:\\Temp\\file.txt` becomes `C:Tempfile.txt`), corrupting the
+        argument before it ever reaches a module like `FileModule`.
+        Disabling `escape` avoids that corruption while keeping quote
+        stripping intact.
+
+        Args:
+            raw_input: The already-stripped raw command line.
+
+        Returns:
+            The list of parsed tokens (possibly empty).
+        """
+        lexer = shlex.shlex(raw_input, posix=True)
+        lexer.whitespace_split = True
+        lexer.escape = ""
+        return list(lexer)
+
     def dispatch(self, raw_input: str) -> CommandResult:
         """Parse and execute a raw command line entered by the user.
 
@@ -117,7 +142,7 @@ class CommandRouter:
             A CommandResult describing the outcome of execution. Returns
             an empty, unsuccessful result for blank input.
         """
-        tokens = shlex.split(raw_input.strip())
+        tokens = self._tokenize(raw_input.strip())
         if not tokens:
             return CommandResult(success=False, message="")
 

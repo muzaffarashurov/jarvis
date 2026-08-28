@@ -438,6 +438,50 @@ browser:
                              # Bounds resource/time usage only; not a
                              # security control.
 
+file:
+  # EP-052 File Automation. Controlled local filesystem automation
+  # (list/exists/stat/read/write/copy/move/mkdir/delete) via the
+  # "file" CommandRouter namespace (see src/skills/files/), built
+  # entirely on the Python standard library (pathlib/shutil,
+  # EP052_DESIGN.md Section 10, Owner Decision D1) -- no new
+  # dependency.
+  #
+  # "enabled" is the master safety gate for the entire namespace
+  # (EP052_DESIGN.md Section 16/20, Owner Decision D2) -- re-checked
+  # on every dispatched "file ..." action, not only at startup.
+  # Defaults to false, matching every other risky-by-nature
+  # capability's own off-by-default precedent (desktop.enabled,
+  # browser.enabled). Even when true, EVERY action -- including
+  # read-only observation -- still requires at least one entry in
+  # "allowed_roots" below; an empty allow-list means "file.enabled:
+  # true" alone permits nothing (Owner Decision D5, the safest
+  # possible default).
+  enabled: false
+
+  # A second, independent gate specifically for destructive actions:
+  # "move", "delete", and overwriting an existing file via "write" or
+  # "copy" (Owner Decision D3). Defaults to false, independently of
+  # "enabled" -- turning on file *observation* (and non-destructive
+  # creation) does not silently also turn on file *deletion*.
+  allow_destructive: false
+
+  # Default-empty allow-list of permitted root directories (Owner
+  # Decisions D4/D5). Every "file" action's resolved, canonicalized
+  # path (Path.resolve(), which follows symlinks/junctions) must be
+  # equal to, or a descendant of, at least one entry here -- otherwise
+  # the action is refused before any filesystem call is made. No
+  # default root is provided; add at least one path explicitly (e.g.
+  # a dedicated Jarvis workspace folder) before any "file" action can
+  # do anything. Do not point this at your whole home directory or
+  # filesystem root.
+  allowed_roots: []
+
+  # Optional deny-list, evaluated after the allow-list (Owner Decision
+  # D4) -- lets an owner exclude a sensitive subpath (e.g. a ".env" or
+  # ".git" directory) within an otherwise-allowed root without
+  # restructuring "allowed_roots" itself. Empty by default.
+  denied_paths: []
+
 api:
   # EP-043 REST API. A local programmatic interface exposing the same
   # CommandRouter every CLI command already dispatches through (see

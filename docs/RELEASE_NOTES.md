@@ -1958,6 +1958,46 @@ recovery point). Full detail: `EP043_STEP4_REPORT.md`.
 
 ---
 
+# EP-052 — File Automation
+
+Status: Released
+
+Highlights:
+
+- Added File Automation: general-purpose file and directory management
+  (list, check existence, inspect metadata, read/write text, copy,
+  move, create a directory, delete) as an explicit, first-class
+  capability -- previously Jarvis could only launch files with the OS
+  default application (EP-003) or write bytes as a side effect of one
+  specific action (EP-050's `desktop screenshot`)
+- CLI integration: file list / exists / stat / read / write / copy /
+  move / mkdir / delete / help
+- Layered security model: disabled by default, an explicit allowed-
+  roots allow-list (empty blocks everything), a separate deny-list for
+  specific paths inside an allowed root, path-traversal and
+  absolute-path rejection, a separate destructive-action permission
+  gating move/delete/overwrite, non-recursive delete only, and
+  UTF-8-only file content
+- A Windows-path-handling defect in the shared command tokenizer
+  (`CommandRouter`) was found and fixed during the Architecture Audit,
+  under an explicit owner decision -- Windows backslash paths are now
+  preserved correctly for every `file` action
+- Invalid configuration disables File Automation for that run (logged)
+  instead of crashing the rest of Jarvis on startup
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed, aside from the owner-authorized `CommandRouter` tokenizer
+fix described above.
+
+No breaking changes.
+
+Validation:
+
+EP052 : 135 passed / 0 failed / 0 skipped
+
 ---
 
 End of document.

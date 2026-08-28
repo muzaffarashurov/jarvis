@@ -50,6 +50,7 @@ import tests.EP048.test_wake_word
 import tests.EP049.test_voice_assistant
 import tests.EP050.test_desktop
 import tests.EP051.test_browser
+import tests.EP052.test_file
 
 class TestModule(CommandModule):
 

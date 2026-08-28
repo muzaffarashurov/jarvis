@@ -10,12 +10,52 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-052 — File Automation
+### EP-053 — Vision Integration
 
 **NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 8
-sequencing, EP-052 (File Automation) is the next Engineering Package
-after EP-051's completion. No design, research, or implementation
-work has begun.
+sequencing, EP-053 (Vision Integration) is the next Engineering
+Package after EP-052's completion. No design, research, or
+implementation work has begun.
+
+### EP-052 — File Automation
+
+STEP 1 (Architecture Discovery, Technology Evaluation & Design), STEP
+2 (Implementation & Testing), STEP 3 (Architecture Audit with one
+narrowly-scoped remediation), and STEP 4 (Finalization) all complete.
+EP-052 is marked COMPLETE with verdict **PASS AFTER REMEDIATION** --
+see `docs/architecture/audits/EP052_ARCHITECTURE_AUDIT.md`. Full
+design, including Owner Decisions D1-D11 (Section 20):
+`docs/architecture/designs/EP052_DESIGN.md`.
+
+Built as a new `file` `CommandModule` (`src/skills/files/skill.py`)
+providing 9 CRUD actions -- `list`, `exists`, `stat`, `read`, `write`,
+`copy`, `move`, `mkdir`, `delete` -- plus `help`, dispatched through
+the *existing*, unmodified `CommandRouter.dispatch()` -- no new
+dispatch mechanism. A new `FileBackend` protocol
+(`src/skills/files/backend.py`) is the only interface `FileModule`
+depends on; `LocalFileBackend` (`src/skills/files/local_backend.py`)
+is the sole real implementation, operating directly on the local
+filesystem behind a layered security model: `file.enabled` (default
+`false`, re-checked on every dispatched action), `file.allow_destructive`
+(gating `move`/`delete`/overwrite separately from non-destructive
+actions), `file.allowed_roots` (an explicit allow-list -- empty blocks
+everything), `file.denied_paths` (excludes specific paths inside an
+allowed root), path-traversal/absolute-path rejection, non-recursive
+`delete`, and UTF-8-only file content.
+
+Owner Decision D11 authorized one narrowly-scoped remediation during
+the STEP 3 Architecture Audit: `src/core/command_router.py`'s command
+tokenizer corrupted Windows-style backslash paths before they reached
+`FileModule`; the minimal fix preserves them. This is the only source
+file EP-052 modified outside `src/skills/files/`,
+`src/bootstrap.py`, and `src/modules/test_module.py`.
+
+Tests: EP-052 135/0/0 (`tests/EP052/test_file.py`) -- protocol
+conformance and argument-shape/gate/path-safety/dispatch tests against
+a `_FakeFileBackend`, plus real CRUD/overwrite/non-recursive-delete/
+UTF-8 behavior against `LocalFileBackend` in a disposable
+`tempfile.TemporaryDirectory()`, never the repository root or an
+operator's home directory.
 
 ### EP-051 — Browser Automation
 

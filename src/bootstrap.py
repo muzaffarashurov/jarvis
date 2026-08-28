@@ -164,6 +164,9 @@ from src.skills.browser.playwright_backend import (
     PlaywrightBrowserBackend,
     PlaywrightBrowserBackendError,
 )
+from src.skills.files.backend import FileBackend
+from src.skills.files.skill import FileModule
+from src.skills.files.local_backend import LocalFileBackend
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -271,6 +274,7 @@ class Bootstrap:
         self._voice_wake_capture: StreamingAudioCapture | None = None
         self._desktop_backend: ComputerUseBackend | None = None
         self._browser_backend: BrowserBackend | None = None
+        self._file_backend: FileBackend | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -1707,6 +1711,34 @@ class Bootstrap:
         self._browser_backend = browser_backend
         router.register(BrowserModule(config=config, backend=browser_backend))
 
+        # EP-052 File Automation. Controlled local filesystem
+        # automation (list/exists/stat/read/write/copy/move/mkdir/
+        # delete) via FileBackend (src/skills/files/backend.py),
+        # dispatched through the same, unmodified
+        # CommandRouter.dispatch() every other skill already uses
+        # (EP052_DESIGN.md Section 9, Owner Decision D9) -- no new
+        # dispatch mechanism, and Tool Engine is untouched.
+        #
+        # Mirrors DesktopModule/BrowserModule's wiring exactly:
+        # FileModule is registered unconditionally when constructed --
+        # 'file.enabled' (default false) is re-checked on every
+        # dispatched action inside FileModule itself (EP052_DESIGN.md
+        # Section 16/20, Owner Decision D2), not only at registration
+        # time. The *backend* is still only constructed when the flag
+        # is true, matching every other subsystem's "don't do the
+        # work if it's off" convention. Unlike WindowsComputerUseBackend/
+        # PlaywrightBrowserBackend, LocalFileBackend has no real
+        # construction-time dependency (no display, no browser
+        # binary, no new third-party import, Owner Decision D1) so no
+        # construction-failure branch is needed here.
+        if bool(config.get("file.enabled", False)):
+            file_backend: FileBackend | None = LocalFileBackend()
+        else:
+            logger.info("File Automation disabled ('file.enabled: false').")
+            file_backend = None
+        self._file_backend = file_backend
+        router.register(FileModule(config=config, backend=file_backend))
+
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
 
@@ -2510,3 +2542,16 @@ class Bootstrap:
             action in either case (EP051_DESIGN.md Section 10/14).
         """
         return self._browser_backend
+
+    @property
+    def file_backend(self) -> FileBackend | None:
+        """Return the FileBackend built for EP-052, if available.
+
+        Returns:
+            The `LocalFileBackend` instance, or None if
+            'file.enabled' is false -- `FileModule` is registered
+            with `CommandRouter` regardless, and reports a clear
+            failure message for every action in either case
+            (EP052_DESIGN.md Section 10/16/20).
+        """
+        return self._file_backend

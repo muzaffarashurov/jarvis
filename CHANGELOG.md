@@ -6,6 +6,115 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.11-ep052
+
+Released: 2026-08-28
+
+Status: EP-052 COMPLETE (STEP 1 Architecture Discovery/Design, STEP 2
+Implementation & Testing, STEP 3 Architecture Audit with one
+narrowly-scoped remediation, STEP 4 Finalization all complete)
+
+### Added
+
+- src/skills/files/backend.py: `FileBackend` protocol -- the
+  file-automation contract (`list`, `exists`, `stat`, `read`, `write`,
+  `copy`, `move`, `mkdir`, `delete`), mirroring the
+  `ComputerUseBackend`/`BrowserBackend` pattern EP-050/EP-051 already
+  established
+- src/skills/files/local_backend.py: `LocalFileBackend`, the sole real
+  implementation -- direct local-filesystem operations gated by a
+  layered security model (enabled flag, destructive-action
+  permission, allowed-roots allow-list, denied-paths deny-list, path
+  traversal / absolute-path protection, source/destination
+  validation, overwrite protection, non-recursive delete, UTF-8-only
+  file content)
+- src/skills/files/skill.py: `FileModule`, the \"file\" `CommandModule`
+  namespace -- `list`, `exists`, `stat`, `read`, `write`, `copy`,
+  `move`, `mkdir`, `delete`, `help` -- dispatched through the
+  existing, unmodified `CommandRouter.dispatch()`, exactly as every
+  prior skill (`desktop`, `browser`, ...) already is
+- config/config.yaml: new `file` section (`enabled`,
+  `allow_destructive`, `allowed_roots`, `denied_paths`)
+- tests/EP052/test_file.py: EP-052 test suite (`NAME = "EP052"`) --
+  protocol conformance, argument-shape/gate/path-safety/dispatch
+  tests against a `_FakeFileBackend`, and real-filesystem CRUD/
+  overwrite/non-recursive-delete/UTF-8 behavior against
+  `LocalFileBackend` in a disposable `tempfile.TemporaryDirectory()`
+  (never the repository root or an operator's home directory)
+- docs/architecture/designs/EP052_DESIGN.md: full design document,
+  including Owner Decisions D1-D11 (Section 20) and D11's STEP 3
+  Windows-path-tokenization remediation record
+- docs/architecture/audits/EP052_ARCHITECTURE_AUDIT.md: EP-052
+  Architecture Audit, Final Verdict PASS AFTER REMEDIATION
+
+### Changed
+
+- src/core/command_router.py: minimal, owner-authorized fix (Owner
+  Decision D11) to the command tokenizer so Windows-style backslash
+  paths passed to `file` actions are preserved rather than corrupted.
+  No other `CommandRouter` behavior changed
+- src/bootstrap.py: constructs `LocalFileBackend`/`FileModule` after
+  the existing EP-051 wiring, gated by `file.enabled` (default
+  `false`), wrapped so invalid `file.*` configuration disables the
+  subsystem for that run (logged) instead of crashing startup.
+  `file` namespace registers even when disabled, reporting a disabled
+  message for every action, matching every other skill's convention
+- src/modules/test_module.py: registers the EP-052 test suite so
+  `test EP052` and `test all` pick it up
+
+### Security
+
+- `file.enabled` defaults to `false` and is re-checked on every
+  dispatched action, not only at registration
+- `file.allow_destructive` gates `move`/`delete`/overwriting `write`/
+  `copy` separately from read and non-destructive-write actions
+- `file.allowed_roots` is an explicit allow-list; an empty list blocks
+  every action. `file.denied_paths` further excludes specific paths
+  inside an allowed root
+- Path traversal and absolute-path escapes are rejected before any
+  backend call; destructive permission never bypasses path-safety
+  checks
+- `delete` is non-recursive only -- a non-empty directory is refused
+- File content is UTF-8-only; a non-UTF-8 read/write is refused
+  cleanly rather than corrupting or silently transcoding data
+
+### Validation
+
+```
+EP052 : 135 passed / 0 failed / 0 skipped
+```
+
+Focused regression (EP-050, EP-051, and prior integration EPs)
+unchanged. Two pre-existing, sandbox-only environment failures
+(`sounddevice`/PortAudio unavailable in this Linux sandbox, affecting
+EP-046/EP-048's own suites) remain documented as unrelated to and
+unmodified by EP-052, consistent with the same condition already
+disclosed against EP-049/EP-051 above.
+
+### STEP 3 -- Architecture Audit / Remediation
+
+Final Verdict: EP-052 STEP 3 -- PASS AFTER REMEDIATION. One
+narrowly-scoped defect was found and fixed: `CommandRouter`'s command
+tokenizer corrupted Windows-style backslash paths before they reached
+`FileModule`. Owner Decision D11 explicitly authorized the minimal
+`src/core/command_router.py` fix described above. No other defect,
+security-gate weakening, or scope expansion was introduced during
+remediation. See
+`docs/architecture/audits/EP052_ARCHITECTURE_AUDIT.md` for the full
+audit.
+
+### STEP 4 -- Finalization
+
+Final EP-052 file set, Owner Decisions D1-D11, CRUD action set, and
+security-gate set re-verified directly against the live
+implementation. EP-052 test suite re-run: 135/135, unchanged from
+STEP 3. No source, test, or configuration file was modified during
+STEP 4.
+
+**EP-052 is COMPLETE.**
+
+---
+
 ## v0.1.10-ep043
 
 Released: 2026-08-20

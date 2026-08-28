@@ -122,6 +122,45 @@ Completed sub-packages:
 
 ## Current
 
+EP-052 File Automation — **COMPLETE** (STEP 1 Architecture Discovery,
+Technology Evaluation & Design, STEP 2 Implementation & Testing,
+STEP 3 Architecture Audit, STEP 4 Finalization all complete -- see
+docs/architecture/designs/EP052_DESIGN.md (including its Section 20
+owner-decision record, D1-D11) and
+docs/architecture/audits/EP052_ARCHITECTURE_AUDIT.md. Verdict:
+**PASS AFTER REMEDIATION** (one narrowly-scoped Owner-Decision-D11
+remediation to `src/core/command_router.py`'s command tokenizer,
+fixing Windows backslash-path corruption for `file` actions -- no
+other defect, security-gate weakening, or scope expansion). Built as
+a new `file` `CommandModule` (`src/skills/files/skill.py`) providing
+9 CRUD actions -- `list`, `exists`, `stat`, `read`, `write`, `copy`,
+`move`, `mkdir`, `delete` -- plus `help`, dispatched through the
+*existing*, unmodified `CommandRouter.dispatch()`, exactly as every
+prior skill (`desktop`, `browser`, ...) already is: no second dispatch
+mechanism. A new `FileBackend` protocol (`src/skills/files/backend.py`)
+defines the file-automation contract; `LocalFileBackend`
+(`src/skills/files/local_backend.py`) is the sole real implementation,
+gated by a layered security model -- `file.enabled` (default `false`,
+re-checked on every dispatched action), `file.allow_destructive`
+(separately gating `move`/`delete`/overwrite), `file.allowed_roots`
+(an explicit allow-list; empty blocks everything), `file.denied_paths`
+(excludes specific paths inside an allowed root), path-traversal/
+absolute-path rejection, non-recursive `delete`, and UTF-8-only file
+content. Tests: EP-052 135/0/0, covering protocol conformance and
+argument-shape/gate/path-safety/dispatch behavior against a
+`_FakeFileBackend`, plus real CRUD/overwrite/non-recursive-delete/
+UTF-8 behavior against `LocalFileBackend` in a disposable
+`tempfile.TemporaryDirectory()` -- never the repository root or an
+operator's home directory. `src/core/tool/`, Agent Framework, Planning
+Engine, Plan Execution Engine, `src/skills/browser/` (EP-051), and
+`src/skills/desktop/` (EP-050) are all confirmed unmodified by
+EP-052, aside from the one owner-authorized `CommandRouter` line
+described above.
+
+**Next Engineering Package: EP-053 Vision Integration — NOT
+STARTED.** No EP-053 design, research, or implementation work has
+begun.
+
 EP-051 Browser Automation — **COMPLETE** (STEP 1 Architecture
 Discovery, Technology Evaluation & Design, STEP 2 Implementation &
 Testing, STEP 3 Architecture Audit, STEP 4 Documentation Completion
@@ -402,9 +441,6 @@ docs/architecture/audits/EP044_AUDIT.md.) EP-043 REST API remains
 EP-044/EP-045/EP-046/EP-047/EP-048/EP-049 -- see
 docs/architecture/designs/EP043_DESIGN.md and
 docs/RELEASE_NOTES.md.)
-
-**Next Engineering Package: EP-052 File Automation — NOT STARTED.**
-No EP-052 design, research, or implementation work has begun.
 
 ---
 

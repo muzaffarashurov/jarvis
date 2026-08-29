@@ -482,6 +482,59 @@ file:
   # restructuring "allowed_roots" itself. Empty by default.
   denied_paths: []
 
+vision:
+  # EP-053 Vision Integration. Local, read-only image interpretation
+  # (metadata via "vision info", OCR text extraction via "vision ocr")
+  # via the "vision" CommandRouter namespace (see src/skills/vision/),
+  # built on Pillow (image decoding) and pytesseract (OCR, wraps an
+  # external Tesseract binary -- see requirements.txt for the
+  # one-time install step; EP053_DESIGN.md Section 10, Owner
+  # Decisions D1/D2/D7).
+  #
+  # "enabled" is the master safety gate for the entire namespace
+  # (EP053_DESIGN.md Section 11/20, Owner Decision D1) -- re-checked
+  # on every dispatched "vision ..." action, not only at startup.
+  # Defaults to false, matching every other risky-by-nature
+  # capability's own off-by-default precedent (desktop.enabled,
+  # browser.enabled, file.enabled). Even when true, EVERY action
+  # still requires at least one entry in "allowed_roots" below -- an
+  # empty allow-list means "vision.enabled: true" alone permits
+  # nothing (mirrors file.allowed_roots' own default-empty, safest
+  # possible default). v1 is local-only (Owner Decision D1) -- no
+  # image byte or path ever leaves this machine; there is no
+  # AI-provider-based "vision describe" action in v1.
+  enabled: false
+
+  # Default-empty allow-list of permitted root directories (Owner
+  # Decision D4), independently configured from "file.allowed_roots"
+  # -- VisionModule has no runtime dependency on FileModule/
+  # FileBackend (EP053_DESIGN.md Section 7/20, avoiding hidden
+  # coupling between unrelated capabilities). Every "vision" action's
+  # resolved, canonicalized path (Path.resolve(), which follows
+  # symlinks/junctions) must be equal to, or a descendant of, at
+  # least one entry here -- otherwise the action is refused before
+  # any image is opened. No default root is provided; add at least
+  # one path explicitly (e.g. wherever "desktop screenshot"/"browser
+  # screenshot" write their output) before any "vision" action can do
+  # anything. Do not point this at your whole home directory or
+  # filesystem root.
+  allowed_roots: []
+
+  # Resource-usage limits only, not security controls (Owner Decision
+  # D5) -- bound the memory/CPU an oversized or maliciously-crafted
+  # image (a "decompression bomb") could consume before "vision
+  # info"/"vision ocr" refuses to process it. Mirrors
+  # "desktop.screenshot.max_dimension"'s own existing precedent.
+  max_file_size_mb: 25      # Refuses to open any image file larger
+                             # than this, in megabytes, before
+                             # attempting to decode it.
+  max_dimension: 8000        # Caps the longest side (in pixels) of
+                              # any image "vision" will decode --
+                              # larger images are refused, never
+                              # silently downscaled (unlike "desktop
+                              # screenshot", which is the producer,
+                              # not the interpreter, of an image).
+
 api:
   # EP-043 REST API. A local programmatic interface exposing the same
   # CommandRouter every CLI command already dispatches through (see

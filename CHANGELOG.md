@@ -6,6 +6,126 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.12-ep053
+
+Released: 2026-08-29
+
+Status: EP-053 COMPLETE / PASSED WITH FINDINGS (STEP 1 Architecture
+Discovery/Design, STEP 2 Implementation & Testing, STEP 3 Architecture
+Audit, STEP 4 Finalization all complete). STEP 3's final verdict is
+**AUDIT PASSED WITH FINDINGS** -- one non-blocking MEDIUM finding is
+documented and was not fixed; this is not a clean, zero-finding pass.
+
+### Added
+
+- src/skills/vision/backend.py: `VisionBackend` protocol -- the
+  vision-interpretation contract (`image_info`, `extract_text`),
+  mirroring the `ComputerUseBackend`/`BrowserBackend`/`FileBackend`
+  pattern EP-050/EP-051/EP-052 already established
+- src/skills/vision/local_backend.py: `LocalVisionBackend`, the sole
+  real implementation -- local, read-only image interpretation built
+  on Pillow (image decoding) and `pytesseract` (OCR, wrapping an
+  external Tesseract binary), gated by resource limits
+  (`vision.max_file_size_mb`, `vision.max_dimension`). Local-only:
+  v1 contains no AI-provider/network path
+- src/skills/vision/skill.py: `VisionModule`, the "vision"
+  `CommandModule` namespace -- `info`, `ocr`, `help` -- dispatched
+  through the existing, unmodified `CommandRouter.dispatch()`, exactly
+  as every prior skill (`desktop`, `browser`, `file`, ...) already is
+- config/config.yaml: new `vision` section (`enabled`,
+  `allowed_roots`, `max_file_size_mb`, `max_dimension`) -- independent
+  of `file.allowed_roots`, no runtime coupling to `FileBackend`
+- requirements.txt: `Pillow==12.1.1`, `pytesseract==0.3.13` (plus a
+  documented one-time external Tesseract system-binary install step)
+- tests/EP053/test_vision.py: EP-053 test suite (`NAME = "EP053"`) --
+  protocol conformance, argument-shape/gate/path-safety/dispatch
+  tests against a `_FakeVisionBackend`, and real-Pillow filesystem/
+  image behavior (including resource-limit enforcement) against
+  `LocalVisionBackend`
+- tests/EP053/test_vision_ocr_integration.py: a separate,
+  intentionally unregistered real-Tesseract OCR check -- never
+  imported by `test_vision.py`, `test_module.py`, or `TestRegistry`
+- docs/architecture/designs/EP053_DESIGN.md: full design document,
+  including Owner Decisions D1-D10 (Section 20)
+- docs/architecture/audits/EP053_ARCHITECTURE_AUDIT.md: EP-053
+  Architecture Audit, Final Verdict AUDIT PASSED WITH FINDINGS
+
+### Changed
+
+- src/bootstrap.py: constructs `LocalVisionBackend`/`VisionModule`
+  after the existing EP-052 wiring, gated by `vision.enabled` (default
+  `false`). `vision` namespace registers even when disabled, reporting
+  a disabled message for every action, matching every other skill's
+  convention
+- src/modules/test_module.py: registers the EP-053 test suite so
+  `test EP053` and `test all` pick it up
+
+### Security
+
+- `vision.enabled` defaults to `false` and is re-checked on every
+  dispatched action, not only at registration
+- `vision.allowed_roots` is an explicit, independently-configured
+  allow-list; an empty list blocks every action -- no runtime
+  dependency on `file.allowed_roots`/`FileBackend`
+- Path traversal, absolute-path escapes, symlink-escape attempts, and
+  malformed/NUL-byte paths are all rejected before any backend call
+  (independently re-verified during the STEP 3 audit)
+- `vision.max_file_size_mb`/`vision.max_dimension` bound resource
+  consumption; both are genuinely enforced and cannot be bypassed
+  through an alternate command path
+- v1 is local-only and CPU-only: no image byte or path ever leaves the
+  machine, and no GPU dependency was introduced
+- `image_info` never requires the Tesseract binary (split
+  availability); only `extract_text`/`vision ocr` does
+
+### Validation
+
+```
+EP053 : 58 passed / 0 failed / 0 skipped
+test all : 6263 passed / 2 failed / 3 skipped
+```
+
+The 2 failures and 3 skips are pre-existing EP-046/EP-048/EP-049
+voice-stack/sandbox limitations (`openwakeword`/`tflite-runtime`
+having no Linux wheel in this environment, and real-hardware-only
+scenarios already documented by their own design documents as
+skippable), independently re-traced to their root causes during the
+STEP 3 audit and reconfirmed unrelated to and unmodified by EP-053.
+
+### STEP 3 -- Architecture Audit
+
+Final Verdict: EP-053 STEP 3 -- **AUDIT PASSED WITH FINDINGS**. All
+ten Owner Decisions (D1-D10) confirmed correctly implemented; all
+eight critical security questions resolved safely (NO); file scope
+confirmed to exactly match the approved STEP 2 scope, with zero
+unauthorized changes to `src/core/command_router.py`, `src/core/
+tool/`, `src/core/ai/provider.py`, or `src/skills/desktop/`/
+`browser/`/`files/`. One non-blocking MEDIUM finding was identified:
+`LocalVisionBackend` enforces `max_dimension` after full image decode
+rather than before, contrary to `EP053_DESIGN.md`'s own stated D5
+intent -- the limit is still always enforced and no unsafe result is
+ever returned. See
+`docs/architecture/audits/EP053_ARCHITECTURE_AUDIT.md` for the full
+audit, including two independent mutation tests and live
+security probes performed against the real, unmutated code.
+
+### STEP 4 -- Finalization
+
+Per explicit owner instruction, the STEP 3 MEDIUM finding was **not**
+remediated during STEP 4 (no approved remediation exists for it, and
+none was authorized) -- it remains documented and non-blocking, exactly
+as the audit recorded it. Release/project documentation
+(`CHANGELOG.md`, `docs/BACKLOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/architecture/JARVIS_ROADMAP.md`) synchronized to mark EP-053
+COMPLETE / PASSED WITH FINDINGS and EP-054 (Self Reflection) as the
+next, not-started Engineering Package. No source, test, configuration,
+or dependency file was modified during STEP 4.
+
+**EP-053 is COMPLETE (PASSED WITH FINDINGS -- one non-blocking MEDIUM
+finding, documented, not fixed).**
+
+---
+
 ## v0.1.11-ep052
 
 Released: 2026-08-28

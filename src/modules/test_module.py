@@ -51,6 +51,7 @@ import tests.EP049.test_voice_assistant
 import tests.EP050.test_desktop
 import tests.EP051.test_browser
 import tests.EP052.test_file
+import tests.EP053.test_vision
 
 class TestModule(CommandModule):
 

@@ -167,6 +167,9 @@ from src.skills.browser.playwright_backend import (
 from src.skills.files.backend import FileBackend
 from src.skills.files.skill import FileModule
 from src.skills.files.local_backend import LocalFileBackend
+from src.skills.vision.backend import VisionBackend
+from src.skills.vision.skill import VisionModule
+from src.skills.vision.local_backend import LocalVisionBackend
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -275,6 +278,7 @@ class Bootstrap:
         self._desktop_backend: ComputerUseBackend | None = None
         self._browser_backend: BrowserBackend | None = None
         self._file_backend: FileBackend | None = None
+        self._vision_backend: VisionBackend | None = None
         colorama_init(autoreset=True)
 
     def initialize(self) -> Orchestrator:
@@ -1739,6 +1743,37 @@ class Bootstrap:
         self._file_backend = file_backend
         router.register(FileModule(config=config, backend=file_backend))
 
+        # EP-053 Vision Integration. Local, read-only image
+        # interpretation (metadata + OCR text extraction) via
+        # VisionBackend (src/skills/vision/backend.py), dispatched
+        # through the same, unmodified CommandRouter.dispatch() every
+        # other skill already uses (EP053_DESIGN.md Section 9, Owner
+        # Decision D9) -- no new dispatch mechanism, and Tool Engine
+        # is untouched.
+        #
+        # Mirrors DesktopModule/BrowserModule/FileModule's wiring
+        # exactly: VisionModule is registered unconditionally when
+        # constructed -- 'vision.enabled' (default false) is
+        # re-checked on every dispatched action inside VisionModule
+        # itself (EP053_DESIGN.md Section 11/20, Owner Decision D1),
+        # not only at registration time. The *backend* is still only
+        # constructed when the flag is true, matching every other
+        # subsystem's "don't do the work if it's off" convention.
+        # Like LocalFileBackend, LocalVisionBackend has no real
+        # construction-time dependency (no display, no external
+        # binary check at construction -- the Tesseract OCR binary is
+        # only ever invoked lazily, per 'vision ocr' call, Owner
+        # Decision D8) so no construction-failure branch is needed
+        # here. v1 is local-only (Owner Decision D1): no AI-provider/
+        # network path exists in this wiring.
+        if bool(config.get("vision.enabled", False)):
+            vision_backend: VisionBackend | None = LocalVisionBackend(config=config)
+        else:
+            logger.info("Vision Integration disabled ('vision.enabled: false').")
+            vision_backend = None
+        self._vision_backend = vision_backend
+        router.register(VisionModule(config=config, backend=vision_backend))
+
         invoice_service = InvoiceService(config=config, execution_engine=execution_engine)
         router.register(InvoiceModule(invoice_service))
 
@@ -2555,3 +2590,16 @@ class Bootstrap:
             (EP052_DESIGN.md Section 10/16/20).
         """
         return self._file_backend
+
+    @property
+    def vision_backend(self) -> VisionBackend | None:
+        """Return the VisionBackend built for EP-053, if available.
+
+        Returns:
+            The `LocalVisionBackend` instance, or None if
+            'vision.enabled' is false -- `VisionModule` is registered
+            with `CommandRouter` regardless, and reports a clear
+            failure message for every action in either case
+            (EP053_DESIGN.md Section 11/20).
+        """
+        return self._vision_backend

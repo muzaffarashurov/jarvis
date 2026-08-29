@@ -10,12 +10,91 @@ Status: Active
 
 ## Next Engineering Package
 
+### EP-054 — Self Reflection
+
+**NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 9
+sequencing, EP-054 (Self Reflection) is the next Engineering Package
+after EP-053's completion. No design, research, or implementation
+work has begun.
+
 ### EP-053 — Vision Integration
 
-**NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 8
-sequencing, EP-053 (Vision Integration) is the next Engineering
-Package after EP-052's completion. No design, research, or
-implementation work has begun.
+STEP 1 (Architecture Discovery, Technology Evaluation & Design), STEP
+2 (Implementation & Testing), STEP 3 (Architecture Audit), and STEP 4
+(Finalization) all complete. EP-053 is marked **COMPLETE / PASSED
+WITH FINDINGS** -- STEP 3's final verdict is **AUDIT PASSED WITH
+FINDINGS** (one non-blocking MEDIUM finding, documented and not
+fixed -- see below), not a clean, zero-finding pass -- see
+`docs/architecture/audits/EP053_ARCHITECTURE_AUDIT.md`. Full design,
+including Owner Decisions D1-D10 (Section 20):
+`docs/architecture/designs/EP053_DESIGN.md`.
+
+Built as a new `vision` `CommandModule` (`src/skills/vision/skill.py`)
+providing local, read-only image interpretation -- `info` (image
+metadata: width, height, format, color mode, file size) and `ocr`
+(text extraction) -- plus `help`, dispatched through the *existing*,
+unmodified `CommandRouter.dispatch()` -- no new dispatch mechanism, no
+Tool Engine change. A new `VisionBackend` protocol
+(`src/skills/vision/backend.py`) is the only interface `VisionModule`
+depends on; `LocalVisionBackend` (`src/skills/vision/local_backend.py`)
+is the sole real implementation, built on Pillow (image decoding) and
+`pytesseract` (OCR, wrapping an external Tesseract binary). v1 is
+local-only and CPU-only: no AI-provider/network path exists anywhere
+in `src/skills/vision/`, and `src/core/ai/provider.py` is entirely
+unmodified. Gated by `vision.enabled` (default `false`, re-checked on
+every dispatched action) and an independent `vision.allowed_roots`
+allow-list (empty blocks everything; no runtime coupling to
+`file.allowed_roots`/`FileBackend`), plus resource limits
+(`vision.max_file_size_mb`, `vision.max_dimension`) enforced inside
+`LocalVisionBackend`. `info` never depends on the Tesseract binary
+being installed (split availability, Owner Decision D8); only `ocr`
+does.
+
+Owner Decisions D1-D10 are all confirmed correctly implemented:
+local-only scope/no AI-provider path (D1), `pytesseract` OCR engine
+(D2), path-only image input (D3), independent path-safety model (D4),
+`max_file_size_mb`/`max_dimension` resource limits (D5), CPU-only
+operation (D6), `Pillow==12.1.1`/`pytesseract==0.3.13` dependency
+approval (D7), split availability (D8), `CommandRouter` dispatch, no
+Tool Engine redesign (D9), and fake-backend + real-Pillow testing with
+real-Tesseract integration handled separately (D10).
+
+Tests: **EP-053 58 passed / 0 failed / 0 skipped**, covering protocol
+conformance and argument-shape/gate/path-safety/dispatch behavior
+against a `_FakeVisionBackend`, plus real-Pillow filesystem/image
+behavior (including resource-limit enforcement) against
+`LocalVisionBackend`. A separate, intentionally unregistered
+real-Tesseract OCR check (`tests/EP053/test_vision_ocr_integration.py`)
+independently verified genuine end-to-end text recognition against a
+freshly rendered image -- it is never imported by `test_vision.py`,
+`test_module.py`, or `TestRegistry`.
+
+Full regression: **6263 passed / 2 failed / 3 skipped**. The 2
+failures and 3 skips are pre-existing EP-046/EP-048/EP-049
+voice-stack/sandbox limitations (`openwakeword`/`tflite-runtime`
+having no Linux wheel in this environment, and real-hardware-only
+scenarios each EP's own design already documented as skippable),
+independently re-traced to their root causes during the STEP 3 audit
+and confirmed unrelated to, and unmodified by, EP-053.
+
+**STEP 3 finding (MEDIUM, non-blocking, documented, not fixed):**
+`LocalVisionBackend` currently enforces its `max_dimension` resource
+limit *after* Pillow fully decodes the image (`image.load()`), rather
+than before, as `EP053_DESIGN.md`'s own Owner Decision D5 specified.
+The limit is still always enforced, and no oversized result is ever
+returned to a caller -- the finding is a decode-cost-ordering
+inefficiency, not a path-safety bypass, a limit that fails to apply,
+or an unsafe result. Per the STEP 3 audit's own "record, do not fix"
+rule, and per this STEP 4's explicit instruction not to modify source
+code without an already-documented, approved remediation, no code
+change was made to address this finding during STEP 4. See
+`docs/architecture/audits/EP053_ARCHITECTURE_AUDIT.md` Section 15,
+Finding 1, for full detail and evidence.
+
+`src/core/command_router.py`, `src/core/tool/`,
+`src/core/ai/provider.py`, `src/skills/desktop/`,
+`src/skills/browser/`, and `src/skills/files/` are all confirmed
+unmodified by EP-053.
 
 ### EP-052 — File Automation
 
@@ -48,6 +127,7 @@ the STEP 3 Architecture Audit: `src/core/command_router.py`'s command
 tokenizer corrupted Windows-style backslash paths before they reached
 `FileModule`; the minimal fix preserves them. This is the only source
 file EP-052 modified outside `src/skills/files/`,
+
 `src/bootstrap.py`, and `src/modules/test_module.py`.
 
 Tests: EP-052 135/0/0 (`tests/EP052/test_file.py`) -- protocol

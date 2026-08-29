@@ -50,6 +50,22 @@ pandas
 # through this file.
 playwright==1.62.0
 
+# EP-053 Vision Integration. Pillow decodes image files for both
+# 'vision info' (metadata) and 'vision ocr' (OCR); pytesseract wraps
+# the external Tesseract OCR binary for 'vision ocr' only
+# (EP053_DESIGN.md Section 10, Owner Decisions D1/D2/D7). v1 is
+# local-only -- no AI-provider/network dependency of any kind. After
+# 'pip install -r requirements.txt', a system Tesseract OCR binary
+# must also be installed and on PATH for 'vision ocr' to work (e.g.
+# 'apt-get install tesseract-ocr' on Debian/Ubuntu, or the official
+# installer on Windows/macOS) -- this is a one-time setup step, not
+# expressible purely through this file, mirroring 'playwright install
+# chromium''s own precedent above. 'vision info' has no such
+# dependency and works once Pillow alone is installed (Owner Decision
+# D8 -- split availability).
+Pillow==12.1.1
+pytesseract==0.3.13
+
 pyautogui
 
 psutil

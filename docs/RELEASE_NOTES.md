@@ -2000,4 +2000,60 @@ EP052 : 135 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-053 — Vision Integration
+
+Status: Released (PASSED WITH FINDINGS -- one non-blocking finding
+documented, not fixed; see "Known limitations" below)
+
+Highlights:
+
+- Added Vision Integration: local, read-only image interpretation --
+  image metadata (dimensions, format, color mode, file size) and
+  OCR text extraction -- as an explicit, first-class capability --
+  previously Jarvis could capture a screenshot (EP-050/EP-051) but had
+  no way to look at what was inside one
+- CLI integration: vision info / ocr / help
+- Local-only, CPU-only v1: built on Pillow (image decoding) and
+  `pytesseract` (OCR, via an external Tesseract binary) -- no image
+  byte or path is ever sent to an AI provider or any other network
+  destination
+- Layered security model: disabled by default, an explicit,
+  independently-configured allowed-roots allow-list (empty blocks
+  everything, no coupling to File Automation's own allow-list),
+  path-traversal/absolute-path/symlink-escape rejection, and
+  configurable file-size/dimension resource limits
+- `vision info` works without the Tesseract OCR engine installed;
+  only `vision ocr` requires it
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed. `src/core/command_router.py`, `src/core/tool/`, `src/core/
+ai/provider.py`, and `src/skills/desktop/`/`browser/`/`files/` are
+all unmodified.
+
+No breaking changes.
+
+Known limitations:
+
+- `LocalVisionBackend` currently enforces its configured
+  `max_dimension` resource limit *after* the image has already been
+  fully decoded, rather than before -- a documented, non-blocking
+  finding from the STEP 3 Architecture Audit. The limit is still
+  always enforced and no oversized result is ever returned; the
+  practical effect is that an oversized-dimension image is
+  unnecessarily fully decoded immediately before being rejected. See
+  `docs/architecture/audits/EP053_ARCHITECTURE_AUDIT.md` Section 15,
+  Finding 1, for full detail. This was not fixed during STEP 4, per
+  the audit's own "document, do not fix" rule.
+- No AI-provider-based ("what does this image show") semantic
+  description capability -- v1 is local OCR/metadata only
+
+Validation:
+
+EP053 : 58 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

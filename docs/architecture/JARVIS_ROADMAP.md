@@ -122,6 +122,67 @@ Completed sub-packages:
 
 ## Current
 
+EP-053 Vision Integration — **COMPLETE** (STEP 1 Architecture
+Discovery, Technology Evaluation & Design, STEP 2 Implementation &
+Testing, STEP 3 Architecture Audit, STEP 4 Finalization all complete
+-- see docs/architecture/designs/EP053_DESIGN.md (including its
+Section 20 owner-decision record, D1-D10) and
+docs/architecture/audits/EP053_ARCHITECTURE_AUDIT.md. **Final Verdict:
+STEP 3 — AUDIT PASSED WITH FINDINGS** (one non-blocking MEDIUM
+finding, documented and not fixed during STEP 4 -- see below). Built
+as a new `vision` `CommandModule` (`src/skills/vision/skill.py`)
+providing local, read-only image interpretation -- `info` (image
+metadata: width, height, format, color mode, file size) and `ocr`
+(text extraction) -- plus `help`, dispatched through the *existing*,
+unmodified `CommandRouter.dispatch()`, exactly as every prior skill
+(`desktop`, `browser`, `file`, ...) already is: no second dispatch
+mechanism, no change to Tool Engine. A new `VisionBackend` protocol
+(`src/skills/vision/backend.py`) defines the vision-interpretation
+contract; `LocalVisionBackend` (`src/skills/vision/local_backend.py`)
+is the sole real implementation, built on Pillow (image decoding) and
+`pytesseract` (OCR, wrapping an external Tesseract binary) -- v1 is
+local-only: no AI-provider/network path exists, and `src/core/ai/
+provider.py` is entirely unmodified. Gated by `vision.enabled`
+(default `false`, re-checked on every dispatched action) and an
+independent `vision.allowed_roots` allow-list (empty blocks
+everything; no runtime coupling to `file.allowed_roots` or
+`FileBackend`), plus resource limits (`vision.max_file_size_mb`,
+`vision.max_dimension`) enforced inside `LocalVisionBackend`. `info`
+never depends on the Tesseract binary being installed (split
+availability); only `ocr` does. Owner Decisions D1-D10 (local-only
+scope, `pytesseract` OCR engine, path-only input, independent
+path-safety model, resource limits, CPU-only, dependency approval,
+split availability, `CommandRouter` dispatch, fake-backend +
+real-Pillow test strategy) are all confirmed correctly implemented.
+Tests: EP-053 58/0/0, covering protocol conformance, argument-shape/
+gate/path-safety/dispatch behavior against a `_FakeVisionBackend`,
+and real-Pillow filesystem/image behavior (including resource-limit
+enforcement) against `LocalVisionBackend`; a separate, intentionally
+unregistered real-Tesseract OCR check
+(`tests/EP053/test_vision_ocr_integration.py`) independently verified
+genuine end-to-end text recognition. Full regression: 6263/2/3 --
+the 2 failures and 3 skips are pre-existing EP-046/EP-048/EP-049
+voice-stack/sandbox limitations (`openwakeword`/`tflite-runtime`
+having no Linux wheel in this environment, and real-hardware-only
+scenarios already documented as skippable by their own design
+documents), independently reproduced and confirmed unrelated to
+EP-053. **STEP 3 finding (MEDIUM, non-blocking, not fixed):**
+`LocalVisionBackend` currently enforces its `max_dimension` resource
+limit *after* Pillow fully decodes the image, rather than before, as
+`EP053_DESIGN.md`'s own Owner Decision D5 specified -- the limit is
+still always enforced and no oversized result is ever returned, but
+an oversized-dimension image is unnecessarily fully decoded before
+being rejected. This is documented, not remediated, per the STEP 3
+audit's "record, do not fix" instruction; see
+`docs/architecture/audits/EP053_ARCHITECTURE_AUDIT.md` Section 15,
+Finding 1 for full detail. `src/core/command_router.py`,
+`src/core/tool/`, `src/core/ai/provider.py`, `src/skills/desktop/`,
+`src/skills/browser/`, and `src/skills/files/` are all confirmed
+unmodified by EP-053.
+
+**Next Engineering Package: EP-054 Self Reflection — NOT STARTED.**
+No EP-054 design, research, or implementation work has begun.
+
 EP-052 File Automation — **COMPLETE** (STEP 1 Architecture Discovery,
 Technology Evaluation & Design, STEP 2 Implementation & Testing,
 STEP 3 Architecture Audit, STEP 4 Finalization all complete -- see
@@ -157,12 +218,9 @@ Engine, Plan Execution Engine, `src/skills/browser/` (EP-051), and
 EP-052, aside from the one owner-authorized `CommandRouter` line
 described above.
 
-**Next Engineering Package: EP-053 Vision Integration — NOT
-STARTED.** No EP-053 design, research, or implementation work has
-begun.
-
 EP-051 Browser Automation — **COMPLETE** (STEP 1 Architecture
 Discovery, Technology Evaluation & Design, STEP 2 Implementation &
+
 Testing, STEP 3 Architecture Audit, STEP 4 Documentation Completion
 all complete -- see docs/architecture/designs/EP051_DESIGN.md
 (including its Section 21 owner-decision record, D1-D12) and

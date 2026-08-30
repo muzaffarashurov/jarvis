@@ -2124,4 +2124,66 @@ EP054 : 76 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-055 — Prompt Optimizer
+
+Status: Released (PASS AFTER REMEDIATION -- two non-blocking findings
+identified during the architecture audit and fixed before release;
+see "Known limitations" below, now empty)
+
+A note on scope: like EP-054, "Prompt Optimizer" had no functional
+specification anywhere in the project's own documentation beyond its
+title. The design phase surveyed the existing, already-built Prompt
+Engine (EP-017) and proposed the smallest, most bounded
+interpretation consistent with it: on-demand improvement of a prompt
+or template's clarity and structure.
+
+Highlights:
+
+- Added Prompt Optimizer: on-demand, AI-generated improvement of a
+  prompt's or an existing template's clarity and structure, without
+  changing its intent
+- CLI integration: `prompt optimize <text>` / `prompt optimize
+  --template <name>` / `prompt help`
+- Composes existing components only -- the already-configured AI
+  provider, accessed directly, and the already-reserved template
+  directory -- with no new external service, no new backend
+  abstraction, and no new dependency
+- Strictly return-only in this release: the improved prompt/template
+  is returned as text but never automatically saved, applied, or used
+  to change any other component's behavior
+- Built-in safeguards: disabled by default, a cap on how much input
+  text one request may include, and a simple rate limit on how often
+  it can call the AI provider
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed. The Prompt Engine (EP-017) that Prompt Optimizer builds
+alongside, `src/core/command_router.py`, `src/core/tool/`, every
+other `src/core/ai/*` file, `src/core/agent/`, `src/core/planning/`,
+`src/core/scheduler/`, and every prior skill
+(`desktop`/`browser`/`files`/`vision`/`reflect`) are all unmodified.
+
+No breaking changes.
+
+Known limitations:
+
+- None outstanding. The architecture audit identified two related,
+  non-blocking findings before release -- while the feature was
+  turned off, some responses could reveal a little more than intended
+  (a configured size limit's numeric value, or whether a named
+  template file existed) before confirming the feature was off. No
+  prompt or template content, and no AI-provider call, was ever
+  involved. Both were fixed prior to release by simply checking
+  whether the feature is enabled earlier, before anything else runs.
+  See `docs/architecture/audits/EP055_ARCHITECTURE_AUDIT.md` Section
+  18 for the fix and its verification.
+
+Validation:
+
+EP055 : 64 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

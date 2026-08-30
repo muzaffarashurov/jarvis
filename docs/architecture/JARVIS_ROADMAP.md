@@ -122,6 +122,90 @@ Completed sub-packages:
 
 ## Current
 
+EP-055 Prompt Optimizer — **COMPLETE** (STEP 1 Architecture Discovery
+& Design, STEP 2 Implementation & Testing, STEP 3 Architecture Audit,
+STEP 4 Finalization all complete -- see
+docs/architecture/designs/EP055_DESIGN.md (including its Section 20
+owner-decision record, D1-D9, and Section 17's D10) and
+docs/architecture/audits/EP055_ARCHITECTURE_AUDIT.md. **Final
+Verdict: STEP 3 — PASS AFTER REMEDIATION** (first pass: AUDIT PASSED
+WITH FINDINGS, one non-blocking MEDIUM finding and one non-blocking
+LOW finding; unlike EP-054, the owner approved fixing both during
+STEP 4 via Owner Decision D10, and both are now resolved and verified
+-- see below). Like EP-054, EP-055's roadmap entry was a bare title
+with no functional specification (Owner Decision D1) -- STEP 1
+surveyed the already-built EP-017 Prompt Engine and recommended
+"Candidate A": on-demand improvement of a prompt's or an existing
+template's clarity/structure. Built as a new `prompt` `CommandModule`
+(`src/skills/prompt_optimizer/skill.py`) providing `optimize <text>` /
+`optimize --template <name>` -- plus `help`, dispatched through the
+*existing*, unmodified `CommandRouter.dispatch()`, exactly as every
+prior skill already is: no second dispatch mechanism, no change to
+Tool Engine. Like EP-054, EP-055 introduces no new external I/O
+surface and therefore no new backend Protocol (Owner Decision D1) --
+`PromptOptimizerModule` instead composes one already-existing,
+unmodified component directly: `ProviderManager`/`AIProvider` (via
+`ProviderManager.get_current().ask()`, deliberately bypassing
+`AIService`'s pipeline so an optimization request neither becomes a
+new conversation turn nor recursively re-enters the very Prompt
+Engine pipeline whose template input it is improving). `paths.prompts`
+(already reserved by EP-017) is read, never written to (Owner
+Decision D4 -- return-only in v1, no `prompt save`). EP-017's Prompt
+Engine (`Prompt`/`PromptBuilder`/`PromptManager`) is never modified or
+called by EP-055. No `AgentEngine` subsystem registration exists in
+v1 (Owner Decision D5 -- `CommandModule` only). No new dependency was
+introduced. Gated by `prompt_optimizer.enabled` (default `false`,
+re-checked on every dispatched action), `prompt_optimizer.
+max_input_size` (default 4000, an input exceeding it is refused,
+never silently truncated), and `prompt_optimizer.
+min_seconds_between_calls` (default 30, a simple, in-process rate
+limit). Owner Decisions D1-D9 (Candidate A scope, single
+`prompt_optimizer.enabled` gate with no separate AI-provider privacy
+gate, return-only v1, no Agent subsystem registration, resource/
+rate-limit defaults, `CommandRouter` dispatch, no real-`AIProvider`
+integration test, no EP-014-017 test-registration backfill) are all
+confirmed correctly implemented with zero findings against their
+literal text. Tests: EP-055 64/0/0 (52 original plus 12 added during
+STEP 4 specifically to prove the corrected gate ordering), covering
+argument-shape/gate/rate-limit/resource-cap/dispatch behavior against
+fake `ProviderManager` stand-ins plus real, temporary-directory-backed
+template-file tests, plus `CommandRouter` dispatch equivalence and
+`Bootstrap` wiring tests. Full regression: EP-054 76/0/0, EP-053
+58/0/0, EP-052 135/0/0, EP-051 105/0/0, EP-050 112/0/0, independently
+reproduced exactly both before and after the STEP 4 fix. **STEP 3
+findings (identified, then fixed and verified during STEP 4):** (1,
+originally MEDIUM) `PromptOptimizerModule._optimize()`'s `--template`
+resolution performed a real filesystem read and could disclose a
+named template's existence, emptiness, or absolute resolved path via
+an error message before the `prompt_optimizer.enabled` gate was
+checked -- no AI-provider call ever occurred and template content was
+never disclosed; fixed in STEP 4 by splitting argument-shape
+validation (no filesystem access, runs before the gate) from actual
+input resolution (which may read a template file, now runs strictly
+after the gate/rate-limit). (2, originally LOW) the `max_input_size`
+cap check ran before the same gate, allowing that non-secret,
+operator-configured numeric value to be observed via an error message
+while disabled -- closely mirroring EP-054's own previously-accepted
+Finding 2; resolved by the same reordering. Both fixes were verified
+against a reverted, pre-fix scratch copy (confirming the new tests
+would have caught the original behavior, not merely passing
+vacuously) and against the real, fixed code's before/after responses
+-- see `docs/architecture/audits/EP055_ARCHITECTURE_AUDIT.md` Sections
+15-18 for full detail. `src/core/ai/prompt.py`, `prompt_builder.py`,
+`prompt_manager.py` (EP-017 Prompt Engine), `src/core/ai/
+context_manager.py`, `context_loader.py`, `context.py` (EP-018
+Context Engine), `src/core/command_router.py`, `src/core/tool/`,
+`src/core/ai/provider.py`, `provider_manager.py`,
+`conversation_manager.py`, `src/services/ai_service.py`, `src/core/
+agent/`, `src/core/planning/`, `src/core/scheduler/`, and every prior
+skill (`desktop`, `browser`, `files`, `vision`, `reflect`) are all
+confirmed byte-identical/unmodified by EP-055, both before and after
+the STEP 4 fix.
+
+**Next Engineering Package: EP-056 Capability Learning — NOT
+STARTED.** No EP-056 design, research, or implementation work has
+begun.
+
 EP-054 Self Reflection — **COMPLETE** (STEP 1 Architecture Discovery
 & Design, STEP 2 Implementation & Testing, STEP 3 Architecture Audit,
 STEP 4 Finalization all complete -- see
@@ -195,9 +279,6 @@ full detail on both findings. `src/core/command_router.py`,
 `src/services/ai_service.py`, `src/services/memory_service.py`, and
 every Phase 7/8 skill (`desktop`, `browser`, `files`, `vision`) are
 all confirmed unmodified by EP-054.
-
-**Next Engineering Package: EP-055 Prompt Optimizer — NOT STARTED.**
-No EP-055 design, research, or implementation work has begun.
 
 EP-053 Vision Integration — **COMPLETE** (STEP 1 Architecture
 Discovery, Technology Evaluation & Design, STEP 2 Implementation &

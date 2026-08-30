@@ -658,6 +658,45 @@ prompt:
   reserved_user_prompt: 2000
   reserved_provider_overhead: 1000
 
+prompt_optimizer:
+  # EP-055 Prompt Optimizer. On-demand prompt/template improvement
+  # (Owner Decision D1, "Candidate A") via the "prompt" CommandRouter
+  # namespace -- see src/skills/prompt_optimizer/. Composes the
+  # already-existing AI Provider Manager ("ai:" above) directly by a
+  # single, direct AIProvider.ask() call; introduces no new dependency
+  # and no new backend/Protocol layer (EP055_DESIGN.md Section 6.2/9).
+  # Deliberately a separate block from "prompt:" above (Owner Decision
+  # D2) -- "prompt:" configures the EP-017 Prompt Engine itself
+  # (Prompt/PromptBuilder/PromptManager), which EP-055 never modifies
+  # or calls (EP055_DESIGN.md Section 14, DO NOT MODIFY).
+  #
+  # "enabled" is the master safety gate for the entire namespace
+  # (EP055_DESIGN.md Section 7/20, Owner Decision D1) -- re-checked on
+  # every dispatched "prompt ..." action, not only at startup.
+  # Defaults to false, matching every other risky-by-nature
+  # capability's own off-by-default precedent (desktop.enabled,
+  # browser.enabled, file.enabled, vision.enabled, reflection.enabled).
+  enabled: false
+
+  # Caps how many characters of prompt/template text a single
+  # "prompt optimize" call may include (Owner Decision D6). An input
+  # exceeding this cap is refused, never silently truncated -- mirrors
+  # "reflection.max_message_count"'s own "reject, never silently
+  # clamp" precedent.
+  max_input_size: 4000
+
+  # A simple, in-process rate limit (reset on restart, not a durable
+  # cross-restart limit) bounding how often "prompt optimize" may call
+  # the configured AI provider, protecting against rapid, repeated
+  # invocation running up provider cost (Owner Decision D6, identical
+  # in shape to "reflection.min_seconds_between_calls").
+  min_seconds_between_calls: 30
+
+  # Owner Decision D4: v1 is strictly return-only -- there is no
+  # "prompt save" action and no "allow_save"/filesystem-write flag.
+  # "prompt optimize" never writes to 'paths.prompts' or anywhere
+  # else; its output is returned as plain text only.
+
 context:
   # EP-018 Context Loader. Provider-independent context gathering,
   # supplying the Prompt Engine's "Conversation Context" stage; see

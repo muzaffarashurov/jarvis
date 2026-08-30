@@ -10,12 +10,91 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-055 — Prompt Optimizer
+### EP-056 — Capability Learning
 
 **NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 9
-sequencing, EP-055 (Prompt Optimizer) is the next Engineering Package
-after EP-054's completion. No design, research, or implementation
-work has begun.
+sequencing, EP-056 (Capability Learning) is the next Engineering
+Package after EP-055's completion. No design, research, or
+implementation work has begun.
+
+### EP-055 — Prompt Optimizer
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), and STEP 4 (Finalization) all
+complete. EP-055 is marked **COMPLETE / PASS AFTER REMEDIATION** --
+STEP 3's first-pass verdict was **AUDIT PASSED WITH FINDINGS** (one
+non-blocking MEDIUM finding and one non-blocking LOW finding).
+Unlike EP-054, where two comparable findings were left documented and
+unfixed, the owner reviewed EP-055's findings and approved fixing
+both during STEP 4 (Owner Decision D10); the STEP 3 audit document
+was then updated in place with a dated remediation section recording
+the fix and its independent verification. Final verdict: **PASS
+AFTER REMEDIATION**, zero open findings -- see
+`docs/architecture/audits/EP055_ARCHITECTURE_AUDIT.md` Sections 15-18.
+Full design, including Owner Decisions D1-D9 (Section 20) and D10
+(Section 17): `docs/architecture/designs/EP055_DESIGN.md`.
+
+Like EP-054, EP-055's roadmap entry ("Prompt Optimizer") was a bare
+title with no functional specification beyond Phase 9's shared,
+one-sentence goal. STEP 1 disclosed this gap and surveyed the
+already-built EP-017 Prompt Engine, recommending Owner Decision D1 =
+"Candidate A": on-demand improvement of a prompt's or an existing
+template's clarity/structure via one direct AI-provider call.
+
+Built as a new `prompt` `CommandModule`
+(`src/skills/prompt_optimizer/skill.py`) providing `optimize <text>` /
+`optimize --template <name>` -- plus `help` -- dispatched through the
+*existing*, unmodified `CommandRouter.dispatch()`. Introduces no new
+backend Protocol (Owner Decision D1) -- composes
+`ProviderManager`/`AIProvider` directly (via
+`ProviderManager.get_current().ask()`, deliberately bypassing
+`AIService`'s pipeline so an optimization request neither becomes a
+new conversation turn nor recursively re-enters the very Prompt
+Engine pipeline whose template input it is improving) and reads
+(never writes -- Owner Decision D4, return-only in v1) the
+already-reserved `paths.prompts` directory EP-017's `PromptBuilder.
+load_template()` already establishes. The EP-017 Prompt Engine
+(`Prompt`/`PromptBuilder`/`PromptManager`) itself is never modified or
+called. Gated by `prompt_optimizer.enabled` (default `false`,
+re-checked on every dispatched action), `prompt_optimizer.
+max_input_size` (default 4000), and `prompt_optimizer.
+min_seconds_between_calls` (default 30). No `AgentEngine` subsystem
+registration exists in v1 (Owner Decision D5). No new dependency was
+introduced.
+
+Owner Decisions D1-D9 were all confirmed correctly implemented with
+zero findings against their literal text during STEP 3. Two related,
+non-blocking ordering findings were identified independently of the
+Owner Decisions: (1, originally MEDIUM) the `--template` path
+performed a real filesystem read and could disclose a template's
+existence/emptiness/absolute path before the `prompt_optimizer.
+enabled` gate was checked; (2, originally LOW) the `max_input_size`
+cap check ran before the same gate, allowing that numeric config
+value to be observed while disabled -- closely mirroring EP-054's own
+previously-accepted Finding 2. In neither case did an AI-provider
+call ever occur, and template content was never disclosed. Owner
+Decision D10 (approved, option (a)) directed a STEP 4 fix: a minimal,
+behavior-preserving reordering so `prompt_optimizer.enabled` is
+checked before any filesystem access or config-value-dependent
+message. The fix was independently verified against a reverted,
+pre-fix scratch copy (proving the new tests genuinely catch the
+original behavior, not merely passing vacuously) and against the real
+code's before/after responses.
+
+Tests: EP055 64/0/0 (52 original + 12 added in STEP 4 specifically to
+prove the corrected gate ordering), covering argument-shape/gate/
+rate-limit/resource-cap/dispatch behavior against fake
+`ProviderManager` stand-ins plus real, temporary-directory-backed
+template-file tests. Full regression suites EP-054 76/0/0, EP-053
+58/0/0, EP-052 135/0/0, EP-051 105/0/0, EP-050 112/0/0 were
+independently reproduced exactly, both before and after the STEP 4
+fix. `src/core/ai/prompt.py`, `prompt_builder.py`, `prompt_manager.py`
+(EP-017), `src/core/ai/context_manager.py`, `src/core/command_router.py`,
+`src/core/ai/provider.py`, `provider_manager.py`,
+`src/services/ai_service.py`, `src/core/agent/`, `src/core/planning/`,
+`src/core/scheduler/`, and every prior skill (`desktop`/`browser`/
+`files`/`vision`/`reflect`) are all confirmed byte-identical/unmodified
+by EP-055, both before and after the STEP 4 fix.
 
 ### EP-054 — Self Reflection
 

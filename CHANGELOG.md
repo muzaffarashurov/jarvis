@@ -6,6 +6,179 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.14-ep055
+
+Released: 2026-08-30
+
+Status: EP-055 COMPLETE / PASS AFTER REMEDIATION (STEP 1 Architecture
+Discovery & Design, STEP 2 Implementation & Testing, STEP 3
+Architecture Audit, STEP 4 Finalization all complete). STEP 3's
+first-pass verdict was **AUDIT PASSED WITH FINDINGS** -- one
+non-blocking MEDIUM finding and one non-blocking LOW finding. Unlike
+EP-054, where two comparable findings were documented and left
+unfixed, the owner reviewed EP-055's findings and approved fixing
+both during STEP 4 (Owner Decision D10). Final verdict, after the fix
+and its independent verification: **PASS AFTER REMEDIATION**, zero
+open findings.
+
+EP-055's roadmap entry ("Prompt Optimizer") had no functional
+specification anywhere in the repository beyond Phase 9's
+one-sentence, five-EP-wide goal already shared with EP-054. STEP 1
+disclosed this explicitly rather than inventing scope, surveyed the
+already-built EP-017 Prompt Engine, and recommended Owner Decision D1
+= "Candidate A": on-demand improvement of a prompt's or an existing
+template's clarity/structure via one direct AI-provider call.
+
+### Added
+
+- src/skills/prompt_optimizer/skill.py: `PromptOptimizerModule`, the
+  "prompt" `CommandModule` namespace -- `optimize <text>` / `optimize
+  --template <name>` (ask the configured AI provider to improve the
+  clarity/structure of the given text, or of a named template's
+  current content, without changing its intent), plus `help`,
+  dispatched through the existing, unmodified
+  `CommandRouter.dispatch()`. Introduces no new backend Protocol
+  (Owner Decision D1) -- composes `ProviderManager`/`AIProvider`
+  directly via `ProviderManager.get_current().ask()`, deliberately
+  bypassing `AIService`'s pipeline, and reads (never writes -- Owner
+  Decision D4) the already-reserved `paths.prompts` directory. The
+  EP-017 Prompt Engine (`Prompt`/`PromptBuilder`/`PromptManager`) is
+  never modified or called
+- config/config.yaml: new `prompt_optimizer` section (`enabled`,
+  `max_input_size`, `min_seconds_between_calls`), deliberately
+  separate from the pre-existing `prompt:` section (EP-017)
+- tests/EP055/test_prompt_optimizer.py: EP-055 test suite (`NAME =
+  "EP055"`) -- argument-shape, gate, rate-limit (fake clock),
+  resource-cap, positive/negative-path, `--template` loading (real,
+  temporary-directory-backed, non-fake), `CommandRouter` dispatch
+  equivalence, `Bootstrap` wiring tests, and (added during STEP 4) 4
+  additional tests specifically proving the corrected gate ordering
+  -- all against fake `ProviderManager` stand-ins where a fake is
+  appropriate
+- docs/architecture/designs/EP055_DESIGN.md: full design document,
+  including the scope-definition discovery (Section 0-5), Owner
+  Decisions D1-D9 (Section 20), and D10 (Section 17, added during
+  STEP 3)
+- docs/architecture/audits/EP055_ARCHITECTURE_AUDIT.md: EP-055
+  Architecture Audit, Final Verdict PASS AFTER REMEDIATION (first
+  pass: AUDIT PASSED WITH FINDINGS; Section 18 records the STEP 4 fix
+  and its independent verification)
+
+### Changed
+
+- src/bootstrap.py: constructs `PromptOptimizerModule` after
+  `ai_provider_manager` (pre-existing) is already wired, gated by
+  `prompt_optimizer.enabled` (default `false`). `prompt` namespace
+  registers even when disabled, reporting a disabled message for
+  every action, matching every other skill's convention
+- src/modules/test_module.py: registers the EP-055 test suite so
+  `test EP055` and `test all` pick it up
+
+### Security
+
+- `prompt_optimizer.enabled` defaults to `false` and is re-checked on
+  every dispatched action, not only at registration
+- `prompt_optimizer.max_input_size` bounds how much text a single
+  `prompt optimize` call may send to the AI provider; an input
+  exceeding it is refused, never silently truncated
+- `prompt_optimizer.min_seconds_between_calls` rate-limits
+  AI-provider calls in-process (reset on restart)
+- v1 is strictly return-only (Owner Decision D4): no `prompt save`
+  action exists; no autonomous change to any configuration, prompt,
+  or other component's behavior
+- **Fixed during STEP 4 (Owner Decision D10):** argument-shape
+  validation (no filesystem access) and the `prompt_optimizer.enabled`
+  gate now both run before template resolution and the
+  `max_input_size` check, so a disabled request can no longer read a
+  template file from disk, disclose whether a named template exists,
+  is empty, or its resolved path, or reveal the configured
+  `max_input_size` value
+
+### Validation
+
+```
+EP055 : 64 passed / 0 failed / 0 skipped
+EP054 : 76 passed / 0 failed / 0 skipped
+EP053 : 58 passed / 0 failed / 0 skipped
+EP052 : 135 passed / 0 failed / 0 skipped
+EP051 : 105 passed / 0 failed / 0 skipped
+EP050 : 112 passed / 0 failed / 0 skipped
+```
+
+All regression figures above were independently reproduced from a
+clean process both before and after the STEP 4 fix.
+
+### STEP 3 -- Architecture Audit
+
+First-pass verdict: EP-055 STEP 3 -- **AUDIT PASSED WITH FINDINGS**.
+All nine Owner Decisions (D1-D9) confirmed correctly implemented with
+zero findings against their literal text. Two related, non-blocking
+ordering findings were identified independently of the Owner
+Decisions:
+
+1. **(originally MEDIUM)** `PromptOptimizerModule._optimize()`'s
+   `--template` resolution performed a real filesystem read and could
+   disclose a named template's existence, emptiness, or absolute
+   resolved path via an error message before the `prompt_optimizer.
+   enabled` gate was checked. No AI-provider call ever occurred, and
+   template content was never disclosed.
+2. **(originally LOW)** The `max_input_size` cap check ran before the
+   same gate, allowing that non-secret, operator-configured numeric
+   value to be observed via an error message while disabled --
+   closely mirroring EP-054's own previously-accepted Finding 2.
+
+File scope confirmed to exactly match the approved STEP 2 scope, with
+zero unauthorized changes to `src/core/ai/prompt.py`,
+`prompt_builder.py`, `prompt_manager.py` (EP-017 Prompt Engine, byte-
+compared against the pre-EP-055 archive and confirmed identical),
+`src/core/command_router.py`, `src/core/tool/`, `src/services/
+ai_service.py`, `src/core/agent/`, `src/core/planning/`,
+`src/core/scheduler/`, or any Phase 7/8 skill. See
+`docs/architecture/audits/EP055_ARCHITECTURE_AUDIT.md` for the full
+first-pass audit, including three independent mutation tests and
+several live edge-case probes performed against the real, unmutated
+code.
+
+### STEP 4 -- Finalization (including remediation)
+
+Unlike EP-054's STEP 4 (documentation sync only, findings left
+unfixed), the owner explicitly approved Owner Decision D10 (option
+(a)): fix both findings before closing EP-055. The fix was minimal
+and behavior-preserving -- `_optimize()`'s argument-shape validation
+was extracted into a new method with zero filesystem access, and the
+`prompt_optimizer.enabled` gate now runs immediately afterward,
+before template resolution or the `max_input_size` check. No public
+interface, config key, or enabled-path behavior changed; all 52
+pre-existing test assertions continued to pass unchanged, and 12 new
+assertions (4 new test methods) were added specifically to prove the
+corrected ordering.
+
+The fix was independently verified two ways: (1) a reverted, pre-fix
+scratch copy (never touching the real repository) was used to confirm
+the new tests would have genuinely caught the original behavior --
+one test raised a real `AssertionError` against the reverted code,
+and another's core assertion demonstrably failed against it; (2) the
+same three live probes from the first audit pass were re-run against
+the real, fixed code and confirmed each now returns the standard
+disabled message with no filesystem-fact or config-value disclosure.
+
+`docs/architecture/audits/EP055_ARCHITECTURE_AUDIT.md` was updated in
+place with a Section 18 remediation record -- the original first-pass
+findings (Sections 1-17) were preserved verbatim, not edited or
+removed, per the same "record both passes factually" precedent
+`EP052_ARCHITECTURE_AUDIT.md` established. Release/project
+documentation (`CHANGELOG.md`, `docs/BACKLOG.md`,
+`docs/RELEASE_NOTES.md`, `docs/architecture/JARVIS_ROADMAP.md`)
+synchronized to mark EP-055 COMPLETE / PASS AFTER REMEDIATION and
+EP-056 (Capability Learning) as the next, not-started Engineering
+Package.
+
+**EP-055 is COMPLETE (PASS AFTER REMEDIATION -- both findings
+identified during STEP 3 were fixed and independently verified during
+STEP 4; zero open findings).**
+
+---
+
 ## v0.1.13-ep054
 
 Released: 2026-08-29

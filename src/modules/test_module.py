@@ -53,6 +53,7 @@ import tests.EP051.test_browser
 import tests.EP052.test_file
 import tests.EP053.test_vision
 import tests.EP054.test_reflection
+import tests.EP055.test_prompt_optimizer
 
 class TestModule(CommandModule):
 

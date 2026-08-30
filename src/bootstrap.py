@@ -171,6 +171,7 @@ from src.skills.vision.backend import VisionBackend
 from src.skills.vision.skill import VisionModule
 from src.skills.vision.local_backend import LocalVisionBackend
 from src.skills.reflection.skill import ReflectionModule
+from src.skills.prompt_optimizer.skill import PromptOptimizerModule
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -579,6 +580,47 @@ class Bootstrap:
                 conversation_manager=conversation_manager,
                 provider_manager=ai_provider_manager,
                 memory_service=self._memory_service,
+            )
+        )
+
+        # EP-055 Prompt Optimizer. On-demand prompt/template
+        # improvement (Owner Decision D1, "Candidate A") via the
+        # "prompt" CommandRouter namespace (see
+        # src/skills/prompt_optimizer/), dispatched through the same,
+        # unmodified CommandRouter.dispatch() every other skill
+        # already uses (EP055_DESIGN.md Section 3.9/20, Owner Decision
+        # D7) -- no new dispatch mechanism, and Tool Engine is
+        # untouched.
+        #
+        # Introduces no new backend Protocol (EP055_DESIGN.md Section
+        # 6.2): PromptOptimizerModule composes one already-existing,
+        # unmodified component directly -- ai_provider_manager (already
+        # constructed above, for AIService's and ReflectionModule's own
+        # use). It deliberately never receives prompt_manager or
+        # context_manager -- EP-017's Prompt Engine
+        # (Prompt/PromptBuilder/PromptManager) is left completely
+        # unmodified and un-called by EP-055 (EP055_DESIGN.md Section
+        # 14, DO NOT MODIFY); PromptOptimizerModule reads
+        # 'paths.prompts' independently, the same directory
+        # PromptBuilder.load_template() already reads, but never
+        # constructs or calls PromptBuilder/PromptManager themselves.
+        #
+        # Mirrors DesktopModule/BrowserModule/FileModule/VisionModule/
+        # ReflectionModule's wiring exactly: PromptOptimizerModule is
+        # registered unconditionally -- 'prompt_optimizer.enabled'
+        # (default false) is re-checked on every dispatched action
+        # inside PromptOptimizerModule itself (EP055_DESIGN.md Section
+        # 7/20), not only at registration time. No construction-failure
+        # branch is needed here since PromptOptimizerModule performs no
+        # I/O of its own at construction time -- it only stores a
+        # reference to the already-constructed ai_provider_manager.
+        #
+        # Owner Decision D4: return-only in v1 -- no 'prompt save'
+        # action and no filesystem-write capability exist.
+        router.register(
+            PromptOptimizerModule(
+                config=config,
+                provider_manager=ai_provider_manager,
             )
         )
 

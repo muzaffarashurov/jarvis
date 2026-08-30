@@ -592,6 +592,48 @@ conversation:
   storage_file: "data/database/conversations.json"
   truncate_strategy: "oldest"
 
+reflection:
+  # EP-054 Self Reflection. On-demand session/conversation
+  # self-critique (Owner Decision D1, "Candidate A") via the "reflect"
+  # CommandRouter namespace -- see src/skills/reflection/. Composes
+  # the already-existing Conversation Engine (above) and AI Provider
+  # Manager ("ai:" below) directly; introduces no new dependency and
+  # no new backend/Protocol layer (EP054_DESIGN.md Section 6.2/9).
+  #
+  # "enabled" is the master safety gate for the entire namespace
+  # (EP054_DESIGN.md Section 7/20, Owner Decision D1) -- re-checked on
+  # every dispatched "reflect ..." action, not only at startup.
+  # Defaults to false, matching every other risky-by-nature
+  # capability's own off-by-default precedent (desktop.enabled,
+  # browser.enabled, file.enabled, vision.enabled). v1 is strictly
+  # descriptive (Owner Decision D3): "reflect summary"'s output never
+  # automatically changes any configuration, prompt, or behavior of
+  # any other component.
+  enabled: false
+
+  # Caps how many of the current conversation's most recent messages
+  # a single "reflect summary" call may include, and is also the
+  # default when no explicit count is given (Owner Decision D7). An
+  # explicit count argument exceeding this cap is refused, never
+  # silently reduced -- mirrors "vision.max_dimension"'s own "reject,
+  # never silently downscale" precedent.
+  max_message_count: 20
+
+  # A simple, in-process rate limit (reset on restart, not a durable
+  # cross-restart limit) bounding how often "reflect summary" may call
+  # the configured AI provider, protecting against rapid, repeated
+  # invocation running up provider cost (Owner Decision D7).
+  min_seconds_between_calls: 30
+
+  # Whether "reflect summary" also persists its generated critique via
+  # the Memory subsystem ("memory:" below), so it can be recalled
+  # later with "reflect recall" (Owner Decision D4). Defaults to
+  # false -- reflections are ephemeral (returned once, never stored)
+  # unless explicitly enabled. Requires the Memory subsystem itself
+  # to also be enabled and available; "reflect recall" reports a
+  # clear failure otherwise.
+  persist_to_memory: false
+
 prompt:
   # EP-017 Prompt Engine. Provider-independent prompt composition
   # shared by every AI request; see src/core/ai/prompt_manager.py.

@@ -170,6 +170,7 @@ from src.skills.files.local_backend import LocalFileBackend
 from src.skills.vision.backend import VisionBackend
 from src.skills.vision.skill import VisionModule
 from src.skills.vision.local_backend import LocalVisionBackend
+from src.skills.reflection.skill import ReflectionModule
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -541,6 +542,45 @@ class Bootstrap:
             context_manager=context_manager,
         )
         router.register(AIModule(ai_service))
+
+        # EP-054 Self Reflection. On-demand session/conversation
+        # self-critique (Owner Decision D1, "Candidate A") via the
+        # "reflect" CommandRouter namespace (see
+        # src/skills/reflection/), dispatched through the same,
+        # unmodified CommandRouter.dispatch() every other skill
+        # already uses (EP054_DESIGN.md Section 3.7/20, Owner Decision
+        # D8) -- no new dispatch mechanism, and Tool Engine is
+        # untouched.
+        #
+        # Introduces no new backend Protocol (EP054_DESIGN.md Section
+        # 6.2): ReflectionModule composes three already-existing,
+        # unmodified components directly -- ConversationManager and
+        # ai_provider_manager (both already constructed above, for
+        # AIService's own use) and, optionally, self._memory_service
+        # (constructed earlier, for MemoryModule's own use; may be
+        # None if the Memory subsystem is disabled/unavailable --
+        # ReflectionModule handles that by reporting a clear failure
+        # for 'reflect recall' only when persistence is actually
+        # requested, never by crashing).
+        #
+        # Mirrors DesktopModule/BrowserModule/FileModule/VisionModule's
+        # wiring exactly: ReflectionModule is registered
+        # unconditionally -- 'reflection.enabled' (default false) is
+        # re-checked on every dispatched action inside ReflectionModule
+        # itself (EP054_DESIGN.md Section 7/20), not only at
+        # registration time. No construction-failure branch is needed
+        # here (unlike LocalVisionBackend's Tesseract-adjacent
+        # precedent) since ReflectionModule performs no I/O of its own
+        # at construction time -- it only stores references to
+        # already-constructed managers.
+        router.register(
+            ReflectionModule(
+                config=config,
+                conversation_manager=conversation_manager,
+                provider_manager=ai_provider_manager,
+                memory_service=self._memory_service,
+            )
+        )
 
         # EP-021: Provider-Independent Embedding Engine. Depends only on
         # Config -- no dependency on RetrievalEngine (EP-020) or any

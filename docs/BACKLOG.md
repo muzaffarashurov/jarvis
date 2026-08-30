@@ -10,12 +10,144 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-054 — Self Reflection
+### EP-055 — Prompt Optimizer
 
 **NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 9
-sequencing, EP-054 (Self Reflection) is the next Engineering Package
-after EP-053's completion. No design, research, or implementation
+sequencing, EP-055 (Prompt Optimizer) is the next Engineering Package
+after EP-054's completion. No design, research, or implementation
 work has begun.
+
+### EP-054 — Self Reflection
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), and STEP 4 (Finalization) all
+complete. EP-054 is marked **COMPLETE / PASSED WITH FINDINGS** --
+STEP 3's final verdict is **AUDIT PASSED WITH FINDINGS** (one
+non-blocking MEDIUM finding and one non-blocking LOW finding,
+documented and not fixed -- see below), not a clean, zero-finding
+pass -- see `docs/architecture/audits/EP054_ARCHITECTURE_AUDIT.md`.
+Full design, including Owner Decisions D1-D9 (Section 20):
+`docs/architecture/designs/EP054_DESIGN.md`.
+
+Unlike EP-050 through EP-053, EP-054's roadmap entry was a bare title
+("Self Reflection") with no functional specification anywhere in the
+repository beyond Phase 9's one-sentence, five-EP-wide goal. STEP 1
+disclosed this gap explicitly and surveyed the existing architecture
+(Conversation Engine, AI Provider Manager, Memory Manager, Agent
+Framework's subsystem registry, Scheduler) to derive several
+grounded candidate interpretations, recommending Owner Decision D1
+= "Candidate A": on-demand session/conversation self-critique.
+
+Built as a new `reflect` `CommandModule`
+(`src/skills/reflection/skill.py`) providing `summary [count]` (ask
+the configured AI provider to critique the last `count` messages of
+the current conversation) and `recall [count]` (return previously
+persisted critiques, most recent first) -- plus `help`, dispatched
+through the *existing*, unmodified `CommandRouter.dispatch()` -- no
+new dispatch mechanism, no Tool Engine change. Unlike
+`desktop`/`browser`/`file`/`vision`, EP-054 introduces no new external
+I/O surface and therefore no new backend Protocol (Owner Decision
+D1) -- `ReflectionModule` instead composes three already-existing,
+unmodified components directly via constructor injection:
+`ConversationManager` (read-only -- `ReflectionModule` never appends
+to or mutates a conversation), `ProviderManager`/`AIProvider` (via
+`ProviderManager.get_current().ask()`, deliberately bypassing
+`AIService`'s higher-level pipeline so a reflection request never
+appends itself as a new turn in the very conversation being reflected
+upon), and, optionally, `MemoryService` (only consulted when
+`reflection.persist_to_memory` is enabled; `reflect recall` reports a
+clear failure if persistence is requested but the Memory subsystem is
+unavailable). v1 is strictly descriptive (Owner Decision D3): it
+never autonomously changes any configuration, prompt, or other
+component's behavior -- that remains explicitly reserved for later
+Phase 9 EPs (Prompt Optimizer, Capability Learning, Autonomous
+Planning) by the roadmap's own sequencing. No `Scheduler` integration
+and no `AgentEngine.register_subsystem()` call exist in v1 (Owner
+Decisions D5/D6 -- manual-only, `CommandModule` only). No new
+dependency was introduced (Owner Decision D9's sibling finding in
+Section 9 of the design).
+
+Gated by `reflection.enabled` (default `false`, re-checked on every
+dispatched action, matching `desktop.enabled`/`browser.enabled`/
+`file.enabled`/`vision.enabled`'s own precedent), `reflection
+.max_message_count` (default and cap: 20 -- an explicit `count`
+argument exceeding it is refused, never silently reduced, mirroring
+`vision.max_dimension`'s own "reject, never silently downscale"
+convention), and `reflection.min_seconds_between_calls` (default 30
+-- a simple, in-process rate limit bounding AI-provider cost from
+rapid, repeated invocation; reset on restart, not a durable
+cross-restart limit).
+
+Owner Decisions D1-D9 are all confirmed correctly implemented, aside
+from the two findings below: Candidate A scope, no new backend
+Protocol (D1); no separate AI-provider/privacy gate beyond
+`reflection.enabled` itself (D2); strictly descriptive output, no
+autonomous effect on anything (D3); opt-in `MemoryService` persistence,
+default `false` (D4); manual-only triggering, no `Scheduler`
+integration in v1 (D5); no `AgentEngine` subsystem registration in v1
+(D6); `max_message_count: 20`/`min_seconds_between_calls: 30` resource/
+rate-limit defaults (D7); `CommandRouter` dispatch, no Tool Engine
+redesign (D8); and no real-`AIProvider` integration test, since a live
+provider call is not deterministic the way EP-053's real-Tesseract OCR
+check was (D9).
+
+Tests: **EP-054 76 passed / 0 failed / 0 skipped**, covering
+argument-shape validation, the `reflection.enabled` gate (zero
+downstream calls while disabled), `max_message_count` cap enforcement,
+`min_seconds_between_calls` rate-limiting (using a fake, injected
+clock, never a real `time.sleep()`), positive-path prompt/response
+generation, negative cases (no provider available, provider raises an
+error, empty conversation), `persist_to_memory` behavior, `help`/
+unknown-action handling, `CommandRouter` dispatch equivalence, and
+`Bootstrap` wiring -- all against fake `ConversationManager`/
+`ProviderManager`/`MemoryService` stand-ins (Owner Decision D10's
+sibling reasoning in the design: a real AI-provider call's
+non-deterministic output makes it unsuitable for the primary,
+always-green suite).
+
+Full regression: **6339 passed / 2 failed / 3 skipped**. The 2
+failures and 3 skips are the same, already-documented, pre-existing
+EP-046/EP-048/EP-049 voice-stack/sandbox limitations recorded at
+EP-053's own completion, independently re-verified during the STEP 3
+audit and confirmed unrelated to, and unmodified by, EP-054.
+
+**STEP 3 findings (documented, not fixed):**
+
+1. **(MEDIUM, non-blocking)** `EP054_DESIGN.md`'s own Section 12
+   explicitly committed to adding a real, non-fake `MemoryService`
+   -backed test to the primary suite once Owner Decision D4 (opt-in
+   Memory persistence) was approved. No such test exists in the
+   registered suite -- every persistence-related test uses a fake
+   `MemoryService` only. The STEP 3 audit independently built and ran
+   a real `MemoryService`/`MemoryStore` integration probe and
+   confirmed the actual integration (`reflect summary` persisting,
+   `reflect recall` retrieving) works correctly end-to-end -- the
+   finding is a test-coverage gap against a self-imposed design
+   commitment, not a functional defect.
+2. **(LOW, non-blocking)** `ReflectionModule._summary()`'s
+   `max_message_count`-exceeded check currently runs *before* the
+   `reflection.enabled` gate, so a caller can observe the configured
+   cap's numeric value via an error message even while Self Reflection
+   is disabled. The STEP 3 audit confirmed, using dummy
+   `ConversationManager`/`ProviderManager` objects that raise on any
+   call, that zero downstream calls occur in this case -- no gate or
+   resource-limit bypass exists; only a non-secret, already-visible
+   config value can be observed out of order.
+
+Per the STEP 3 audit's own "record, do not fix" rule, and per this
+STEP 4's instruction to write and update documentation only, no code
+change was made to address either finding. See
+`docs/architecture/audits/EP054_ARCHITECTURE_AUDIT.md` Section 15 for
+full detail and evidence on both.
+
+`src/core/command_router.py`, `src/core/tool/`,
+`src/core/ai/provider.py`, `src/core/ai/provider_manager.py`,
+`src/core/ai/conversation_manager.py`, `src/core/ai/conversation.py`,
+`src/core/memory/`, `src/core/agent/`, `src/core/planning/`,
+`src/core/scheduler/`, `src/services/ai_service.py`,
+`src/services/memory_service.py`, and every Phase 7/8 skill
+(`desktop`, `browser`, `files`, `vision`) are all confirmed unmodified
+by EP-054.
 
 ### EP-053 — Vision Integration
 

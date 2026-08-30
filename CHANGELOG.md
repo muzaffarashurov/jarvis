@@ -6,6 +6,134 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.13-ep054
+
+Released: 2026-08-29
+
+Status: EP-054 COMPLETE / PASSED WITH FINDINGS (STEP 1 Architecture
+Discovery & Design, STEP 2 Implementation & Testing, STEP 3
+Architecture Audit, STEP 4 Finalization all complete). STEP 3's final
+verdict is **AUDIT PASSED WITH FINDINGS** -- one non-blocking MEDIUM
+finding and one non-blocking LOW finding are documented and were not
+fixed; this is not a clean, zero-finding pass.
+
+EP-054's roadmap entry ("Self Reflection") had no functional
+specification anywhere in the repository beyond Phase 9's one-sentence
+goal. STEP 1 disclosed this explicitly rather than inventing scope,
+surveyed the existing architecture, and recommended Owner Decision D1
+= "Candidate A": on-demand session/conversation self-critique.
+
+### Added
+
+- src/skills/reflection/skill.py: `ReflectionModule`, the "reflect"
+  `CommandModule` namespace -- `summary [count]` (ask the configured
+  AI provider to critique the last `count` messages of the current
+  conversation) and `recall [count]` (return previously persisted
+  critiques, most recent first), plus `help`, dispatched through the
+  existing, unmodified `CommandRouter.dispatch()`. Introduces no new
+  backend Protocol (Owner Decision D1) -- composes `ConversationManager`
+  (read-only), `ProviderManager`/`AIProvider` (via `get_current().ask()`,
+  deliberately bypassing `AIService`'s conversation-mutating pipeline),
+  and optional `MemoryService` directly
+- config/config.yaml: new `reflection` section (`enabled`,
+  `max_message_count`, `min_seconds_between_calls`,
+  `persist_to_memory`)
+- tests/EP054/test_reflection.py: EP-054 test suite (`NAME = "EP054"`)
+  -- argument-shape, gate, rate-limit (fake clock), resource-cap,
+  positive/negative-path, persistence, `CommandRouter` dispatch
+  equivalence, and `Bootstrap` wiring tests, all against fake
+  `ConversationManager`/`ProviderManager`/`MemoryService` stand-ins
+- docs/architecture/designs/EP054_DESIGN.md: full design document,
+  including the scope-definition discovery (Section 0-5) and Owner
+  Decisions D1-D9 (Section 20)
+- docs/architecture/audits/EP054_ARCHITECTURE_AUDIT.md: EP-054
+  Architecture Audit, Final Verdict AUDIT PASSED WITH FINDINGS
+
+### Changed
+
+- src/bootstrap.py: constructs `ReflectionModule` after
+  `ConversationManager`/`ProviderManager`/`MemoryService` (all
+  pre-existing) are already wired, gated by `reflection.enabled`
+  (default `false`). `reflect` namespace registers even when disabled,
+  reporting a disabled message for every action, matching every other
+  skill's convention
+- src/modules/test_module.py: registers the EP-054 test suite so
+  `test EP054` and `test all` pick it up
+
+### Security
+
+- `reflection.enabled` defaults to `false` and is re-checked on every
+  dispatched action, not only at registration
+- `reflection.max_message_count` bounds how much conversation history
+  a single `reflect summary` call may send to the AI provider; an
+  explicit count exceeding it is refused, never silently reduced
+- `reflection.min_seconds_between_calls` rate-limits AI-provider calls
+  in-process (reset on restart)
+- v1 is strictly descriptive (Owner Decision D3): no autonomous change
+  to any configuration, prompt, or other component's behavior
+- `ReflectionModule` never appends to or mutates the conversation it
+  reads from
+- `reflection.persist_to_memory` defaults to `false`; `reflect recall`
+  fails clearly if persistence is requested but unavailable
+
+### Validation
+
+```
+EP054 : 76 passed / 0 failed / 0 skipped
+test all : 6339 passed / 2 failed / 3 skipped
+```
+
+The 2 failures and 3 skips are the same pre-existing EP-046/EP-048/
+EP-049 voice-stack/sandbox limitations already documented at EP-053's
+completion, independently re-verified during the STEP 3 audit and
+reconfirmed unrelated to and unmodified by EP-054.
+
+### STEP 3 -- Architecture Audit
+
+Final Verdict: EP-054 STEP 3 -- **AUDIT PASSED WITH FINDINGS**. Seven
+of nine Owner Decisions (D1, D2, D3, D5, D6, D8, D9) confirmed
+correctly implemented with zero findings; D4 and D7 are each
+functionally correct but carry one finding apiece:
+
+1. **(MEDIUM)** The design document's own Section 12 committed to a
+   real, non-fake `MemoryService`-backed test once Owner Decision D4
+   was approved; none exists in the registered suite. The audit
+   independently built and ran a real `MemoryService`/`MemoryStore`
+   integration probe and confirmed the actual integration works
+   correctly -- a test-coverage gap, not a functional defect.
+2. **(LOW)** The `max_message_count`-exceeded check runs before the
+   `reflection.enabled` gate, allowing a non-secret config value to be
+   observed via an error message while disabled -- confirmed, via
+   dummy objects that raise on any call, that zero downstream calls
+   occur; no gate or resource-limit bypass exists.
+
+File scope confirmed to exactly match the approved STEP 2 scope, with
+zero unauthorized changes to `src/core/command_router.py`, `src/core/
+tool/`, any `src/core/ai/*` file, `src/core/memory/`, `src/core/
+agent/`, `src/core/planning/`, `src/core/scheduler/`,
+`src/services/ai_service.py`/`memory_service.py`, or any Phase 7/8
+skill. See `docs/architecture/audits/EP054_ARCHITECTURE_AUDIT.md` for
+the full audit, including three independent mutation tests and a real
+`MemoryService` integration probe performed against the real,
+unmutated code.
+
+### STEP 4 -- Finalization
+
+Per the STEP 3 audit's own "record, do not fix" rule, neither finding
+was remediated during STEP 4 -- both remain documented and
+non-blocking, exactly as the audit recorded them. Release/project
+documentation (`CHANGELOG.md`, `docs/BACKLOG.md`,
+`docs/RELEASE_NOTES.md`, `docs/architecture/JARVIS_ROADMAP.md`)
+synchronized to mark EP-054 COMPLETE / PASSED WITH FINDINGS and
+EP-055 (Prompt Optimizer) as the next, not-started Engineering
+Package. No source, test, configuration, or dependency file was
+modified during STEP 4.
+
+**EP-054 is COMPLETE (PASSED WITH FINDINGS -- one non-blocking MEDIUM
+finding and one non-blocking LOW finding, documented, not fixed).**
+
+---
+
 ## v0.1.12-ep053
 
 Released: 2026-08-29

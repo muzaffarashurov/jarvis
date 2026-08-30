@@ -52,6 +52,7 @@ import tests.EP050.test_desktop
 import tests.EP051.test_browser
 import tests.EP052.test_file
 import tests.EP053.test_vision
+import tests.EP054.test_reflection
 
 class TestModule(CommandModule):
 

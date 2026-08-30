@@ -122,6 +122,83 @@ Completed sub-packages:
 
 ## Current
 
+EP-054 Self Reflection — **COMPLETE** (STEP 1 Architecture Discovery
+& Design, STEP 2 Implementation & Testing, STEP 3 Architecture Audit,
+STEP 4 Finalization all complete -- see
+docs/architecture/designs/EP054_DESIGN.md (including its Section 20
+owner-decision record, D1-D9) and
+docs/architecture/audits/EP054_ARCHITECTURE_AUDIT.md. **Final Verdict:
+STEP 3 — AUDIT PASSED WITH FINDINGS** (one non-blocking MEDIUM finding
+and one non-blocking LOW finding, both documented and not fixed
+during STEP 4 -- see below). Unlike EP-050 through EP-053, EP-054's
+roadmap entry was a bare title with no functional specification
+(Owner Decision D1) -- STEP 1 surveyed the existing architecture and
+recommended "Candidate A": on-demand session/conversation
+self-critique. Built as a new `reflect` `CommandModule`
+(`src/skills/reflection/skill.py`) providing `summary` (ask the
+configured AI provider to critique the last N messages of the current
+conversation) and `recall` (return previously persisted critiques) --
+plus `help`, dispatched through the *existing*, unmodified
+`CommandRouter.dispatch()`, exactly as every prior skill (`desktop`,
+`browser`, `file`, `vision`) already is: no second dispatch mechanism,
+no change to Tool Engine. Unlike `desktop`/`browser`/`file`/`vision`,
+EP-054 introduces no new external I/O surface and therefore no new
+backend Protocol (Owner Decision D1) -- `ReflectionModule` instead
+composes three already-existing, unmodified components directly:
+`ConversationManager` (read-only), `ProviderManager`/`AIProvider`
+(via `ProviderManager.get_current().ask()`, deliberately bypassing
+`AIService`'s conversation-mutating pipeline so a reflection never
+appends itself to the conversation it is reflecting on), and,
+optionally, `MemoryService` (only when `reflection.persist_to_memory`
+is enabled). v1 is strictly descriptive (Owner Decision D3): it never
+autonomously changes any configuration, prompt, or other component's
+behavior. No `Scheduler` integration and no `AgentEngine` subsystem
+registration exist in v1 (Owner Decisions D5/D6 -- manual-only,
+`CommandModule` only). No new dependency was introduced. Gated by
+`reflection.enabled` (default `false`, re-checked on every dispatched
+action), `reflection.max_message_count` (default and cap: 20, an
+explicit count exceeding it is refused, never silently reduced), and
+`reflection.min_seconds_between_calls` (default 30, a simple,
+in-process rate limit). Owner Decisions D1-D9 (Candidate A scope, no
+separate AI-provider privacy gate, strictly descriptive output,
+opt-in Memory persistence, manual-only triggering, no Agent subsystem
+registration, resource/rate-limit defaults, `CommandRouter` dispatch,
+no real-`AIProvider` integration test) are all confirmed correctly
+implemented, aside from the two findings below. Tests: EP-054 76/0/0,
+covering argument-shape/gate/rate-limit/resource-cap/dispatch behavior
+against fake `ConversationManager`/`ProviderManager`/`MemoryService`
+stand-ins, plus `CommandRouter` dispatch equivalence and `Bootstrap`
+wiring tests. Full regression: 6339/2/3 -- the 2 failures and 3 skips
+are the same pre-existing EP-046/EP-048/EP-049 voice-stack/sandbox
+limitations already documented at EP-053's completion, independently
+reproduced again and confirmed unrelated to EP-054. **STEP 3 findings
+(documented, not fixed):** (1, MEDIUM) `EP054_DESIGN.md`'s own Section
+12 committed to adding a real, non-fake `MemoryService`-backed test
+once Owner Decision D4 was approved; no such test exists in the
+registered suite -- every persistence test uses a fake `MemoryService`
+only. The STEP 3 audit independently built and ran a real
+`MemoryService`/`MemoryStore` integration probe and confirmed the
+actual integration works correctly; the finding is a test-coverage
+gap against a self-imposed design commitment, not a functional
+defect. (2, LOW) `ReflectionModule._summary()`'s `max_message_count`
+cap check runs before the `reflection.enabled` gate, so a caller can
+observe the configured cap's numeric value via an error message even
+while Self Reflection is disabled -- confirmed, via dummy objects that
+raise on any call, that zero downstream (conversation/provider) calls
+occur in this case; no gate or resource-limit bypass exists. See
+`docs/architecture/audits/EP054_ARCHITECTURE_AUDIT.md` Section 15 for
+full detail on both findings. `src/core/command_router.py`,
+`src/core/tool/`, `src/core/ai/provider.py`,
+`src/core/ai/provider_manager.py`, `src/core/ai/conversation_manager.py`,
+`src/core/ai/conversation.py`, `src/core/memory/`, `src/core/agent/`,
+`src/core/planning/`, `src/core/scheduler/`,
+`src/services/ai_service.py`, `src/services/memory_service.py`, and
+every Phase 7/8 skill (`desktop`, `browser`, `files`, `vision`) are
+all confirmed unmodified by EP-054.
+
+**Next Engineering Package: EP-055 Prompt Optimizer — NOT STARTED.**
+No EP-055 design, research, or implementation work has begun.
+
 EP-053 Vision Integration — **COMPLETE** (STEP 1 Architecture
 Discovery, Technology Evaluation & Design, STEP 2 Implementation &
 Testing, STEP 3 Architecture Audit, STEP 4 Finalization all complete
@@ -179,9 +256,6 @@ Finding 1 for full detail. `src/core/command_router.py`,
 `src/core/tool/`, `src/core/ai/provider.py`, `src/skills/desktop/`,
 `src/skills/browser/`, and `src/skills/files/` are all confirmed
 unmodified by EP-053.
-
-**Next Engineering Package: EP-054 Self Reflection — NOT STARTED.**
-No EP-054 design, research, or implementation work has begun.
 
 EP-052 File Automation — **COMPLETE** (STEP 1 Architecture Discovery,
 Technology Evaluation & Design, STEP 2 Implementation & Testing,

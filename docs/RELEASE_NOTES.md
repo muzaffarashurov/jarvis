@@ -2056,4 +2056,72 @@ EP053 : 58 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-054 — Self Reflection
+
+Status: Released (PASSED WITH FINDINGS -- two non-blocking findings
+documented, not fixed; see "Known limitations" below)
+
+A note on scope: unlike prior Engineering Packages, "Self Reflection"
+had no functional specification anywhere in the project's own
+documentation beyond its title. Rather than inventing a feature scope,
+the design phase surveyed the existing architecture and proposed the
+smallest, most bounded interpretation consistent with it: an on-demand
+self-critique of the current conversation.
+
+Highlights:
+
+- Added Self Reflection: on-demand, AI-generated self-critique of the
+  current conversation's recent messages -- what went well, what could
+  be improved, and one concrete thing to remember for next time
+- CLI integration: reflect summary [count] / reflect recall [count] /
+  reflect help
+- Composes existing components only -- the Conversation Engine (read
+  only) and the already-configured AI provider -- with no new external
+  service, no new backend abstraction, and no new dependency
+- Strictly descriptive in this release: reflections are returned as
+  text (and, optionally, saved for later recall) but never
+  automatically change any setting, prompt, or behavior
+- Optional persistence: reflections can be saved and recalled later,
+  off by default
+- Built-in safeguards: disabled by default, a cap on how much
+  conversation history one reflection may include, and a simple rate
+  limit on how often it can call the AI provider
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed. `src/core/command_router.py`, `src/core/tool/`, every
+`src/core/ai/*` file, `src/core/memory/`, `src/core/agent/`,
+`src/core/planning/`, `src/core/scheduler/`, and every prior skill
+(`desktop`/`browser`/`files`/`vision`) are all unmodified.
+
+No breaking changes.
+
+Known limitations:
+
+- A test the design document committed to adding (a real, non-fake
+  check of the optional save/recall feature) was not included in the
+  automated test suite. The underlying feature was independently
+  verified to work correctly during the architecture audit; this is a
+  test-coverage gap, not a functional problem. See
+  `docs/architecture/audits/EP054_ARCHITECTURE_AUDIT.md` Section 15,
+  Finding 1.
+- If reflection is turned off and someone requests an unusually large
+  reflection window in the same request, the response can reveal the
+  configured limit's numeric value before confirming the feature is
+  off. No conversation content or AI-provider call is ever involved --
+  this is a minor, low-impact ordering detail. See
+  `docs/architecture/audits/EP054_ARCHITECTURE_AUDIT.md` Section 15,
+  Finding 2.
+- No scheduled/automatic reflection (manual, on-demand only) and no
+  autonomous use of a reflection's content -- both are intentionally
+  reserved for later Engineering Packages
+
+Validation:
+
+EP054 : 76 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

@@ -172,6 +172,7 @@ from src.skills.vision.skill import VisionModule
 from src.skills.vision.local_backend import LocalVisionBackend
 from src.skills.reflection.skill import ReflectionModule
 from src.skills.prompt_optimizer.skill import PromptOptimizerModule
+from src.skills.capability_registry.skill import CapabilityRegistryModule
 from src.services.plugin_service import PluginService
 from src.services.process_service import ProcessService
 from src.services.rag_service import RagService
@@ -1910,6 +1911,72 @@ class Bootstrap:
             discovery=plugin_discovery,
         )
         router.register(PluginModule(plugin_service))
+
+        # EP-056 Capability Registry ("Capability Learning"). On-demand
+        # composition of Jarvis's currently available capabilities
+        # (Owner Decision D1, "Candidate A") via the "capability"
+        # CommandRouter namespace (see src/skills/capability_registry/),
+        # dispatched through the same, unmodified
+        # CommandRouter.dispatch() every other skill already uses
+        # (EP056_DESIGN.md Section 3.7/20, Owner Decision D7) -- no new
+        # dispatch mechanism, and Tool Engine is untouched.
+        #
+        # Bootstrap ordering (Owner Decision D5, EP056_DESIGN.md
+        # Section 3.8/14): CapabilityRegistryModule depends on
+        # plugin_service, which is not constructed until here -- much
+        # later than ai_provider_manager/prompt_manager above -- so
+        # this registration deliberately sits immediately after
+        # plugin_service's own construction and PluginModule's own
+        # registration, not alongside the Prompt Engine's wiring.
+        #
+        # Introduces no new backend Protocol (EP056_DESIGN.md Section
+        # 6.2): CapabilityRegistryModule composes three already-
+        # existing, unmodified components directly -- plugin_service
+        # (already constructed above, read-only via
+        # running_plugins()), router.module_names (a bound method,
+        # read-only), and prompt_manager (already constructed above,
+        # for AIService's own use; "capability inject" calls its
+        # existing, previously-unused build(capabilities=...) seam,
+        # never modifying PromptManager/PromptBuilder themselves --
+        # EP-017's Prompt Engine is left completely unmodified and
+        # never autonomously invoked by EP-056, EP055_DESIGN.md
+        # Section 14, DO NOT MODIFY, still applies to EP-056 too).
+        #
+        # Mirrors DesktopModule/BrowserModule/FileModule/VisionModule/
+        # ReflectionModule/PromptOptimizerModule's wiring exactly:
+        # CapabilityRegistryModule is registered unconditionally --
+        # 'capability_registry.enabled' (default false) is re-checked
+        # on every dispatched action inside CapabilityRegistryModule
+        # itself (EP056_DESIGN.md Section 7/20), not only at
+        # registration time. No construction-failure branch is needed
+        # here since CapabilityRegistryModule performs no I/O of its
+        # own at construction time -- it only stores references to
+        # already-constructed collaborators.
+        #
+        # Owner Decision D3: no separate privacy/AI-provider gate --
+        # "capability list"/"capability inject" make no AI-provider
+        # call and disclose nothing "plugin status"/"plugin info"
+        # do not already disclose today.
+        #
+        # STEP 4 fix (Owner Decision D8, EP056_ARCHITECTURE_AUDIT.md
+        # Finding 1): `CommandRouter.module_names` is a @property, not
+        # a plain method -- `router.module_names` alone evaluates it
+        # immediately to a `list[str]` at construction time, not a
+        # callable, which crashed every "capability list"/"capability
+        # inject" call with `TypeError: 'list' object is not
+        # callable`. Wrapping it in a lambda defers evaluation to
+        # dispatch time, satisfying CapabilityRegistryModule's own
+        # documented `Callable[[], list[str]]` contract and correctly
+        # reflecting any namespace (e.g. "scheduler", "telegram",
+        # "test") registered after this point in Bootstrap.
+        router.register(
+            CapabilityRegistryModule(
+                config=config,
+                plugin_service=plugin_service,
+                module_names=lambda: router.module_names,
+                prompt_manager=prompt_manager,
+            )
+        )
 
         if plugin_discovery is not None:
             plugin_service.discover_plugins()

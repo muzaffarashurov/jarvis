@@ -54,6 +54,7 @@ import tests.EP052.test_file
 import tests.EP053.test_vision
 import tests.EP054.test_reflection
 import tests.EP055.test_prompt_optimizer
+import tests.EP056.test_capability_registry
 
 class TestModule(CommandModule):
 

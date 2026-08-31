@@ -10,12 +10,107 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-056 — Capability Learning
+### EP-057 — Memory Optimization
 
 **NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 9
-sequencing, EP-056 (Capability Learning) is the next Engineering
-Package after EP-055's completion. No design, research, or
+sequencing, EP-057 (Memory Optimization) is the next Engineering
+Package after EP-056's completion. No design, research, or
 implementation work has begun.
+
+### EP-056 — Capability Registry
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), and STEP 4 (Finalization) all
+complete. EP-056 is marked **COMPLETE / PASS AFTER REMEDIATION** --
+STEP 3's first-pass verdict was **AUDIT FAILED (ONE BLOCKING
+FINDING)**: a HIGH-severity defect made `capability list`/`capability
+inject` completely non-functional in real, production `Bootstrap`
+wiring. The owner reviewed the finding and approved fixing it during
+STEP 4 (Owner Decision D8); the STEP 3 audit document was then
+updated in place with a dated remediation section recording the fix
+and its independent verification. Final verdict: **PASS AFTER
+REMEDIATION**, zero open findings -- see
+`docs/architecture/audits/EP056_ARCHITECTURE_AUDIT.md` Sections 15-18.
+Full design, including Owner Decisions D1-D7 (Section 20) and D8
+(Section 17): `docs/architecture/designs/EP056_DESIGN.md`.
+
+Like EP-054/EP-055, EP-056's roadmap entry ("Capability Learning") was
+a bare title with no functional specification beyond Phase 9's
+shared, one-sentence goal. STEP 1 disclosed this gap and found the
+strongest textual anchor of any Phase-9 EP so far:
+`PromptBuilder.append_capabilities()`'s own docstring, already
+written during EP-017, reads "reserved for the future Capability
+Registry" verbatim. STEP 1 recommended Owner Decision D1 =
+"Candidate A": an on-demand Capability Registry composing already-
+declared Plugin capability data (EP-010) plus bare `CommandRouter`
+namespace names, finally giving that seam real content.
+
+Built as a new `capability` `CommandModule`
+(`src/skills/capability_registry/skill.py`) providing `list` (compose
+a summary of every currently running plugin's declared capability
+tags plus the bare list of registered built-in commands) and `inject
+<text>` (pass that same summary through the Prompt Engine's existing,
+previously-unused `PromptManager.build(capabilities=...)` seam
+together with `<text>`, returning the assembled prompt for
+inspection -- never calling an AI provider) -- plus `help`, dispatched
+through the *existing*, unmodified `CommandRouter.dispatch()`.
+Introduces no new backend Protocol (Owner Decision D1) -- composes
+`PluginService.running_plugins()` and `CommandRouter.module_names`
+directly, read-only. The EP-010 Plugin system and EP-017 Prompt
+Engine are never modified or redesigned; `PromptManager`/
+`PromptBuilder` are called only through their existing, unmodified
+public API. Gated by `capability_registry.enabled` (default `false`,
+re-checked on every dispatched action). No separate AI-provider
+privacy gate exists, since neither action ever calls an AI provider
+(Owner Decision D3). No `AgentEngine` subsystem registration exists in
+v1. No new dependency was introduced.
+
+Owner Decisions D1-D7 were all confirmed correctly implemented with
+zero findings against their literal text during STEP 3. However, the
+STEP 3 audit's direct exercise of the real, fully-wired `Bootstrap`
+with `capability_registry.enabled: true` -- a step beyond what the
+registered test suite performed -- found that `src/bootstrap.py`
+passed `CommandRouter.module_names` (a `@property`, evaluated eagerly
+at construction time) where `CapabilityRegistryModule`'s own
+documented constructor contract required a live, zero-argument
+callable. This caused a 100%-reproducible `TypeError` on every single
+call to `capability list` or `capability inject`, surfaced to the
+end user only as a generic "Internal error" message. `capability
+help` was unaffected. No security, disclosure, or gate-bypass issue
+was involved -- this was a pure availability defect. The registered
+51-assertion test suite did not catch it because its fake
+`module_names` collaborator correctly implemented the *documented*
+interface; only a real, enabled `Bootstrap` exercise could surface the
+mismatch between that documentation and what `bootstrap.py` actually
+supplied. Owner Decision D8 (approved, option (a)) directed a STEP 4
+fix: a single-line, behavior-preserving change
+(`module_names=router.module_names` -> `module_names=lambda: router.
+module_names`) confined entirely to `src/bootstrap.py`, requiring zero
+change to `src/skills/capability_registry/skill.py`,
+`CommandRouter`, `PluginService`, or `PromptManager`. The fix was
+independently verified against a reverted, pre-fix scratch copy
+(proving new tests genuinely catch the original defect, not merely
+passing vacuously) and against the real, fixed code's before/after
+responses through the actual `Bootstrap` -> `CommandRouter` ->
+`CapabilityRegistryModule` path.
+
+Tests: EP056 62/0/0 (51 original + 11 added in STEP 4, three new test
+methods specifically exercising the real, enabled `Bootstrap` wiring
+end-to-end -- not fakes -- to prevent this exact wiring defect from
+returning), covering argument-shape/gate/dispatch behavior against
+fake `PluginService`/`module_names` stand-ins, a real, unmodified
+`PromptManager` integration for `capability inject` (Owner Decision
+D6), and the real-`Bootstrap` regression guard. Full regression
+suites EP-055 64/0/0, EP-054 76/0/0, EP-053 58/0/0, EP-052 135/0/0,
+EP-051 105/0/0, EP-050 112/0/0 were independently reproduced exactly,
+both before and after the STEP 4 fix. `src/core/plugins/plugin.py`,
+`plugin_manifest.py`, `plugin_registry.py`, `plugin_loader.py`,
+`plugin_discovery.py` (EP-010), `src/services/plugin_service.py`,
+`src/core/ai/prompt.py`, `prompt_builder.py`, `prompt_manager.py`
+(EP-017), `src/core/command_router.py`, `src/services/ai_service.py`,
+and every prior skill (`desktop`/`browser`/`files`/`vision`/`reflect`/
+`prompt`) are all confirmed byte-identical/unmodified by EP-056, both
+before and after the STEP 4 fix.
 
 ### EP-055 — Prompt Optimizer
 

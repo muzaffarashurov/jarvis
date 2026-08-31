@@ -122,6 +122,99 @@ Completed sub-packages:
 
 ## Current
 
+EP-056 Capability Registry — **COMPLETE** (STEP 1 Architecture
+Discovery & Design, STEP 2 Implementation & Testing, STEP 3
+Architecture Audit, STEP 4 Finalization all complete -- see
+docs/architecture/designs/EP056_DESIGN.md (including its Section 20
+owner-decision record, D1-D7, and Section 17's D8) and
+docs/architecture/audits/EP056_ARCHITECTURE_AUDIT.md. **Final Verdict:
+STEP 3 — PASS AFTER REMEDIATION** (first pass: AUDIT FAILED with one
+HIGH/BLOCKING finding; the owner approved fixing it during STEP 4 via
+Owner Decision D8, and it is now resolved and verified -- see below).
+Like EP-054/EP-055, EP-056's roadmap entry was a bare title with no
+functional specification (Owner Decision D1) -- STEP 1 found the
+strongest textual anchor of any Phase-9 EP so far:
+`PromptBuilder.append_capabilities()`'s own docstring, already
+written during EP-017, reads "reserved for the future Capability
+Registry" verbatim, and recommended "Candidate A": an on-demand
+Capability Registry composing already-declared Plugin capability data
+(EP-010) plus bare `CommandRouter` namespace names. Built as a new
+`capability` `CommandModule`
+(`src/skills/capability_registry/skill.py`) providing `list` (compose
+a summary of every currently running plugin's declared capability
+tags plus the bare list of registered built-in commands) and `inject
+<text>` (pass that same summary through the Prompt Engine's existing,
+previously-unused `PromptManager.build(capabilities=...)` seam
+together with `<text>`, returning the assembled prompt for
+inspection -- never calling an AI provider) -- plus `help`, dispatched
+through the *existing*, unmodified `CommandRouter.dispatch()`, exactly
+as every prior skill already is: no second dispatch mechanism, no
+change to Tool Engine. Like EP-054/EP-055, EP-056 introduces no new
+external I/O surface and therefore no new backend Protocol (Owner
+Decision D1) -- `CapabilityRegistryModule` instead composes two
+already-existing, unmodified components directly, read-only:
+`PluginService.running_plugins()` (EP-010) and `CommandRouter.
+module_names`. The EP-010 Plugin system and EP-017 Prompt Engine are
+never modified or redesigned; `PromptManager`/`PromptBuilder` are
+called only through their existing, unmodified public API. No
+separate AI-provider privacy gate exists, since neither action ever
+calls an AI provider (Owner Decision D3). No `AgentEngine` subsystem
+registration exists in v1. No new dependency was introduced. Gated by
+`capability_registry.enabled` (default `false`, re-checked on every
+dispatched action). Owner Decisions D1-D7 (Candidate A scope, include
+`capability inject`, no separate privacy gate, `capability` namespace
+name, `Bootstrap` registration at the existing `plugin_service` site,
+real `PromptManager` in integration tests, `CommandRouter` dispatch)
+are all confirmed correctly implemented with zero findings against
+their literal text. Tests: EP-056 62/0/0 (51 original plus 11 added
+during STEP 4 specifically to exercise the real, enabled `Bootstrap`
+wiring end-to-end), covering argument-shape/gate/dispatch behavior
+against fake `PluginService`/`module_names` stand-ins, a real,
+unmodified `PromptManager` integration for `capability inject`, and a
+real-`Bootstrap` regression guard. Full regression: EP-055 64/0/0,
+EP-054 76/0/0, EP-053 58/0/0, EP-052 135/0/0, EP-051 105/0/0, EP-050
+112/0/0, independently reproduced exactly both before and after the
+STEP 4 fix. **STEP 3 finding (identified, then fixed and verified
+during STEP 4):** (1, HIGH/BLOCKING) the STEP 3 audit's direct
+exercise of the real, fully-wired `Bootstrap` with
+`capability_registry.enabled: true` -- a step beyond what the
+registered test suite performed -- found that `src/bootstrap.py`
+passed `CommandRouter.module_names` (a `@property`, evaluated eagerly
+at construction time) where `CapabilityRegistryModule`'s own
+documented constructor contract required a live, zero-argument
+callable, causing a 100%-reproducible `TypeError` on every single call
+to `capability list` or `capability inject`, surfaced to the end user
+only as a generic "Internal error" message; `capability help` was
+unaffected, and no security, disclosure, or gate-bypass issue was
+involved. The registered 51-assertion suite did not catch it because
+its fake `module_names` collaborator correctly implemented the
+*documented* interface -- only a real, enabled `Bootstrap` exercise
+could surface the mismatch between that documentation and what
+`bootstrap.py` actually supplied. Fixed in STEP 4 by a single-line,
+behavior-preserving change (`module_names=router.module_names` ->
+`module_names=lambda: router.module_names`) confined entirely to
+`src/bootstrap.py`, requiring zero change to
+`src/skills/capability_registry/skill.py`, `CommandRouter`,
+`PluginService`, or `PromptManager`. Verified against a reverted,
+pre-fix scratch copy (confirming the new tests would have caught the
+original defect, not merely passing vacuously) and against the real,
+fixed code's before/after responses through the actual `Bootstrap` ->
+`CommandRouter` -> `CapabilityRegistryModule` path -- see
+`docs/architecture/audits/EP056_ARCHITECTURE_AUDIT.md` Sections 15-18
+for full detail. `src/core/plugins/plugin.py`, `plugin_manifest.py`,
+`plugin_registry.py`, `plugin_loader.py`, `plugin_discovery.py`
+(EP-010 Plugin system), `src/services/plugin_service.py`,
+`src/core/ai/prompt.py`, `prompt_builder.py`, `prompt_manager.py`
+(EP-017 Prompt Engine), `src/core/command_router.py`,
+`src/services/ai_service.py`, and every prior skill (`desktop`,
+`browser`, `files`, `vision`, `reflect`, `prompt`) are all confirmed
+byte-identical/unmodified by EP-056, both before and after the STEP 4
+fix.
+
+**Next Engineering Package: EP-057 Memory Optimization — NOT
+STARTED.** No EP-057 design, research, or implementation work has
+begun.
+
 EP-055 Prompt Optimizer — **COMPLETE** (STEP 1 Architecture Discovery
 & Design, STEP 2 Implementation & Testing, STEP 3 Architecture Audit,
 STEP 4 Finalization all complete -- see
@@ -201,10 +294,6 @@ agent/`, `src/core/planning/`, `src/core/scheduler/`, and every prior
 skill (`desktop`, `browser`, `files`, `vision`, `reflect`) are all
 confirmed byte-identical/unmodified by EP-055, both before and after
 the STEP 4 fix.
-
-**Next Engineering Package: EP-056 Capability Learning — NOT
-STARTED.** No EP-056 design, research, or implementation work has
-begun.
 
 EP-054 Self Reflection — **COMPLETE** (STEP 1 Architecture Discovery
 & Design, STEP 2 Implementation & Testing, STEP 3 Architecture Audit,

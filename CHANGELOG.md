@@ -6,6 +6,203 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.15-ep056
+
+Released: 2026-08-31
+
+Status: EP-056 COMPLETE / PASS AFTER REMEDIATION (STEP 1 Architecture
+Discovery & Design, STEP 2 Implementation & Testing, STEP 3
+Architecture Audit, STEP 4 Finalization all complete). STEP 3's
+first-pass verdict was **AUDIT FAILED (ONE BLOCKING FINDING)** -- one
+HIGH-severity, blocking finding. The owner reviewed the finding and
+approved fixing it during STEP 4 (Owner Decision D8). Final verdict,
+after the fix and its independent verification: **PASS AFTER
+REMEDIATION**, zero open findings.
+
+EP-056's roadmap entry ("Capability Learning") had no functional
+specification anywhere in the repository beyond Phase 9's
+one-sentence, five-EP-wide goal already shared with EP-054/EP-055.
+STEP 1 disclosed this explicitly and found the strongest textual
+anchor of any Phase-9 EP so far: `PromptBuilder.append_capabilities()`'s
+own docstring, already written during EP-017, reads "reserved for
+the future Capability Registry" verbatim. STEP 1 recommended Owner
+Decision D1 = "Candidate A": an on-demand Capability Registry
+composing already-declared Plugin capability data (EP-010) plus bare
+`CommandRouter` namespace names, finally giving that seam real
+content.
+
+### Added
+
+- src/skills/capability_registry/skill.py: `CapabilityRegistryModule`,
+  the "capability" `CommandModule` namespace -- `list` (compose a
+  summary of every currently running plugin's declared capability
+  tags, plus the bare list of registered built-in commands) and
+  `inject <text>` (pass that same summary through the Prompt Engine's
+  existing, previously-unused `PromptManager.build(capabilities=...)`
+  seam together with `<text>`, returning the assembled prompt for
+  inspection -- never calling an AI provider), plus `help`, dispatched
+  through the existing, unmodified `CommandRouter.dispatch()`.
+  Introduces no new backend Protocol (Owner Decision D1) -- composes
+  `PluginService.running_plugins()` (EP-010) and `CommandRouter.
+  module_names` directly, read-only. The EP-010 Plugin system and
+  EP-017 Prompt Engine are never modified or called
+- config/config.yaml: new `capability_registry` section (`enabled`),
+  deliberately separate from the pre-existing `prompt:`/
+  `prompt_optimizer:` sections
+- tests/EP056/test_capability_registry.py: EP-056 test suite (`NAME =
+  "EP056"`) -- argument-shape, gate, positive/negative-path,
+  `capability list`/`capability inject` composition tests against
+  fake `PluginService`/`module_names` stand-ins, a real, unmodified
+  `PromptManager` integration test for `capability inject`,
+  `CommandRouter` dispatch equivalence, `Bootstrap` wiring tests, and
+  (added during STEP 4) 3 additional tests exercising the real,
+  enabled `Bootstrap` -> `CommandRouter` -> `CapabilityRegistryModule`
+  path end-to-end
+- docs/architecture/designs/EP056_DESIGN.md: full design document,
+  including the scope-definition discovery (Section 0-5), Owner
+  Decisions D1-D7 (Section 20), and D8 (Section 17, added during
+  STEP 3)
+- docs/architecture/audits/EP056_ARCHITECTURE_AUDIT.md: EP-056
+  Architecture Audit, Final Verdict PASS AFTER REMEDIATION (first
+  pass: AUDIT FAILED with one HIGH/BLOCKING finding; Section 18
+  records the STEP 4 fix and its independent verification)
+
+### Changed
+
+- src/bootstrap.py: constructs `CapabilityRegistryModule` immediately
+  after `plugin_service`'s own construction and `PluginModule`'s own
+  registration (Owner Decision D5), gated by
+  `capability_registry.enabled` (default `false`). `capability`
+  namespace registers even when disabled, reporting a disabled
+  message for every action, matching every other skill's convention
+
+### Security
+
+- `capability_registry.enabled` defaults to `false` and is
+  re-checked on every dispatched action, not only at registration
+- No separate AI-provider privacy gate exists (Owner Decision D3):
+  neither `capability list` nor `capability inject` ever calls an AI
+  provider, and both disclose no more than the already-existing
+  `plugin status`/`plugin info` commands already disclose today
+- No filesystem write capability exists anywhere in this module
+
+### Fixed
+
+- **STEP 4 (Owner Decision D8):** `src/bootstrap.py` previously passed
+  `module_names=router.module_names` when constructing
+  `CapabilityRegistryModule`. Because `CommandRouter.module_names` is
+  a `@property`, this evaluated the property immediately at
+  construction time, yielding a `list[str]` rather than the live,
+  zero-argument callable `CapabilityRegistryModule`'s own documented
+  constructor contract required. Every single call to `capability
+  list` or `capability inject`, in real production `Bootstrap`
+  wiring, raised `TypeError: 'list' object is not callable`, surfaced
+  to the end user only as a generic "Internal error" message.
+  `capability help` was unaffected, and no security, disclosure, or
+  gate-bypass issue was involved. Fixed by a single-line,
+  behavior-preserving change confined to `src/bootstrap.py`
+  (`module_names=router.module_names` ->
+  `module_names=lambda: router.module_names`), requiring zero change
+  to `src/skills/capability_registry/skill.py`, `CommandRouter`,
+  `PluginService`, or `PromptManager`. This also corrects
+  `capability list`/`capability inject`'s summary to correctly
+  reflect namespaces registered after `capability` itself (e.g.
+  `scheduler`, `telegram`, `test`), since the namespace list is now
+  evaluated live at dispatch time rather than captured once at
+  construction time.
+
+### Validation
+
+```
+EP056 : 62 passed / 0 failed / 0 skipped
+EP055 : 64 passed / 0 failed / 0 skipped
+EP054 : 76 passed / 0 failed / 0 skipped
+EP053 : 58 passed / 0 failed / 0 skipped
+EP052 : 135 passed / 0 failed / 0 skipped
+EP051 : 105 passed / 0 failed / 0 skipped
+EP050 : 112 passed / 0 failed / 0 skipped
+```
+
+All regression figures above were independently reproduced from a
+clean process both before and after the STEP 4 fix.
+
+### STEP 3 -- Architecture Audit
+
+First-pass verdict: EP-056 STEP 3 -- **AUDIT FAILED (ONE BLOCKING
+FINDING)**. All seven Owner Decisions (D1-D7) confirmed correctly
+implemented with zero findings against their literal text. One
+finding was identified through a direct exercise of the real,
+fully-wired `Bootstrap` with `capability_registry.enabled: true` -- a
+step beyond what the registered test suite performed:
+
+1. **(HIGH -- BLOCKING)** `src/bootstrap.py` passed `CommandRouter.
+   module_names` (a `@property`, evaluated eagerly at construction
+   time) where `CapabilityRegistryModule`'s own documented
+   constructor contract required a live, zero-argument callable,
+   causing a 100%-reproducible `TypeError` on every call to
+   `capability list` or `capability inject`. No security, disclosure,
+   or gate-bypass issue was involved -- this was a pure availability
+   defect. The registered 51-assertion suite did not catch it because
+   its fake `module_names` collaborator correctly implemented the
+   *documented* interface; only a real, enabled `Bootstrap` exercise
+   surfaced the mismatch between that documentation and what
+   `bootstrap.py` actually supplied.
+
+File scope confirmed to exactly match the approved STEP 2 scope, with
+zero unauthorized changes to `src/core/plugins/plugin.py`,
+`plugin_manifest.py`, `plugin_registry.py`, `plugin_loader.py`,
+`plugin_discovery.py` (EP-010 Plugin system, byte-compared against
+the pre-EP-056 archive and confirmed identical),
+`src/services/plugin_service.py`, `src/core/ai/prompt.py`,
+`prompt_builder.py`, `prompt_manager.py` (EP-017 Prompt Engine),
+`src/core/command_router.py`, `src/services/ai_service.py`, or any
+prior skill. See `docs/architecture/audits/EP056_ARCHITECTURE_AUDIT.md`
+for the full first-pass audit, including two independent mutation
+tests and a direct, real-`Bootstrap` edge-case probe.
+
+### STEP 4 -- Finalization (including remediation)
+
+Unlike EP-054's STEP 4 (documentation sync only, findings left
+unfixed), and consistent with EP-055's STEP 4, the owner explicitly
+approved Owner Decision D8 (option (a)): fix the finding before
+closing EP-056. The fix was minimal and behavior-preserving -- a
+single line in `src/bootstrap.py`'s `CapabilityRegistryModule`
+registration call. No public interface, config key, or previously-
+correct behavior changed; all 51 pre-existing test assertions
+continued to pass unchanged, and 11 new assertions (3 new test
+methods) were added specifically to exercise the real, enabled
+`Bootstrap` wiring end-to-end and prevent this exact wiring defect
+from returning.
+
+The fix was independently verified two ways: (1) a reverted, pre-fix
+scratch copy (never touching the real repository) was used to confirm
+the new tests would have genuinely caught the original defect --
+exactly the 9 assertions belonging to the 3 new test methods failed
+against it, with the exact predicted error messages, while every
+other test continued to pass; (2) the same live probe from the first
+audit pass was re-run against the real, fixed code through the actual
+`Bootstrap` -> `CommandRouter` -> `CapabilityRegistryModule` path and
+confirmed both `capability list` and `capability inject` now succeed,
+correctly including namespaces registered after `capability` itself
+(`scheduler`, `telegram`, `test`).
+
+`docs/architecture/audits/EP056_ARCHITECTURE_AUDIT.md` was updated in
+place with a Section 18 remediation record -- the original first-pass
+finding (Sections 1-17) was preserved verbatim, not edited or removed,
+per the same "record both passes factually" precedent
+`EP052_ARCHITECTURE_AUDIT.md`/`EP055_ARCHITECTURE_AUDIT.md` already
+established. Release/project documentation (`CHANGELOG.md`,
+`docs/BACKLOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/architecture/JARVIS_ROADMAP.md`) synchronized to mark EP-056
+COMPLETE / PASS AFTER REMEDIATION and EP-057 (Memory Optimization) as
+the next, not-started Engineering Package.
+
+**EP-056 is COMPLETE (PASS AFTER REMEDIATION -- the one blocking
+finding identified during STEP 3 was fixed and independently verified
+during STEP 4; zero open findings).**
+
+---
+
 ## v0.1.14-ep055
 
 Released: 2026-08-30

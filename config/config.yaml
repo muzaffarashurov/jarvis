@@ -697,6 +697,35 @@ prompt_optimizer:
   # "prompt optimize" never writes to 'paths.prompts' or anywhere
   # else; its output is returned as plain text only.
 
+capability_registry:
+  # EP-056 Capability Registry ("Capability Learning"). On-demand
+  # composition of Jarvis's currently available capabilities (Owner
+  # Decision D1, "Candidate A") via the "capability" CommandRouter
+  # namespace -- see src/skills/capability_registry/. Composes two
+  # already-existing, unmodified components directly: PluginService
+  # (EP-010, "plugins:" below) and CommandRouter's own
+  # module_names() -- introduces no new data model, no new
+  # dependency, and no new backend/Protocol layer
+  # (EP056_DESIGN.md Section 6.2/9). "capability inject" additionally
+  # calls the existing, previously-unused
+  # PromptManager.build(capabilities=...) seam ("prompt:" above,
+  # EP-017) -- never modifies the Prompt Engine itself
+  # (EP056_DESIGN.md Section 14, DO NOT MODIFY).
+  #
+  # "enabled" is the master safety gate for the entire namespace
+  # (EP056_DESIGN.md Section 7/20, Owner Decision D1) -- re-checked on
+  # every dispatched "capability ..." action, not only at startup.
+  # Defaults to false, matching every other risky-by-nature
+  # capability's own off-by-default precedent (desktop.enabled,
+  # browser.enabled, file.enabled, vision.enabled, reflection.enabled,
+  # prompt_optimizer.enabled). Unlike reflection/prompt_optimizer, no
+  # AI-provider call exists anywhere in this module and no
+  # resource/rate-limit key is needed (Owner Decision D3,
+  # EP056_DESIGN.md Section 7/17) -- "capability list"/"capability
+  # inject" disclose nothing the existing, unmodified "plugin
+  # status"/"plugin info" commands do not already disclose today.
+  enabled: false
+
 context:
   # EP-018 Context Loader. Provider-independent context gathering,
   # supplying the Prompt Engine's "Conversation Context" stage; see

@@ -2186,4 +2186,67 @@ EP055 : 64 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-056 — Capability Registry
+
+Status: Released (PASS AFTER REMEDIATION -- one blocking finding
+identified during the architecture audit and fixed before release;
+see "Known limitations" below, now empty)
+
+A note on scope: like EP-054 and EP-055, "Capability Learning" had no
+functional specification anywhere in the project's own documentation
+beyond its title. The design phase found the strongest clue yet among
+these bare-title packages: the Prompt Engine's own code (EP-017)
+already contained a spot reserved, in its own comments, for "the
+future Capability Registry" -- so the design phase built exactly
+that: a way for Jarvis to describe what it can currently do, using
+information that already exists rather than inventing anything new.
+
+Highlights:
+
+- Added a Capability Registry: on-demand composition of a summary of
+  Jarvis's currently available capabilities, drawn entirely from
+  already-existing, already-declared information
+- CLI integration: `capability list` (show the summary) /
+  `capability inject <text>` (pass that summary, together with some
+  text, through the Prompt Engine's existing "Capability Context"
+  stage, and show the result) / `capability help`
+- Composes existing components only -- each currently running
+  plugin's own declared capabilities, and the plain list of built-in
+  commands already registered -- with no new external service, no
+  new backend abstraction, and no new dependency
+- Never calls an AI provider and never writes anything to disk
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed. The Plugin system (EP-010) and Prompt Engine (EP-017) that
+the Capability Registry builds alongside, `src/core/command_router.py`,
+`src/services/ai_service.py`, and every prior skill
+(`desktop`/`browser`/`files`/`vision`/`reflect`/`prompt`) are all
+unmodified.
+
+No breaking changes.
+
+Known limitations:
+
+- None outstanding. The architecture audit found, before release,
+  that the way the new commands were originally wired together with
+  the rest of the app meant they would fail every time someone
+  actually tried to use them, even though the feature's own code and
+  its own tests were correct in isolation -- a wiring mismatch, not a
+  security or data problem, and not something that could leak any
+  information. It was fixed prior to release by correcting that one
+  piece of wiring, and new tests were added that check the commands
+  work through the real, fully running app rather than only in
+  isolation, so this exact mistake cannot silently reappear.
+  See `docs/architecture/audits/EP056_ARCHITECTURE_AUDIT.md` Section
+  18 for the fix and its verification.
+
+Validation:
+
+EP056 : 62 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

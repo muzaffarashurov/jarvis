@@ -1,10 +1,16 @@
 """Context compression module: CLI command surface for EP-027 Context Compression.
 
 Exposes the "compression" command namespace (help, status, providers,
-use, analyze, compress, limits) as thin CommandModule handlers,
+use, analyze, compress, query, limits) as thin CommandModule handlers,
 following the same pattern as SemanticModule/EmbeddingModule. All
 orchestration logic lives in CompressionService; this module only
 formats CommandResult objects for the shell.
+
+EP-057 Memory Optimization (Owner Decision D1/D4, "Candidate A") adds
+the "query" action, forwarding to CompressionService.query() --
+already-built, already-tested Context Compression/Semantic Search
+infrastructure (EP-027/EP-026), previously exposed only to EP-027's
+own test suite. Every other action is unchanged.
 """
 
 from __future__ import annotations
@@ -20,6 +26,7 @@ from src.services.context_compression_service import (
     CompressionStatus,
     CompressOutcome,
     ProviderSelectionResult,
+    QueryOutcome,
 )
 
 HELP_TEXT: str = (
@@ -30,6 +37,7 @@ HELP_TEXT: str = (
     "compression use <provider>\n"
     'compression analyze "<text>"\n'
     'compression compress "<text>"\n'
+    'compression query "<text>"\n'
     "compression limits"
 )
 
@@ -55,6 +63,7 @@ class ContextCompressionModule:
             "use": self._use,
             "analyze": self._analyze,
             "compress": self._compress,
+            "query": self._query,
             "limits": self._limits,
         }
 
@@ -177,6 +186,40 @@ class ContextCompressionModule:
         result = outcome.result
         lines = [
             "Context Compression Result",
+            "",
+            f"Original chunks : {result.original_chunk_count}",
+            f"Compressed chunks : {result.chunk_count}",
+            f"Original characters : {result.original_character_count}",
+            f"Compressed characters : {result.character_count}",
+            f"Estimated tokens : {result.estimated_tokens}",
+            f"Deduplicated : {result.deduplicated_chunk_count}",
+            f"Truncated : {self._mark(result.truncated)}",
+            "",
+            result.joined_text(),
+        ]
+        return CommandResult(success=True, message="\n".join(lines))
+
+    def _query(self, arguments: list[str]) -> CommandResult:
+        """Search memory for the given query and compress the results (EP-057).
+
+        Args:
+            arguments: The query words (joined with spaces).
+
+        Returns:
+            A CommandResult listing the query/compression outcome, or
+            a user-friendly error message.
+        """
+        if not arguments:
+            return CommandResult(success=False, message='Usage: compression query "<text>"')
+
+        query = " ".join(arguments)
+        outcome: QueryOutcome = self._service.query(query)
+        if not outcome.success or outcome.result is None:
+            return CommandResult(success=False, message=outcome.error)
+
+        result = outcome.result
+        lines = [
+            "Context Compression Query Result",
             "",
             f"Original chunks : {result.original_chunk_count}",
             f"Compressed chunks : {result.chunk_count}",

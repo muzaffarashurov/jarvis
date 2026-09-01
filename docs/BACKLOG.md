@@ -10,12 +10,135 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-057 — Memory Optimization
+### EP-058 — Autonomous Planning
 
 **NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 9
-sequencing, EP-057 (Memory Optimization) is the next Engineering
-Package after EP-056's completion. No design, research, or
+sequencing, EP-058 (Autonomous Planning) is the next Engineering
+Package after EP-057's completion. No design, research, or
 implementation work has begun.
+
+### EP-057 — Memory Optimization
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), and STEP 4 (Finalization) all
+complete. EP-057 is marked **COMPLETE / PASS AFTER REMEDIATION** --
+STEP 3's first-pass verdict was **AUDIT PASSED WITH FINDINGS** (three
+non-blocking findings, zero blocking). Unlike EP-054, where two
+comparable findings were left documented and unfixed, the owner
+reviewed EP-057's findings and directed that all three be closed
+during STEP 4; the STEP 3 audit document was then updated in place
+with a dated remediation section recording each fix and its
+independent verification. Final verdict: **PASS AFTER REMEDIATION**,
+zero open findings -- see
+`docs/architecture/audits/EP057_ARCHITECTURE_AUDIT.md` Sections 15-20.
+Full design, including Owner Decisions D1-D4 (Section 20) and the
+Owner Approval Checklist (added during STEP 4):
+`docs/architecture/designs/EP057_DESIGN.md`.
+
+Like EP-054/EP-055/EP-056, EP-057's roadmap entry ("Memory
+Optimization") was a bare title with no functional specification
+beyond Phase 9's shared, one-sentence goal. STEP 1 disclosed this gap
+and found the strongest anchor of any Phase-9 EP so far:
+`CompressionEngine.compress_query()`/`compress_semantic_results()`
+(EP-027) were already fully built and fully tested but had exactly
+zero production callers anywhere in the repository, and
+`src/bootstrap.py`'s own construction-site comment already named this
+exact situation, describing the underlying Semantic Search access as
+"used only by `compression`'s future callers via `compress_query()`,
+never by the CLI commands wired here." STEP 1 recommended Owner
+Decision D1 = "Candidate A": expose that already-built,
+already-tested method as a new, on-demand `compression query
+"<text>"` command, finally giving it a real caller.
+
+Built as one new `query()` method on `CompressionService`
+(`src/services/context_compression_service.py`) -- a one-line forward
+to `CompressionEngine.compress_query()`, introducing no new
+compression or semantic-search logic of its own -- and one new
+`query` action on `ContextCompressionModule`
+(`src/modules/context_compression_module.py`), dispatched through the
+*existing*, unmodified `CommandRouter.dispatch()`. Introduces no new
+backend Protocol, Manager, Engine, or Provider (Owner Decision D1) --
+`compression query` instead composes already-existing, unmodified
+components directly, read-only: `CompressionEngine.compress_query()`
+(EP-027), which itself reaches `SemanticEngine.search()` (EP-026)
+over Knowledge Base (EP-024) and Long-Term Memory (EP-025) content.
+The EP-016 Conversation Engine, EP-018 Context Loader, EP-024
+Knowledge Base, EP-025 Long-Term Memory, EP-026 Semantic Search, and
+EP-027 Context Compression's own core logic are never modified or
+redesigned. No `top_k`/`threshold` CLI arguments are exposed --
+`compression query` relies on the existing `semantic.*` configuration
+defaults (Owner Decision D2). No separate AI-provider privacy gate
+exists, since `compression query` never calls an AI provider and,
+independently confirmed during the architecture audit, discloses
+strictly less than the already-existing `semantic search` command
+already discloses today (Owner Decision D3). Extends the existing
+`compression` `CommandModule` namespace rather than creating a new one
+or extending `ltm` (Owner Decision D4). No `AgentEngine` subsystem
+registration exists in v1. No new dependency was introduced. Required
+zero `src/bootstrap.py` construction-ordering change and zero new
+configuration key, since `CompressionEngine` was already constructed
+with a live `SemanticEngine` wherever Semantic Search is available.
+
+Owner Decisions D1-D4 were all confirmed correctly implemented with
+zero findings against their literal text during STEP 3. The STEP 3
+audit identified three further, non-blocking findings, none security-
+or disclosure-related: (1, LOW, informational) `src/bootstrap.py`'s
+own construction-site comment became factually stale the moment
+EP-057 gave `compress_query()` a real CLI caller; (2, LOW) the
+registered test suite defined a `context_compression.enabled: false`
+configuration fixture but never actually used it, and a test named
+for that scenario instead tested a different code path ("no
+`SemanticEngine` configured"), because `compress_query()` checks for
+a `None` `SemanticEngine` before ever reaching the
+`enabled`/provider-selection check; (3, informational)
+`EP057_DESIGN.md`, approved during STEP 1, had been delivered to the
+owner but never committed into the repository tree. Owner Decision:
+the owner directed a STEP 4 fix for all three findings -- rather than
+leaving them documented and unfixed, as EP-054's STEP 4 did with its
+own two non-blocking findings. Fixed by: (1) a comment-only, two-line
+edit to `src/bootstrap.py`, independently confirmed to touch zero
+executable statements; (2) renaming the misleadingly-named test and
+adding a new test that exercises the actual `context_compression.
+enabled: false` gate together with a real `SemanticEngine`,
+independently confirmed via a dedicated mutation test to genuinely
+detect a simulated gate bypass that would have passed through the
+original suite entirely undetected; (3) committing
+`EP057_DESIGN.md`'s approved content to
+`docs/architecture/designs/EP057_DESIGN.md`, restoring parity with
+EP-054/EP-055/EP-056's own design documents.
+
+Tests: EP-057 41/0/0 (35 original plus 6 added during STEP 4
+specifically to close finding (2) above), covering
+argument-shape/gate/dispatch behavior, a real, unmodified
+`SemanticEngine`/`KnowledgeService` integration (not a fake) for the
+one genuine cross-subsystem call this EP makes, and three real,
+enabled `Bootstrap` -> `CommandRouter` -> `CompressionService` ->
+`CompressionEngine` -> `SemanticEngine` -> `KnowledgeService`
+end-to-end tests. Full regression suites EP-056 62/0/0, EP-055
+64/0/0, EP-054 76/0/0, EP-053 58/0/0, EP-052 135/0/0, EP-051 105/0/0,
+EP-050 112/0/0, plus EP-024 Knowledge Base 407/0/0, EP-025 Long-Term
+Memory 442/0/0, EP-026 Semantic Search 204/0/0, and EP-027 Context
+Compression 229/0/0 were independently reproduced exactly, both
+before and after the STEP 4 fixes.
+`src/core/context_compression/compression_engine.py`,
+`compression_manager.py`, `compression_provider.py`,
+`compression_result.py` (EP-027), `src/core/semantic/semantic_engine.py`
+(EP-026), `src/core/long_term_memory/`,
+`src/services/long_term_memory_service.py` (EP-025),
+`src/core/knowledge/`, `src/services/knowledge_service.py` (EP-024),
+`src/core/memory/`, `src/services/memory_service.py` (EP-013/023),
+`src/core/ai/conversation.py`, `conversation_manager.py`,
+`context_manager.py` (EP-016/018), `src/core/command_router.py`, and
+`config/config.yaml` are all confirmed byte-identical/unmodified by
+EP-057, both before and after the STEP 4 fixes; `src/bootstrap.py`'s
+only change across all of EP-057 is the single, comment-only edit
+described above. Separately, and unrelated to EP-057, two pre-existing
+EP-048 (Wake Word) test failures were independently investigated
+during STEP 3 and conclusively proven pre-existing and
+environment-only (the `openwakeword` package is not installable in
+the audit environment) by reproducing the identical failure against a
+separate, pristine copy of the repository containing zero EP-057
+code.
 
 ### EP-056 — Capability Registry
 

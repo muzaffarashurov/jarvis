@@ -17,6 +17,18 @@ It implements no business logic belonging to any other module and
 never imports from src.core.rag or src.core.ai (Context Compression
 must not generate answers, call an AI provider, build prompts, or
 reason).
+
+EP-057 Memory Optimization (Owner Decision D1, "Candidate A") adds
+`query()`, a thin forward to CompressionEngine.compress_query() --
+already-built, already-tested (EP-027), previously reachable only
+from EP-027's own test suite. `query()` introduces no new compression
+or semantic-search logic of its own: it composes the same
+already-existing engine call `compress()` composes for
+`compress_text()`, adapted to `compress_query()`'s own signature and
+exception surface. Per Owner Decision D2, `top_k`/`threshold` are not
+exposed as CLI arguments in v1 -- callers rely on 'semantic.top_k' /
+'semantic.similarity_threshold''s already-configured defaults, so
+`query()` takes no such parameters.
 """
 
 from __future__ import annotations
@@ -130,6 +142,23 @@ class CompressOutcome:
 
     success: bool
     text: str
+    result: CompressionResult | None
+    error: str
+
+
+@dataclass(frozen=True)
+class QueryOutcome:
+    """Result of `compression query "<text>"` (EP-057).
+
+    Attributes:
+        success: Whether the query completed successfully.
+        query: The natural-language query that was searched for.
+        result: The resulting CompressionResult, or None on failure.
+        error: Human-readable error message, or "" on success.
+    """
+
+    success: bool
+    query: str
     result: CompressionResult | None
     error: str
 
@@ -266,6 +295,29 @@ class CompressionService:
             return CompressOutcome(success=False, text=text, result=None, error=str(exc))
 
         return CompressOutcome(success=True, text=text, result=result, error="")
+
+    def query(self, query: str) -> QueryOutcome:
+        """Run a semantic search for `query`, then compress its results (EP-057).
+
+        Thin forward to the already-existing, already-tested
+        `CompressionEngine.compress_query()` (EP-027) -- reuses
+        'semantic.top_k' / 'semantic.similarity_threshold''s own,
+        already-configured defaults (Owner Decision D2); no per-call
+        override is exposed here.
+
+        Args:
+            query: The natural-language query to search for.
+
+        Returns:
+            A QueryOutcome describing the outcome.
+        """
+        try:
+            result = self._engine.compress_query(query)
+        except (CompressionEngineError, CompressionProviderError) as exc:
+            logger.error(f"Context Compression query failed: {exc}")
+            return QueryOutcome(success=False, query=query, result=None, error=str(exc))
+
+        return QueryOutcome(success=True, query=query, result=result, error="")
 
     def limits(self) -> CompressionLimits:
         """Return the current default compression limits."""

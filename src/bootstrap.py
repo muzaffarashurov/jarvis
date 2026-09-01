@@ -770,8 +770,8 @@ class Bootstrap:
         # CompressionEngine owns the context -> chunks ->
         # compressed-result pipeline, reaching Semantic Search only
         # through SemanticEngine's public `search()` method (optional
-        # -- used only by `compression`'s future callers via
-        # `compress_query()`, never by the CLI commands wired here).
+        # -- reached via `compress_query()`, which EP-057 exposed as
+        # the "compression query <text>" CLI command wired here).
         #
         # Context Compression has no hard dependency on Semantic
         # Search, the Embedding Engine, Knowledge Base, or Long-Term

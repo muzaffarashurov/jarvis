@@ -2249,4 +2249,71 @@ EP056 : 62 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-057 — Memory Optimization
+
+Status: Released (PASS AFTER REMEDIATION -- three non-blocking
+findings identified during the architecture audit and fixed before
+release; see "Known limitations" below, now empty)
+
+A note on scope: like EP-054, EP-055, and EP-056, "Memory
+Optimization" had no functional specification anywhere in the
+project's own documentation beyond its title. The design phase found
+the clearest opportunity yet among these bare-title packages: a piece
+of memory-search-and-compression logic (built for an earlier package,
+EP-027) was already fully built and fully tested, but nothing in the
+running app had ever actually been wired up to use it. The design
+phase built exactly that missing connection: a way to ask Jarvis to
+search its own stored memory and knowledge for something, with the
+results automatically de-duplicated and trimmed down to a manageable
+size.
+
+Highlights:
+
+- Added a new command, `compression query "<text>"`, that searches
+  Jarvis's Knowledge Base and Long-Term Memory for content related to
+  the given text, then automatically removes duplicate results and
+  keeps the total size within already-configured limits
+- Reuses the existing Context Compression feature's own
+  search-and-compress logic end to end -- no new search engine, no
+  new compression logic, and no new way of storing or organizing
+  memory was added
+- Never calls an AI provider and never writes anything to disk;
+  shows only compressed result text and summary counts, never
+  internal identifiers or similarity scores
+- Sits alongside the existing `compression compress`/`compression
+  analyze` commands in the same command group
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed. The Context Compression, Semantic Search, Knowledge Base,
+and Long-Term Memory features this command builds on top of,
+`src/core/command_router.py`, and every prior skill are all
+unmodified except for one internal, comment-only note in the
+application's startup code (updated purely for accuracy -- it has no
+effect on behavior).
+
+No breaking changes.
+
+Known limitations:
+
+- None outstanding. The architecture audit found three small,
+  non-user-facing issues before release, none of which involved
+  security or data exposure: an outdated internal code comment; a
+  gap in the project's own test coverage around one specific,
+  already-correctly-working safety check (confirmed working before
+  and after, via manual verification and then a dedicated new test);
+  and the project's own internal design document for this feature
+  having been shared with the project owner but not yet saved into
+  the project's own files. All three were corrected prior to release.
+  See `docs/architecture/audits/EP057_ARCHITECTURE_AUDIT.md` Section
+  19 for the fixes and their verification.
+
+Validation:
+
+EP057 : 41 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

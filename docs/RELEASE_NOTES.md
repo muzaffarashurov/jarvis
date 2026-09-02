@@ -2316,4 +2316,75 @@ EP057 : 41 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-058 — Autonomous Planning
+
+Status: Released (AUDIT PASSED, NO BLOCKING FINDINGS -- two
+non-blocking, informational findings identified during the
+architecture audit and each given a final disposition before release;
+see "Known limitations" below)
+
+A note on scope: like EP-054 through EP-057, "Autonomous Planning"
+had no functional specification anywhere in the project's own
+documentation beyond its title. This time, the design phase found the
+clearest opportunity yet: an entire, already-complete set of
+Engineering Packages -- everything covering how Jarvis registers its
+own subsystems, breaks a request down into steps, and dispatches
+those steps to real work -- had, from the start, deliberately left
+out any kind of AI-driven reasoning, planning only by matching fixed
+keywords in a request's text. The design phase built exactly the
+missing piece: a second, optional way to decide what a request's plan
+should look like, this time by asking an AI to reason about the
+request's meaning, while still only ever choosing from the same, real
+set of actions Jarvis can actually carry out.
+
+Highlights:
+
+- Added a second, optional planning strategy: when explicitly
+  selected, Jarvis asks an AI provider to decide which of its
+  already-known actions are relevant to a request, instead of relying
+  only on fixed keyword matching
+- The original, keyword-based planning strategy is completely
+  unaffected and remains the default -- the new AI-based strategy is
+  never used unless an operator explicitly turns it on
+- Chooses only from Jarvis's own, already-real list of actions --
+  never invents a new one, and always falls back to a safe,
+  do-nothing-harmful acknowledgment if the AI's answer doesn't make
+  sense
+- Reuses the exact same underlying AI-connection mechanism already
+  used elsewhere in Jarvis -- no second, separate way of talking to
+  an AI provider was introduced
+- No new command was needed -- the existing "switch planning
+  strategy" and "make a plan" commands already work with the new
+  strategy automatically
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed. The existing keyword-based planning strategy, the systems
+that register Jarvis's subsystems and dispatch real work, and every
+prior skill are all unmodified.
+
+No breaking changes.
+
+Known limitations:
+
+- None outstanding. The architecture audit found two small,
+  non-user-facing issues before release, neither of which involved
+  security or data exposure: an inaccurate count in the project's own
+  internal design notes (a table size was misstated -- corrected, with
+  no effect on how the feature actually works), and a minor,
+  already-known quirk in how the project's own test tooling reports a
+  very specific kind of failure (affects test reporting only, not the
+  feature itself, and applies equally to every other feature in the
+  project). Both were reviewed and closed before release. See
+  `docs/architecture/audits/EP058_ARCHITECTURE_AUDIT.md` Section 19
+  for the details.
+
+Validation:
+
+EP058 : 110 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

@@ -10,12 +10,141 @@ Status: Active
 
 ## Next Engineering Package
 
+### EP-059 — Distributed Runtime
+
+**NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 10
+sequencing, EP-059 (Distributed Runtime) is the next Engineering
+Package after EP-058's completion. No design, research, or
+implementation work has begun.
+
 ### EP-058 — Autonomous Planning
 
-**NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 9
-sequencing, EP-058 (Autonomous Planning) is the next Engineering
-Package after EP-057's completion. No design, research, or
-implementation work has begun.
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), and STEP 4 (Finalization) all
+complete. EP-058 is marked **COMPLETE / AUDIT PASSED, NO BLOCKING
+FINDINGS** -- STEP 3 identified two non-blocking, informational
+findings and zero blocking findings; the owner reviewed both and
+directed STEP 4 to correct the one that was documentation-only
+(Finding 1) and acknowledge the other with no action, exactly as its
+own original recommendation already advised (Finding 2) -- see
+`docs/architecture/audits/EP058_ARCHITECTURE_AUDIT.md` Sections
+17-20. Full design, including Owner Decisions D1-D3 and the Owner
+Approval Checklist (added during STEP 4):
+`docs/architecture/designs/EP058_DESIGN.md`.
+
+Like EP-054/EP-055/EP-056/EP-057, EP-058's roadmap entry ("Autonomous
+Planning") was a bare title with no functional specification beyond
+Phase 9's shared, one-sentence goal. STEP 1 disclosed this gap and
+found an unusually strong anchor: an entire, already-complete
+ten-Engineering-Package chain (Phase 4 "Agent Framework", EP-028-032,
+and Phase 5 "Workflow Automation", EP-033-037), every package of
+which explicitly, repeatedly declares in its own docstring that it
+performs no AI reasoning and defers that to a named-but-unbuilt
+future concept. `DefaultAgentProvider.execute()` (EP-028) returns, on
+every real call, the literal runtime message "No Planner/Reasoning
+Engine is registered yet (future EP)"; `PlanningProvider`'s own
+module docstring (EP-029) explicitly names "a future AI-/LLM-backed
+planning strategy... an obvious, natural extension point for this
+abstraction" as the reason it implements only one, deterministic
+provider. STEP 1 recommended Owner Decision D1 = "Candidate A": a
+new, additive `AIPlanningProvider` implementation of the existing
+`PlanningProvider` abstraction, registered alongside -- never
+replacing -- the deterministic `DefaultPlanningProvider`.
+
+Built as one new file,
+`src/core/planning/ai_planning_provider.py` -- `AIPlanningProvider`
+reasons about a request's meaning using an AI provider (EP-014/015,
+reached only through `ProviderManager.get_current()` ->
+`AIProvider.ask()` directly, the same deliberate bypass of
+`AIService`'s Conversation/Context/Prompt Engine pipeline
+`PromptOptimizerModule` (EP-055) already established), choosing only
+from the exact same, already-real `(subsystem, action)` vocabulary
+`DefaultPlanningProvider`'s own `_KEYWORD_RULES` table already
+recognizes -- derived programmatically at import time, never
+hardcoded, so the two providers remain genuine, interchangeable
+substitutes over the identical action space. Registered via
+`PlanningManager`'s already-existing, generic `register_provider()`
+method (EP-029, unmodified) at the existing Planning construction
+site in `src/bootstrap.py` -- one new import, one new comment block,
+and one new line inside the pre-existing `try`/`except PlanningError`
+block, with that block's original structure fully preserved.
+`planning.default_provider` remains `"planning"` (Owner Decision D1)
+-- an operator must explicitly run `planning use ai` (or set
+`planning.default_provider: "ai"`) to select the new provider. No
+`top_k`/`threshold`-equivalent tuning was added (Owner Decision D2:
+no additional cost/latency safeguard beyond the existing `planning
+use ai` action's own plain result); no new configuration key was
+added (Owner Decision D3: no `max_tokens` value -- relies on the
+active AI provider's own existing default). Zero new CLI action was
+needed -- `planning use`/`providers`/`plan` already work generically
+for any registered provider. Introduces no new backend Protocol,
+Manager, or Engine -- composes only `ProviderManager.get_current()`/
+`AIProvider.ask()` (EP-014/015) and `PlanningProvider`'s own
+already-existing abstract contract (EP-029), both unmodified.
+
+Owner Decisions D1-D3 were all confirmed correctly implemented with
+zero findings against their literal text during STEP 3. The STEP 3
+audit identified two further, non-blocking findings, neither
+security- or disclosure-related: (1, LOW, informational)
+`EP058_DESIGN.md`'s own prose described `DefaultPlanningProvider`'s
+keyword table as having "nine" entries, when the actual count is
+seventeen keyword rules collapsing to eight unique `(subsystem,
+action)` pairs after deduplication -- a prose miscount with zero
+effect on the implementation, which derives its menu programmatically
+rather than from any hardcoded count; (2, LOW, informational) a
+mutation causing an unhandled exception partway through the EP-058
+test suite's own `run()` method prevents subsequent test methods from
+executing -- a characteristic shared by every EP's own pre-existing
+`BaseTest`/`TestRunner` convention, not specific to EP-058. Owner
+Decision: the owner directed Finding 1 be corrected via a
+documentation-only edit to `EP058_DESIGN.md` (four passages,
+"nine" -> "seventeen ... eight unique pairs"), and Finding 2 be
+acknowledged with no action, exactly as its own original
+recommendation already advised (fixing it would require a separate,
+cross-cutting change to shared testing infrastructure outside any
+single EP's scope). Zero code, test, or configuration change was made
+during STEP 4.
+
+Tests: EP-058 110/0/0, covering the reply-parsing helpers directly
+(well-formed, messy/bulleted/numbered formatting, off-menu-pair
+rejection per this project's Unknown API Policy applied to AI output,
+deduplication, empty-reply fallback, `max_steps` truncation), the
+provider in isolation against a real `ProviderManager` with a fake AI
+backend (faking only the one genuine external network dependency
+this EP introduces, never an in-repo component), `PlanningManager`
+compliance (registration, duplicate-name rejection, listing),
+non-interference with the deterministic provider, five real, enabled
+`Bootstrap` -> `CommandRouter` -> `PlanningService` -> `PlanningEngine`
+-> `PlanningManager` -> `AIPlanningProvider` -> `ProviderManager`
+end-to-end tests (including the real no-AI-provider-configured
+failure path and a real fake-backend success path, injected into the
+already-registered provider's own real, shared `ProviderManager` --
+never a second, duplicate registration), and architecture-compliance
+import scans. Full regression suites EP-028 214/0/0, EP-029 197/0/0,
+EP-030 179/0/0, EP-031 212/0/0, EP-032 176/0/0, EP-033 182/0/0,
+EP-034 113/0/0, EP-035 143/0/0, EP-036 101/0/0, EP-055 64/0/0, EP-056
+62/0/0, EP-057 41/0/0 were independently reproduced exactly, both
+before and after the STEP 4 documentation-only edit.
+`src/core/planning/planning_provider.py`, `planning_manager.py`,
+`planning_engine.py`, `planning_result.py` (EP-029),
+`src/core/agent/`, `src/services/agent_service.py`,
+`src/modules/agent_module.py` (EP-028), `src/core/plan_execution/`,
+`src/services/plan_execution_service.py`,
+`src/modules/plan_execution_module.py` (EP-030), `src/core/tool/`,
+`src/services/tool_service.py`, `src/modules/tool_module.py`
+(EP-031), `src/core/collaboration/` (EP-032),
+`src/core/workflow_engine/`, `src/core/workflow_scheduler/`,
+`src/core/automation_engine/`, `src/core/background_workers/`
+(EP-033-036), `src/core/ai/provider_manager.py`, `provider.py`,
+`conversation.py`, `conversation_manager.py`, `context_manager.py`
+(EP-014/015/016/018), `src/services/ai_service.py`,
+`src/core/memory/`, `src/core/long_term_memory/`,
+`src/core/knowledge/`, `src/core/semantic/`,
+`src/core/context_compression/` (EP-013/023/024/025/026/027),
+`src/core/command_router.py`, `config/config.yaml`,
+`src/services/planning_service.py`, and `src/modules/planning_module.py`
+are all confirmed byte-identical/unmodified by EP-058, both before
+and after the STEP 4 documentation-only edit.
 
 ### EP-057 — Memory Optimization
 

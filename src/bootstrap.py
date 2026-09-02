@@ -28,6 +28,7 @@ from src.core.config import Config, ConfigError
 from src.core.context_compression.compression_engine import CompressionEngine
 from src.core.context_compression.compression_manager import CompressionManager
 from src.core.context_compression.compression_provider import ContextCompressionError
+from src.core.planning.ai_planning_provider import AIPlanningProvider
 from src.core.planning.planning_engine import PlanningEngine
 from src.core.planning.planning_manager import PlanningManager
 from src.core.planning.planning_provider import PlanningError
@@ -901,9 +902,24 @@ class Bootstrap:
         # instance through its public `plan()` method only -- see the
         # EP-030 wiring immediately below. It stays None whenever
         # Planning Engine itself is unavailable this run.
+        # EP-058: Autonomous Planning registers a second, AI-/LLM-backed
+        # PlanningProvider (`AIPlanningProvider`, "ai") alongside --
+        # never replacing -- the deterministic "planning" provider
+        # below, through PlanningManager's already-existing, generic
+        # `register_provider()` public method only (see
+        # src/core/planning/ai_planning_provider.py). Reuses the
+        # already-constructed `ai_provider_manager` (EP-014) directly;
+        # constructs no second AI-client mechanism of its own.
+        # 'planning.default_provider' is untouched and stays "planning"
+        # -- an operator must explicitly run 'planning use ai' (or set
+        # 'planning.default_provider: "ai"') to select it, exactly the
+        # way EP-031's `ToolExecutionProvider` is registered as an
+        # additional plan-execution provider without becoming the
+        # default.
         planning_engine_for_plan_execution: PlanningEngine | None = None
         try:
             planning_manager = PlanningManager(config=config)
+            planning_manager.register_provider(AIPlanningProvider(provider_manager=ai_provider_manager))
             planning_engine = PlanningEngine(
                 manager=planning_manager, agent_engine=agent_engine_for_planning
             )

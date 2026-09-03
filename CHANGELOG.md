@@ -6,6 +6,180 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.18-ep059
+
+Released: 2026-09-03
+
+Status: EP-059 COMPLETE / AUDIT PASSED, NO BLOCKING FINDINGS (STEP 1
+Architecture Discovery & Design, STEP 2 Implementation & Testing,
+STEP 3 Architecture Audit, STEP 4 Finalization all complete). STEP
+3's verdict was **AUDIT PASSED, NO BLOCKING FINDINGS** -- three
+non-blocking, informational findings, zero blocking. The owner
+reviewed all three findings and directed STEP 4 to leave each
+unchanged, since none violated `EP059_DESIGN.md` or any approved
+Owner Decision (D1-D6) -- in particular, Finding 3 (no
+`runtime.enabled` config key) is the literal, explicit outcome of
+approved Owner Decision D6, not an oversight. Final status after STEP
+4: zero code/test/config change.
+
+EP-059's roadmap entry ("Distributed Runtime") had no functional
+specification anywhere in the repository beyond Phase 10's own
+one-sentence goal, and no prior EP anchored a multi-process or
+networked runtime concept of any kind. STEP 1 recommended Owner
+Decision D1 = "Candidate A": a new, additive, read-only
+`RuntimeService`/`RuntimeModule` pair that aggregates
+already-existing, already-public facts -- `RestApiServer.is_running`/
+`.host`/`.port` (EP-043), `BackgroundWorkerService.status()`
+(EP-036), and `InteractiveShell` presence -- plus process PID/uptime
+via the standard library only, into one `RuntimeStatus` snapshot,
+reachable through a new `runtime` CLI namespace (Owner Decision D2).
+
+### Added
+
+- src/services/runtime_service.py: `RuntimeStatus` (a small, inline,
+  frozen dataclass -- Owner Decision D3, no new `src/core/runtime/`
+  package) and `RuntimeService`, whose only public method is
+  `status()`. Read-only: never starts, stops, restarts, or
+  reconfigures anything it reports on. Handles every dependency being
+  `None` cleanly, never raising
+- src/modules/runtime_module.py: `RuntimeModule`, the `"runtime"` CLI
+  namespace (Owner Decision D2), exposing exactly two actions --
+  `status` and `help` -- and no control action of any kind (Owner
+  Decision D5)
+- src/bootstrap.py: one new import block, `self._started_at` captured
+  once at `Bootstrap.__init__()` time, one new `RuntimeService(...)`
+  construction and `router.register(RuntimeModule(...))` call placed
+  at the true end of `initialize()` -- after `_build_command_router()`
+  (which assigns `_background_worker_service`) has already returned
+  and `_shell`/`_rest_api_server` have also already been assigned, so
+  `RuntimeService` always observes the final, live references, never
+  an early or stale `None` -- and one new `runtime_service` property
+- tests/EP059/test_runtime.py: EP-059 test suite (`NAME = "EP059"`),
+  93 assertions covering `RuntimeService.status()` in isolation (all-
+  `None` dependencies, real `RestApiServer`/`BackgroundWorkerService`/
+  `InteractiveShell` instances, PID, uptime monotonicity, task-count
+  changes after a real `submit()`), a dedicated field-wiring mutation
+  guard, `RuntimeModule` CLI behavior, `CommandRouter` dispatch
+  equivalence, the read-only/no-control-surface guarantee, real
+  `Bootstrap` end-to-end wiring, construction-ordering identity and
+  behavioral checks, REST command-dispatch compatibility through the
+  existing, unmodified `ApiRouter`/`RestApiServer` path (no new
+  endpoint), and regression guards for `system status`/`/health`
+- docs/architecture/designs/EP059_DESIGN.md: full design document,
+  including Owner Decisions D1-D6 and (added during STEP 2) the two
+  owner-approved documentation clarifications (construction-ordering
+  and REST-authentication-inheritance)
+- docs/architecture/audits/EP059_ARCHITECTURE_AUDIT.md: EP-059
+  Architecture Audit, Final Verdict AUDIT PASSED, NO BLOCKING FINDINGS
+
+### Changed
+
+- No existing method's signature, return type, or behavior changed.
+  `RestApiServer`, `BackgroundWorkerService`, `InteractiveShell`, and
+  `CommandRouter` are completely unaffected -- every change above is a
+  pure addition (two new files, one new import block plus one new
+  construction/registration block plus one new property in
+  `bootstrap.py`, one new test-registration import line). No existing
+  `config/config.yaml` key was added, removed, or had its meaning
+  changed, and no new `runtime.*` key was added (Owner Decision D6)
+
+### Security
+
+- No new control surface of any kind: `runtime status`/`runtime help`
+  are the only two actions, matching Owner Decision D5
+- `runtime status` becomes reachable over the existing REST API the
+  moment `RuntimeModule` is registered, with zero new endpoint code --
+  it therefore inherits the REST API's own pre-existing lack of
+  authentication, exactly as `worker status`/`/health` already do
+  today; this is a pre-existing characteristic of `RestApiServer`, not
+  something EP-059 introduces or regresses
+- Information disclosed (PID, uptime, REST host/port, background-
+  worker thread/task counts) is not materially more sensitive than
+  what already-existing, unauthenticated commands disclose today
+
+### Validation
+
+```
+EP059 : 93 passed / 0 failed / 0 skipped
+EP036 : 101 passed / 0 failed / 0 skipped
+EP036-STEP2 : 48 passed / 0 failed / 0 skipped
+EP036-STEP3 : 53 passed / 0 failed / 0 skipped
+EP043 : 83 passed / 0 failed / 0 skipped
+EP033 : 182 passed / 0 failed / 0 skipped
+EP034 : 113 passed / 0 failed / 0 skipped
+EP035 : 143 passed / 0 failed / 0 skipped
+EP037 : 87 passed / 0 failed / 0 skipped
+```
+
+All regression figures above were independently reproduced from a
+clean process at STEP 2, STEP 3, and STEP 4. Five distinct mutation
+tests (one field-wiring swap, one stale-`None` Bootstrap-wiring
+mutation, one silent-unknown-action mutation, one hardcoded-boolean
+mutation, and one inverted-shell-active-logic mutation), each applied
+and then fully restored (byte-identical checksums reconfirmed after
+each), were all independently caught by the EP-059 suite. The
+sandbox's own pre-existing, environment-only failures (missing
+`vosk`/`sounddevice`+PortAudio, affecting EP-046/047/048/049
+identically both before and after EP-059) are unrelated to this EP
+and unchanged by it.
+
+### STEP 3 -- Architecture Audit
+
+Verdict: EP-059 STEP 3 -- **AUDIT PASSED, NO BLOCKING FINDINGS**. All
+six Owner Decisions (D1-D6) confirmed correctly implemented with zero
+findings against their literal text. Dependency direction confirmed
+strictly `Module -> Service -> Core` with zero reverse coupling into
+`RestApiServer`/`BackgroundWorkerService`/`InteractiveShell` (all
+three independently confirmed byte-identical to the pristine,
+pre-EP-059 repository). Three non-blocking, informational findings
+were identified:
+
+1. **(LOW, informational)** `uptime_seconds` measures time since
+   `Bootstrap.__init__()`, not since `initialize()` completes -- a
+   deliberate, documented choice, not a defect.
+2. **(LOW, informational)** `RuntimeModule` silently ignores trailing
+   arguments to `status`/`help` rather than returning a usage error --
+   consistent with these actions taking no parameters.
+3. **(LOW, informational)** no `runtime.enabled` config key exists,
+   so the subsystem cannot be disabled without a code change -- the
+   explicit, approved outcome of Owner Decision D6, not an oversight.
+
+File scope confirmed to exactly match the approved STEP 2 scope, with
+zero unauthorized changes to `src/core/api/rest_api_server.py`/
+`api_router.py` (EP-043), `src/services/background_worker_service.py`/
+`src/core/background_workers/background_worker_pool.py` (EP-036),
+`src/core/shell.py`, `src/core/command_router.py`,
+`src/modules/background_worker_module.py`, or `config/config.yaml`.
+See `docs/architecture/audits/EP059_ARCHITECTURE_AUDIT.md` for the
+full audit, including an auditor-independent mutation test and a
+direct object-identity probe of the real Bootstrap wiring.
+
+### STEP 4 -- Finalization (including remediation)
+
+The owner reviewed all three non-blocking findings individually and
+directed that none required remediation: Finding 1 and Finding 2 are
+deliberate design choices consistent with `EP059_DESIGN.md`, and
+Finding 3 is the literal, approved result of Owner Decision D6, which
+specifically forbade adding a `runtime.enabled` key. No code, test,
+or configuration change was made during STEP 4. The STEP 3 audit
+document was left unmodified -- its findings were not edited, softened,
+or removed. An additional, fifth mutation test (auditor-independent,
+distinct from the four already recorded) was applied and confirmed
+caught, then fully restored and reconfirmed byte-identical, before
+the full regression suite was re-run and reproduced results identical
+to STEP 2/3. Release/project documentation (`CHANGELOG.md`,
+`docs/BACKLOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/architecture/JARVIS_ROADMAP.md`) synchronized to mark EP-059
+COMPLETE / AUDIT PASSED, NO BLOCKING FINDINGS, with no next
+Engineering Package yet started.
+
+**EP-059 is COMPLETE (AUDIT PASSED, NO BLOCKING FINDINGS -- three
+non-blocking, informational findings identified during STEP 3, each
+reviewed and left unchanged during STEP 4 as correctly not requiring
+remediation; zero open findings requiring further action).**
+
+---
+
 ## v0.1.17-ep058
 
 Released: 2026-09-01

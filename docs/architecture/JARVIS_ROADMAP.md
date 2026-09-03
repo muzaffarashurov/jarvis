@@ -122,6 +122,102 @@ Completed sub-packages:
 
 ## Current
 
+EP-059 Distributed Runtime — **COMPLETE** (STEP 1 Architecture
+Discovery & Design, STEP 2 Implementation & Testing, STEP 3
+Architecture Audit, STEP 4 Finalization all complete -- see
+docs/architecture/designs/EP059_DESIGN.md (including its Owner
+Decisions D1-D6 and the two owner-approved documentation
+clarifications added during STEP 2) and
+docs/architecture/audits/EP059_ARCHITECTURE_AUDIT.md. **Final
+Verdict: STEP 3 — AUDIT PASSED, NO BLOCKING FINDINGS** (three
+non-blocking, informational findings; STEP 4 reviewed each
+individually and left all three unchanged, since none violated
+`EP059_DESIGN.md` or any approved Owner Decision -- see below).
+EP-059's roadmap entry ("Distributed Runtime") had no functional
+specification beyond Phase 10's own one-sentence goal, and unlike
+EP-054 through EP-058, no prior EP anchored a multi-process or
+networked runtime concept for this one to complete. STEP 1
+recommended Owner Decision D1 = "Candidate A": a new, additive,
+read-only `RuntimeService`/`RuntimeModule` pair that aggregates
+already-existing, already-public facts -- `RestApiServer.is_running`/
+`.host`/`.port` (EP-043), `BackgroundWorkerService.status()`
+(EP-036), and `InteractiveShell` presence -- plus process PID/uptime
+via the standard library only, into one `RuntimeStatus` snapshot.
+Owner Decision D2: a new `runtime` CLI namespace (`runtime status`/
+`runtime help`). Owner Decision D3: `RuntimeStatus` kept as a small,
+inline, frozen dataclass in `runtime_service.py`, no new
+`src/core/runtime/` package. Owner Decision D4: no Scheduler or
+Telegram status in v1, since neither is auto-started as a side effect
+of `Bootstrap.initialize()`. Owner Decision D5: read-only only -- no
+runtime control/start/stop actions of any kind. Owner Decision D6: no
+`runtime.enabled` config key, no `config/config.yaml` change. Built
+as two new files, `src/services/runtime_service.py` (`RuntimeStatus`
+and `RuntimeService`, whose only public method is `status()`) and
+`src/modules/runtime_module.py` (`RuntimeModule`, exposing exactly
+`status` and `help`). Registered in `src/bootstrap.py` at the true
+end of `initialize()` -- after `_build_command_router()` (which
+assigns `_background_worker_service`) has already returned and
+`_shell`/`_rest_api_server` have also already been assigned, so
+`RuntimeService` always observes the final, live references, never
+an early or stale `None`. Introduces no new backend Protocol,
+Manager, or Engine -- it composes three already-existing, unmodified
+components directly, read-only: `RestApiServer.is_running`/`.host`/
+`.port` (EP-043), `BackgroundWorkerService.status()` (EP-036), and
+`InteractiveShell` presence. Zero new REST endpoint was needed --
+`runtime status` is reachable through the existing, unmodified
+`ApiRouter`/`RestApiServer` forwarding path the moment the module is
+registered; it inherits that path's own pre-existing lack of
+authentication, exactly as `worker status`/`/health` already do
+today (an approved, documentation-only clarification added to
+`EP059_DESIGN.md` during STEP 2, not a new risk EP-059 introduces).
+Required zero change to `RestApiServer`/`ApiRouter` (EP-043),
+`BackgroundWorkerService`/`BackgroundWorkerPool` (EP-036),
+`InteractiveShell`, `CommandRouter`, or `config/config.yaml`. Owner
+Decisions D1-D6 are all confirmed correctly implemented with zero
+findings against their literal text. Tests: EP-059 93/0/0, covering
+`RuntimeService.status()` in isolation (all-`None` dependencies, real
+`RestApiServer`/`BackgroundWorkerService`/`InteractiveShell`
+instances, PID, uptime monotonicity, task-count changes after a real
+`submit()`), a dedicated field-wiring mutation guard, `RuntimeModule`
+CLI behavior, `CommandRouter` dispatch equivalence, the
+read-only/no-control-surface guarantee, real `Bootstrap` end-to-end
+wiring, construction-ordering identity and behavioral checks, REST
+command-dispatch compatibility through the existing, unmodified
+`ApiRouter`/`RestApiServer` path, and regression guards for `system
+status`/`/health`. Full regression: EP-036 101/0/0, EP-036-STEP2
+48/0/0, EP-036-STEP3 53/0/0, EP-043 83/0/0, EP-033 182/0/0, EP-034
+113/0/0, EP-035 143/0/0, EP-037 87/0/0 -- all independently
+reproduced exactly at STEP 2, STEP 3, and STEP 4, confirming
+`RestApiServer`/`BackgroundWorkerService`'s own logic was never
+modified. Five distinct mutation tests (one field-wiring swap, one
+stale-`None` Bootstrap-wiring mutation, one silent-unknown-action
+mutation, one hardcoded-boolean mutation applied independently during
+the STEP 3 audit, and one inverted-shell-active-logic mutation
+applied during STEP 4), each fully restored (byte-identical
+checksums reconfirmed after each), were all independently caught.
+**STEP 3 findings (identified, then each reviewed and left unchanged
+during STEP 4 -- zero findings were security-, disclosure-, or
+blocking-related):** (1, LOW, informational) `uptime_seconds`
+measures time since `Bootstrap.__init__()`, not since `initialize()`
+completes -- a deliberate, documented choice, not a defect,
+requiring no action; (2, LOW, informational) `RuntimeModule` silently
+ignores trailing arguments to `status`/`help` rather than returning a
+usage error -- consistent with these actions taking no parameters,
+requiring no action; (3, LOW, informational) no `runtime.enabled`
+config key exists, so the subsystem cannot be disabled without a code
+change -- the explicit, approved outcome of Owner Decision D6, not an
+oversight, requiring no action. `src/core/api/rest_api_server.py`,
+`api_router.py` (EP-043), `src/services/background_worker_service.py`,
+`src/core/background_workers/background_worker_pool.py` (EP-036),
+`src/core/shell.py`, `src/core/command_router.py`,
+`src/modules/background_worker_module.py`, and `config/config.yaml`
+are all confirmed byte-identical/unmodified by EP-059, both before
+and after STEP 4.
+
+**Next Engineering Package: EP-060 Jarvis Operating System — NOT
+STARTED.** No EP-060 design, research, or implementation work has
+begun.
+
 EP-058 Autonomous Planning — **COMPLETE** (STEP 1 Architecture
 Discovery & Design, STEP 2 Implementation & Testing, STEP 3
 Architecture Audit, STEP 4 Finalization all complete -- see
@@ -254,10 +350,6 @@ no action, and recorded purely for completeness.
 `src/services/planning_service.py`, and `src/modules/planning_module.py`
 are all confirmed byte-identical/unmodified by EP-058, both before
 and after the STEP 4 documentation-only edit.
-
-**Next Engineering Package: EP-059 Distributed Runtime — NOT
-STARTED.** No EP-059 design, research, or implementation work has
-begun.
 
 EP-057 Memory Optimization — **COMPLETE** (STEP 1 Architecture
 Discovery & Design, STEP 2 Implementation & Testing, STEP 3

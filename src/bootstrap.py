@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pyfiglet
@@ -114,6 +115,7 @@ from src.modules.rag_module import RagModule
 from src.modules.scheduler_module import SchedulerModule
 from src.modules.semantic_module import SemanticModule
 from src.modules.telegram_module import TelegramModule
+from src.modules.runtime_module import RuntimeModule
 from src.services.agent_service import AgentService
 from src.services.ai_service import AIService
 from src.services.collaboration_service import CollaborationService
@@ -180,6 +182,7 @@ from src.services.rag_service import RagService
 from src.services.scheduler_service import SchedulerService
 from src.services.semantic_service import SemanticService
 from src.services.telegram_service import TelegramService
+from src.services.runtime_service import RuntimeService
 from src.skills.system.skill import SystemModule
 from src.utils.constants import (
     APP_NAME,
@@ -247,6 +250,13 @@ class Bootstrap:
         """
         self._project_root = project_root or PROJECT_ROOT
         self._initialized = False
+        # EP-059: captured once, here at construction time (not at
+        # initialize() time, and never re-captured on a subsequent
+        # initialize() call), so RuntimeService.status()'s
+        # `uptime_seconds` behaves sensibly even if initialize() is
+        # called more than once on the same Bootstrap instance -- see
+        # `EP059_DESIGN.md` Section 11's edge-case note.
+        self._started_at: float = time.monotonic()
         self._config: Config | None = None
         self._event_bus = EventBus()
         self._orchestrator: Orchestrator | None = None
@@ -275,6 +285,7 @@ class Bootstrap:
         self._discord_service: DiscordService | None = None
         self._email_service: EmailService | None = None
         self._rest_api_server: RestApiServer | None = None
+        self._runtime_service: RuntimeService | None = None
         self._voice_engine: VoskSpeechToTextEngine | None = None
         self._voice_tts_engine: TextToSpeechEngine | None = None
         self._voice_wake_engine: WakeWordEngine | None = None
@@ -315,6 +326,24 @@ class Bootstrap:
         self._command_router = self._build_command_router(self._orchestrator, self._config)
         self._shell = InteractiveShell(router=self._command_router)
         self._rest_api_server = self._build_rest_api_server(self._command_router, self._config)
+
+        # EP-059: constructed last, only after every dependency it
+        # reads (`_rest_api_server`, `_background_worker_service` --
+        # the latter already assigned inside `_build_command_router`
+        # above -- and `_shell`) has already been assigned this run,
+        # so a `None` reference here correctly reflects "this run
+        # didn't build/enable that subsystem," never a
+        # not-yet-constructed one (see `EP059_DESIGN.md` Section 8,
+        # clarified per Owner-approved documentation update).
+        # Read-only: RuntimeService never starts, stops, or
+        # reconfigures any of the objects it is handed.
+        self._runtime_service = RuntimeService(
+            started_at=self._started_at,
+            rest_api_server=self._rest_api_server,
+            background_worker_service=self._background_worker_service,
+            shell=self._shell,
+        )
+        self._command_router.register(RuntimeModule(self._runtime_service))
 
         self._initialized = True
         return self._orchestrator
@@ -2768,3 +2797,17 @@ class Bootstrap:
             (EP053_DESIGN.md Section 11/20).
         """
         return self._vision_backend
+
+    @property
+    def runtime_service(self) -> RuntimeService | None:
+        """Return the RuntimeService built for EP-059, if available.
+
+        Returns:
+            The RuntimeService instance, or None if
+            `run()`/`initialize()` has not completed. Unlike every
+            other subsystem's property above, there is no
+            `runtime.enabled` gate to report on (Owner Decision D6) --
+            once `initialize()` has completed, this is always
+            non-None.
+        """
+        return self._runtime_service

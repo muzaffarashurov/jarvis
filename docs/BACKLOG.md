@@ -10,12 +10,101 @@ Status: Active
 
 ## Next Engineering Package
 
-### EP-059 — Distributed Runtime
+### EP-060 — Jarvis Operating System
 
 **NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 10
-sequencing, EP-059 (Distributed Runtime) is the next Engineering
-Package after EP-058's completion. No design, research, or
+sequencing, EP-060 (Jarvis Operating System) is the next Engineering
+Package after EP-059's completion. No design, research, or
 implementation work has begun.
+
+### EP-059 — Distributed Runtime
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), and STEP 4 (Finalization) all
+complete. EP-059 is marked **COMPLETE / AUDIT PASSED, NO BLOCKING
+FINDINGS** -- STEP 3 identified three non-blocking, informational
+findings and zero blocking findings; the owner reviewed each
+individually and directed STEP 4 to leave all three unchanged, since
+none violated `EP059_DESIGN.md` or any approved Owner Decision
+(D1-D6) -- in particular, Finding 3 (no `runtime.enabled` config key)
+is the literal, explicit outcome of approved Owner Decision D6, not
+an oversight -- see `docs/architecture/audits/EP059_ARCHITECTURE_AUDIT.md`
+Sections 17-18. Full design, including Owner Decisions D1-D6 and the
+two owner-approved documentation clarifications (added during STEP
+2): `docs/architecture/designs/EP059_DESIGN.md`.
+
+EP-059's roadmap entry ("Distributed Runtime") had no functional
+specification anywhere in the repository beyond Phase 10's own
+one-sentence goal, and no prior EP anchored a multi-process or
+networked runtime concept. STEP 1 recommended Owner Decision D1 =
+"Candidate A": a new, additive, read-only `RuntimeService`/
+`RuntimeModule` pair that aggregates already-existing, already-public
+facts -- `RestApiServer.is_running`/`.host`/`.port` (EP-043),
+`BackgroundWorkerService.status()` (EP-036), and `InteractiveShell`
+presence -- plus process PID/uptime via the standard library only,
+into one `RuntimeStatus` snapshot.
+
+Built as two new files, `src/services/runtime_service.py`
+(`RuntimeStatus`, a small, inline, frozen dataclass -- Owner Decision
+D3, no new `src/core/runtime/` package -- and `RuntimeService`, whose
+only public method is `status()`) and `src/modules/runtime_module.py`
+(`RuntimeModule`, the `"runtime"` CLI namespace -- Owner Decision D2 --
+exposing exactly two actions, `status` and `help`, and no control
+action of any kind -- Owner Decision D5). Registered in
+`src/bootstrap.py` at the true end of `initialize()` -- after
+`_build_command_router()` (which assigns `_background_worker_service`)
+has already returned and `_shell`/`_rest_api_server` have also
+already been assigned -- so `RuntimeService` always observes the
+final, live references, never an early or stale `None`. No Scheduler
+or Telegram status was added (Owner Decision D4); no
+`runtime.enabled` config key was added (Owner Decision D6). `runtime
+status` becomes reachable over the existing REST API with zero new
+endpoint code, through the already-existing, unmodified
+`ApiRouter`/`RestApiServer` forwarding path.
+
+Owner Decisions D1-D6 were all confirmed correctly implemented with
+zero findings against their literal text during STEP 3. The STEP 3
+audit identified three further, non-blocking findings, none
+security- or disclosure-related: (1, LOW, informational)
+`uptime_seconds` measures time since `Bootstrap.__init__()`, not
+since `initialize()` completes -- a deliberate, documented choice; (2,
+LOW, informational) `RuntimeModule` silently ignores trailing
+arguments to `status`/`help` rather than returning a usage error --
+consistent with these actions taking no parameters; (3, LOW,
+informational) no `runtime.enabled` config key exists, so the
+subsystem cannot be disabled without a code change -- the explicit,
+approved outcome of Owner Decision D6. Owner Decision: the owner
+reviewed all three findings individually and directed that none
+required remediation, since each was either a deliberate design
+choice consistent with `EP059_DESIGN.md` or the literal, approved
+result of an Owner Decision. Zero code, test, or configuration change
+was made during STEP 4.
+
+Tests: EP-059 93/0/0, covering `RuntimeService.status()` in isolation
+(all-`None` dependencies, real `RestApiServer`/`BackgroundWorkerService`/
+`InteractiveShell` instances, PID, uptime monotonicity, task-count
+changes after a real `submit()`), a dedicated field-wiring mutation
+guard, `RuntimeModule` CLI behavior, `CommandRouter` dispatch
+equivalence, the read-only/no-control-surface guarantee, real
+`Bootstrap` end-to-end wiring, construction-ordering identity and
+behavioral checks, REST command-dispatch compatibility through the
+existing, unmodified `ApiRouter`/`RestApiServer` path (no new
+endpoint), and regression guards for `system status`/`/health`. Five
+distinct mutation tests (one field-wiring swap, one stale-`None`
+Bootstrap-wiring mutation, one silent-unknown-action mutation, one
+hardcoded-boolean mutation applied independently during the audit,
+and one inverted-shell-active-logic mutation applied during STEP 4),
+each fully restored (byte-identical checksums reconfirmed after
+each), were all independently caught. Full regression suites EP-036
+101/0/0, EP-036-STEP2 48/0/0, EP-036-STEP3 53/0/0, EP-043 83/0/0,
+EP-033 182/0/0, EP-034 113/0/0, EP-035 143/0/0, EP-037 87/0/0 were
+independently reproduced exactly at STEP 2, STEP 3, and STEP 4.
+`src/core/api/rest_api_server.py`, `api_router.py` (EP-043),
+`src/services/background_worker_service.py`,
+`src/core/background_workers/background_worker_pool.py` (EP-036),
+`src/core/shell.py`, `src/core/command_router.py`,
+`src/modules/background_worker_module.py`, and `config/config.yaml`
+are all confirmed byte-identical/unmodified by EP-059.
 
 ### EP-058 — Autonomous Planning
 

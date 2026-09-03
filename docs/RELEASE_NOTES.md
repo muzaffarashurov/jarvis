@@ -2387,4 +2387,67 @@ EP058 : 110 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-059 — Distributed Runtime
+
+Status: Released (AUDIT PASSED, NO BLOCKING FINDINGS -- three
+non-blocking, informational findings identified during the
+architecture audit and each reviewed and left unchanged before
+release, since none required a change; see "Known limitations"
+below)
+
+A note on scope: "Distributed Runtime" had no functional
+specification anywhere in the project's own documentation beyond its
+title, and unlike prior EPs, no earlier Engineering Package had
+already anchored a multi-process or networked runtime concept for
+this one to complete. The design phase instead built a read-only way
+to see, in one place, what parts of Jarvis's own runtime are actually
+active right now in this one process -- its command shell, its REST
+API server, and its background task pool -- along with basic process
+information like how long it has been running.
+
+Highlights:
+
+- Added a new "runtime status" command that shows, in one place,
+  whether Jarvis's command shell, REST API server, and background
+  task pool are active, along with the REST API's address (when
+  active), background worker thread and task counts (when active),
+  and the process's own ID and uptime
+- Purely observational -- "runtime status" cannot start, stop, or
+  change any part of Jarvis; it only reports what is already true
+- Every existing command and feature is completely unaffected -- this
+  is a new, additive command with no effect on how anything else
+  already works
+- Reachable both from the interactive shell and, when the REST API is
+  turned on, from the same existing web API every other command
+  already uses -- no new API endpoint was needed
+
+Compatibility:
+
+Fully backward compatible with every prior EP. No existing service,
+manager, or CLI command was renamed, removed, or had its behavior
+changed. The REST API server, the background task pool, and every
+prior skill are all unmodified.
+
+No breaking changes.
+
+Known limitations:
+
+- None outstanding. The architecture audit found three small,
+  non-user-facing observations before release, none involving
+  security or data exposure: how "uptime" is measured (a deliberate,
+  documented choice), that the status command doesn't complain about
+  unexpected extra words typed after it (harmless, since it takes no
+  such input), and that this feature has no on/off switch of its own
+  in the configuration file (an intentional decision, since the
+  feature does no work of its own until asked). All three were
+  reviewed and confirmed to need no change before release. See
+  `docs/architecture/audits/EP059_ARCHITECTURE_AUDIT.md` Section 17
+  for the details.
+
+Validation:
+
+EP059 : 93 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

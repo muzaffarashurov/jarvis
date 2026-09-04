@@ -6,6 +6,169 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.19-ep060
+
+Released: 2026-09-04
+
+Status: EP-060 COMPLETE / AUDIT PASSED, NO BLOCKING FINDINGS (STEP 1
+Architecture Discovery & Design, STEP 2 Implementation & Testing,
+STEP 3 Architecture Audit, STEP 4 Finalization all complete). STEP
+3's verdict was **AUDIT PASSED, NO BLOCKING FINDINGS** -- one
+non-blocking WARNING, zero blocking. STEP 4 resolved the WARNING
+(rather than leaving it open, per EP-059's precedent for its own three
+findings) because doing so required no design or scope change -- only
+synchronizing one stale EP-059 test assertion with the already-approved
+EP-060 contract. Final status after STEP 4: one test file
+(`tests/EP059/test_runtime.py`) synchronized, four documentation files
+updated, zero production-code or configuration change beyond what
+STEP 2 already implemented.
+
+EP-060's roadmap entry ("Jarvis Operating System") had no functional
+specification anywhere in the repository beyond Phase 10's own
+one-sentence goal, shared with EP-059. STEP 1 found no textual anchor
+naming a specific EP-060 mechanism, but did find a real, code-verified
+gap: `Bootstrap.shutdown()` stopped only the REST API Server, never
+the Background Worker Pool, and the Scheduler auto-starts its own tick
+loop by default (`scheduler.enabled`/`scheduler.auto_start` both
+default `true`) with no public method to stop it at all -- directly
+correcting EP-059 Owner Decision D4's premise that Scheduler is never
+auto-started as a side effect of `initialize()`. STEP 1 recommended
+Owner Decision D1 = "Candidate A": widen EP-059's `RuntimeService`/
+`RuntimeModule` from a read-only introspection surface into a small,
+additive lifecycle control plane, reachable through the already-
+existing `runtime` CLI namespace (no new namespace).
+
+### Added
+
+- src/services/runtime_service.py: `RuntimeStatus` gains
+  `scheduler_active`/`scheduler_jobs_registered`, both defaulted so
+  every original EP-059 construction call site is unaffected; a new
+  `RuntimeShutdownReport` frozen dataclass; `RuntimeService` gains
+  exactly one new public method, `shutdown() -> RuntimeShutdownReport`,
+  coordinating REST API Server then Background Worker Service
+  shutdown, in that order, reusing only their own already-existing,
+  already-idempotent `stop()`/`shutdown()` methods -- no new stop
+  logic of its own, and no Scheduler/Shell control of any kind
+- src/modules/runtime_module.py: `_status()` formatting gains a
+  Scheduler line; the module still exposes exactly two actions,
+  `status` and `help` (Owner Decision D3) -- no `shutdown` action was
+  added
+- src/bootstrap.py: one new `_scheduler_service` attribute plus public
+  property (Owner Decision D6), promoted from a previously-discarded
+  local variable inside `_build_command_router()`; the existing
+  `RuntimeService(...)` construction site widened with one new keyword
+  argument; `shutdown()`'s existing body replaced (Owner Decision D2)
+  to delegate to `RuntimeService.shutdown()`, with a fallback for when
+  `RuntimeService` was never built, now also nulling
+  `background_worker_service` after shutdown (a new, symmetric
+  postcondition alongside the pre-existing `rest_api_server` one)
+- tests/EP060/test_runtime_lifecycle.py: EP-060 test suite (`NAME =
+  "EP060"`), 65 assertions covering the widened constructor/`status()`,
+  `shutdown()` in isolation (all-`None` dependencies, real
+  `RestApiServer`/`BackgroundWorkerService` instances, idempotency,
+  ordering via call-order-recording proxies, and the disclosed,
+  explicitly-pinned `BackgroundWorkerService.status()` post-shutdown
+  limitation), the `{status, shutdown}`/`{status, help}` public-surface
+  guarantees, `RuntimeModule` status formatting, and real end-to-end
+  `Bootstrap` wiring/shutdown
+- docs/architecture/designs/EP060_DESIGN.md: full design document,
+  including Owner Decisions D1-D6
+- docs/architecture/audits/EP060_ARCHITECTURE_AUDIT.md: EP-060
+  Architecture Audit, Final Verdict AUDIT PASSED, NO BLOCKING FINDINGS
+
+### Changed
+
+- src/modules/test_module.py: one added import line
+  (`import tests.EP060.test_runtime_lifecycle`)
+- tests/EP059/test_runtime.py:
+  `_test_service_exposes_only_status`'s assertion updated from
+  `["status"]` to `["shutdown", "status"]`, with a docstring explaining
+  why -- synchronizing this EP-059 Owner-Decision-D5 guard assertion
+  with EP-060's own, separately-approved Owner Decision D1 widening,
+  rather than leaving it contradicting the now-approved contract. No
+  other assertion in this file was changed; 92 of its 93 assertions
+  required no change at all
+- No existing method's signature, return type, or behavior changed
+  for `RestApiServer`, `BackgroundWorkerService`,
+  `SchedulerService`/`Scheduler` (EP-011, confirmed byte-identical),
+  `CommandRouter`, or `InteractiveShell`. No existing `config/
+  config.yaml` key was added, removed, or had its meaning changed, and
+  no new `runtime.*`/`scheduler.*` key was added
+
+### Security
+
+- No new control surface reachable via CLI or REST: `runtime status`/
+  `runtime help` remain the only two actions (Owner Decision D3);
+  `RuntimeService.shutdown()` is invoked exclusively by `Bootstrap.
+  shutdown()` at genuine process exit, never dispatchable through
+  `CommandRouter`/`ApiRouter`
+- `shutdown()` never forcefully terminates anything: `Background
+  WorkerService.shutdown()` is always called with its own default
+  `wait=True`, letting in-flight background tasks finish
+
+### Validation
+
+```
+EP060 : 65 passed / 0 failed / 0 skipped
+EP059 : 93 passed / 0 failed / 0 skipped
+EP036 : 101 passed / 0 failed / 0 skipped
+EP036-STEP2 : 48 passed / 0 failed / 0 skipped
+EP036-STEP3 : 53 passed / 0 failed / 0 skipped
+EP043 : 83 passed / 0 failed / 0 skipped
+```
+
+All figures above were independently reproduced from a clean process
+at STEP 2, STEP 3, and STEP 4. `EP059`'s figure is 93/93 only after
+the STEP 4 synchronization described above; STEP 2/STEP 3 each
+observed 92/93 with the one, now-resolved, disclosed WARNING.
+
+### STEP 3 -- Architecture Audit
+
+Verdict: EP-060 STEP 3 -- **AUDIT PASSED, NO BLOCKING FINDINGS**. All
+six Owner Decisions (D1-D6) confirmed correctly implemented with zero
+findings against their literal text. `src/services/
+scheduler_service.py` and every file under `src/core/scheduler/`
+independently re-hashed and confirmed byte-identical to their
+pre-EP-060 state -- Scheduler is observed, never controlled. Exactly
+one non-blocking finding was identified:
+
+1. **(WARNING, non-blocking)**
+   `tests/EP059/test_runtime.py::_test_service_exposes_only_status`
+   asserted `RuntimeService`'s public method list equals `["status"]`
+   -- an EP-059 Owner-Decision-D5 guard assertion that, by
+   construction, could not survive any future, legitimate widening of
+   that surface. Classified as an obsolete historical guard, not an
+   EP-060 defect: every other, compatibility-relevant assertion in
+   that file passed unmodified.
+
+File scope confirmed to exactly match the approved STEP 2 scope, with
+zero unauthorized changes to `src/services/scheduler_service.py`,
+`src/core/scheduler/*.py`, `config/config.yaml`, or `requirements.txt`.
+See `docs/architecture/audits/EP060_ARCHITECTURE_AUDIT.md` for the
+full audit.
+
+### STEP 4 -- Finalization (including remediation)
+
+The one non-blocking WARNING was resolved: `tests/EP059/
+test_runtime.py::_test_service_exposes_only_status`'s assertion was
+updated to `["shutdown", "status"]`, with an added docstring
+explaining the change and citing `EP060_ARCHITECTURE_AUDIT.md` Section
+7 as its basis. This is the smallest possible change that makes the
+test agree with the already-approved EP-060 contract: no other
+assertion in the file was touched, and `RuntimeService.shutdown()`
+itself was not hidden, removed, or weakened to avoid the conflict. The
+STEP 3 audit document was left unmodified -- its finding was not
+edited, softened, or removed. The full regression suite was re-run
+fresh after the synchronization and reproduced EP-059 at 93/93, with
+every other suite unchanged from STEP 2/STEP 3. Release/project
+documentation (`CHANGELOG.md`, `docs/BACKLOG.md`,
+`docs/RELEASE_NOTES.md`, `docs/architecture/JARVIS_ROADMAP.md`)
+synchronized to mark EP-060 COMPLETE / AUDIT PASSED, NO BLOCKING
+FINDINGS. No further Engineering Package is yet named beyond Phase 10
+anywhere in this repository.
+
+---
+
 ## v0.1.18-ep059
 
 Released: 2026-09-03

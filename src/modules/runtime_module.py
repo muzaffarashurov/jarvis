@@ -1,21 +1,27 @@
-"""Runtime module: CLI command surface for EP-059 RuntimeService.
+"""Runtime module: CLI command surface for EP-059/EP-060 RuntimeService.
 
 Exposes the "runtime" command namespace (status, help) as thin
 CommandModule handlers, following the same pattern as
-BackgroundWorkerModule/PlanningModule. All aggregation logic lives in
-RuntimeService (unchanged); this module only formats `RuntimeStatus`
-into a `CommandResult` for the shell.
+BackgroundWorkerModule/PlanningModule. All aggregation/coordination
+logic lives in RuntimeService (unchanged); this module only formats
+`RuntimeStatus` into a `CommandResult` for the shell.
 
-Per Owner Decision D5, no mutating action of any kind is exposed here
-(no "runtime restart"/"stop"/"reconfigure") -- `status`/`help` are the
-only two actions, matching this EP's own read-only, introspection-only
-scope.
+Per EP-059 Owner Decision D5 and EP-060 Owner Decision D3, no mutating
+action of any kind is exposed here (no "runtime restart"/"stop"/
+"shutdown"/"reconfigure") -- `status`/`help` remain the only two
+actions. EP-060 adds `RuntimeService.shutdown()`, but it is invoked
+exclusively by `Bootstrap.shutdown()` at process exit, never through
+this module -- see `EP060_DESIGN.md` Section 9.2/Owner Decision D3
+("shutdown coordination remains internal-only... never dispatchable
+via the Shell or... the still-unauthenticated REST API").
 
 Since `RestApiServer`'s own `ApiRouter` (EP-043) already forwards any
 `CommandRouter`-registered command unchanged, "runtime status" becomes
 reachable over the REST API the moment this module is registered, with
 zero REST-layer-specific code written for it (see `EP059_DESIGN.md`
-Section 6.4).
+Section 6.4). Because no mutating action exists in this module, this
+remains true without introducing any new REST-reachable control
+surface.
 """
 
 from __future__ import annotations
@@ -97,4 +103,9 @@ class RuntimeModule:
         if status.background_workers_active:
             lines.append(f"Background worker threads : {status.background_worker_count}")
             lines.append(f"Background tasks submitted : {status.background_worker_task_count}")
+        lines.append(
+            f"Scheduler : {'ACTIVE' if status.scheduler_active else 'INACTIVE'}"
+        )
+        if status.scheduler_active:
+            lines.append(f"Scheduler jobs registered : {status.scheduler_jobs_registered}")
         return CommandResult(success=True, message="\n\n".join(lines))

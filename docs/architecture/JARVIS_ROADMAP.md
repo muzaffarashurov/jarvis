@@ -122,6 +122,90 @@ Completed sub-packages:
 
 ## Current
 
+EP-060 Jarvis Operating System — **COMPLETE** (STEP 1 Architecture
+Discovery & Design, STEP 2 Implementation & Testing, STEP 3
+Architecture Audit, STEP 4 Finalization all complete -- see
+docs/architecture/designs/EP060_DESIGN.md (including its Owner
+Decisions D1-D6) and docs/architecture/audits/EP060_ARCHITECTURE_AUDIT.md.
+**Final Verdict: STEP 3 — AUDIT PASSED, NO BLOCKING FINDINGS** (one
+non-blocking WARNING; STEP 4 resolved it by synchronizing the one
+EP-059 assertion it concerned -- see below). EP-060's roadmap entry
+("Jarvis Operating System") had no functional specification anywhere
+in the repository beyond Phase 10's own one-sentence goal, shared with
+EP-059. STEP 1 found no textual anchor naming a specific EP-060
+mechanism, but did find a real, code-verified gap: `Bootstrap.
+shutdown()` stopped only the REST API Server, never the Background
+Worker Pool, and the Scheduler auto-starts its own tick loop by
+default (`scheduler.enabled`/`scheduler.auto_start` both default
+`true`) with no public method to stop it at all -- correcting EP-059
+Owner Decision D4's premise that Scheduler is never auto-started as a
+side effect of `initialize()`. STEP 1 recommended Owner Decision D1 =
+"Candidate A": widen EP-059's `RuntimeService`/`RuntimeModule` from a
+read-only introspection surface into a small, additive lifecycle
+control plane, rather than build any new registry, scheduler, event
+bus, or distributed infrastructure. Owner Decision D2: `Bootstrap.
+shutdown()`'s existing body is altered (not merely appended to) to
+delegate to `RuntimeService.shutdown()` -- the first non-purely-
+additive touch to that file across this project's history, disclosed
+and approved rather than assumed. Owner Decision D3: shutdown
+coordination stays internal-only, invoked exclusively by `Bootstrap.
+shutdown()` at process exit -- no CLI/REST-reachable `runtime
+shutdown` action was added. Owner Decision D4: Telegram stays excluded
+from status (its `auto_start` genuinely defaults `false`, unlike
+Scheduler's). Owner Decision D5: `src/services/scheduler_service.py`
+(EP-011) is not modified -- Scheduler is observed, not controlled, in
+v1; no Scheduler shutdown capability exists. Owner Decision D6: a new
+`scheduler_service` property was added to `Bootstrap`, mirroring every
+other subsystem's own convention. Built by widening
+`src/services/runtime_service.py` (`RuntimeStatus` gains
+`scheduler_active`/`scheduler_jobs_registered`, both defaulted for
+backward compatibility; `RuntimeService` gains exactly one new public
+method, `shutdown() -> RuntimeShutdownReport`, coordinating REST API
+Server then Background Worker Service shutdown, reusing only their
+own already-existing, already-idempotent `stop()`/`shutdown()`
+methods) and `src/modules/runtime_module.py` (status formatting gains
+a Scheduler line; still exactly `status`/`help`, no new action). In
+`src/bootstrap.py`: one new `_scheduler_service` attribute plus
+property (D6), the existing `RuntimeService(...)` construction site
+widened with `scheduler_service=self._scheduler_service`, and
+`shutdown()`'s body replaced to delegate to `RuntimeService.shutdown()`
+with a fallback for when `RuntimeService` was never built, now also
+nulling `background_worker_service` (a new, symmetric postcondition
+alongside the pre-existing `rest_api_server` one); `_scheduler_service`
+is deliberately left untouched by `shutdown()`. `src/services/
+scheduler_service.py`, `src/core/scheduler/*.py`, `config/config.yaml`,
+and `requirements.txt` are all confirmed byte-identical/unmodified by
+EP-060. Tests: EP-060 65/0/0 (new suite, `tests/EP060/
+test_runtime_lifecycle.py`), covering the widened constructor/status
+(including real, unmodified `SchedulerService` under both
+`auto_start: true` and `false`), `shutdown()` in isolation (all-`None`
+dependencies, real `RestApiServer`/`BackgroundWorkerService`
+instances, idempotency, ordering, and the disclosed, pinned
+`BackgroundWorkerService.status()` post-shutdown limitation), the
+`{status, shutdown}`/`{status, help}` public-surface guarantees, and
+real end-to-end `Bootstrap` wiring/shutdown. Full regression: EP-059
+93/0/0 (after the STEP 4 synchronization below), EP-036 101/0/0,
+EP-036-STEP2 48/0/0, EP-036-STEP3 53/0/0, EP-043 83/0/0 -- all
+independently reproduced at STEP 2, STEP 3, and STEP 4. **STEP 3
+finding (one non-blocking WARNING, resolved during STEP 4):**
+`tests/EP059/test_runtime.py::_test_service_exposes_only_status`
+asserted `RuntimeService`'s public method list equals `["status"]` --
+an EP-059 Owner-Decision-D5 guard assertion that, by construction,
+could not survive any future, legitimate widening of that surface.
+STEP 3 classified this as an obsolete historical guard, not an EP-060
+defect (every other, compatibility-relevant assertion in that file
+passed unmodified). STEP 4 updated the one assertion to
+`["shutdown", "status"]`, with a docstring explaining why, restoring
+EP-059 to 93/93 -- no test was weakened, skipped, or deleted; the
+change makes the test agree with the approved EP-060 contract rather
+than contradict it.
+
+**Next Engineering Package: none yet defined.** EP-060 completes
+Phase 10 ("Jarvis Operating System" -- `docs/engineering/
+ENGINEERING_GUIDE.md`'s own Phase 10 goal, "Complete the AI Operating
+System"), the roadmap's final currently-named phase. No EP-061 or
+Phase 11 exists anywhere in this repository as of this release.
+
 EP-059 Distributed Runtime — **COMPLETE** (STEP 1 Architecture
 Discovery & Design, STEP 2 Implementation & Testing, STEP 3
 Architecture Audit, STEP 4 Finalization all complete -- see
@@ -213,10 +297,6 @@ oversight, requiring no action. `src/core/api/rest_api_server.py`,
 `src/modules/background_worker_module.py`, and `config/config.yaml`
 are all confirmed byte-identical/unmodified by EP-059, both before
 and after STEP 4.
-
-**Next Engineering Package: EP-060 Jarvis Operating System — NOT
-STARTED.** No EP-060 design, research, or implementation work has
-begun.
 
 EP-058 Autonomous Planning — **COMPLETE** (STEP 1 Architecture
 Discovery & Design, STEP 2 Implementation & Testing, STEP 3

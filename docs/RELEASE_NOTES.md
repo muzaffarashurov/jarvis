@@ -2450,4 +2450,65 @@ EP059 : 93 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-060 — Jarvis Operating System
+
+Status: Released (AUDIT PASSED, NO BLOCKING FINDINGS -- one
+non-blocking observation identified during the architecture audit and
+resolved before release by updating one internal test; see "Known
+limitations" below)
+
+A note on scope: like EP-059, "Jarvis Operating System" had no
+functional specification anywhere in the project's own documentation
+beyond its title. This release closes a real gap found while looking
+for one: when Jarvis shut down, it always stopped its web API, but it
+never gave its background task pool a chance to finish cleanly first
+-- it was simply cut off when the program exited. This release fixes
+that.
+
+Highlights:
+
+- Shutting down Jarvis now properly signals the background task pool
+  to finish up, in addition to stopping the web API, instead of only
+  stopping the web API and leaving background tasks to be cut off
+  abruptly when the program exits
+- "runtime status" (introduced in the previous release) now also
+  shows whether Jarvis's task Scheduler is currently active and how
+  many jobs it has registered
+- Purely internal coordination -- nothing new is reachable through the
+  command shell or the web API; shutting down still happens
+  automatically when Jarvis exits, exactly as before
+- Every existing command and feature is completely unaffected -- this
+  is an internal improvement to how Jarvis shuts itself down, with no
+  effect on how anything else already works
+
+Compatibility:
+
+Fully backward compatible with every prior EP, including EP-059. No
+existing service, manager, or CLI command was renamed, removed, or had
+its user-facing behavior changed. The Scheduler itself, the web API
+server, and the background task pool's own internal logic are all
+unmodified.
+
+No breaking changes.
+
+Known limitations:
+
+- None outstanding. The Scheduler's own tick loop still cannot be
+  stopped independently -- Jarvis's shutdown sequence signals the web
+  API and the background task pool to stop, but the Scheduler
+  continues running until the whole program exits. This is an
+  intentional, disclosed limitation of this release, not an oversight,
+  and a natural candidate for a future release. The architecture audit
+  also found that one old, internal test needed updating to reflect
+  this release's intentionally added shutdown capability; that update
+  was made before release and did not change how Jarvis behaves. See
+  `docs/architecture/audits/EP060_ARCHITECTURE_AUDIT.md` Section 7 for
+  the details.
+
+Validation:
+
+EP060 : 65 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

@@ -279,6 +279,13 @@ class Bootstrap:
         self._workflow_scheduler_service: WorkflowSchedulerService | None = None
         self._automation_service: AutomationService | None = None
         self._background_worker_service: BackgroundWorkerService | None = None
+        # EP-060 (EP060_DESIGN.md Section 5.9/9.5): previously a local
+        # variable inside `_build_command_router()`, discarded after
+        # `SchedulerModule` registration. Promoted to an instance
+        # attribute so RuntimeService can observe Scheduler status
+        # (Section 9.1) -- mirrors `_background_worker_service`'s own
+        # existing pattern exactly.
+        self._scheduler_service: SchedulerService | None = None
         self._git_service: GitService | None = None
         self._github_service: GitHubService | None = None
         self._telegram_info_service: TelegramInfoService | None = None
@@ -328,20 +335,23 @@ class Bootstrap:
         self._rest_api_server = self._build_rest_api_server(self._command_router, self._config)
 
         # EP-059: constructed last, only after every dependency it
-        # reads (`_rest_api_server`, `_background_worker_service` --
-        # the latter already assigned inside `_build_command_router`
-        # above -- and `_shell`) has already been assigned this run,
-        # so a `None` reference here correctly reflects "this run
-        # didn't build/enable that subsystem," never a
-        # not-yet-constructed one (see `EP059_DESIGN.md` Section 8,
+        # reads (`_rest_api_server`, `_background_worker_service`/
+        # `_scheduler_service` -- both already assigned inside
+        # `_build_command_router` above -- and `_shell`) has already
+        # been assigned this run, so a `None` reference here correctly
+        # reflects "this run didn't build/enable that subsystem," never
+        # a not-yet-constructed one (see `EP059_DESIGN.md` Section 8,
         # clarified per Owner-approved documentation update).
-        # Read-only: RuntimeService never starts, stops, or
-        # reconfigures any of the objects it is handed.
+        # `scheduler_service` added by EP-060 (`EP060_DESIGN.md` Section
+        # 9.1/9.5) -- read-only observation only; RuntimeService never
+        # starts, stops, or reconfigures any of the objects it is
+        # handed, including this one (Owner Decision D5).
         self._runtime_service = RuntimeService(
             started_at=self._started_at,
             rest_api_server=self._rest_api_server,
             background_worker_service=self._background_worker_service,
             shell=self._shell,
+            scheduler_service=self._scheduler_service,
         )
         self._command_router.register(RuntimeModule(self._runtime_service))
 
@@ -2039,6 +2049,11 @@ class Bootstrap:
         job_registry = JobRegistry()
         scheduler = Scheduler(registry=job_registry, execution_engine=execution_engine)
         scheduler_service = SchedulerService(config=config, scheduler=scheduler)
+        # EP-060 (EP060_DESIGN.md Section 5.9/9.5): promoted to an
+        # instance attribute (previously discarded once this method
+        # returned) so RuntimeService can later observe Scheduler
+        # status. No reordering of any existing line in this method.
+        self._scheduler_service = scheduler_service
         for default_job in Bootstrap._default_jobs(config):
             scheduler_service.register(default_job)
         router.register(SchedulerModule(scheduler_service))
@@ -2147,17 +2162,35 @@ class Bootstrap:
         return candidate
 
     def shutdown(self) -> None:
-        """Stop any background component started by this Bootstrap.
+        """Coordinate shutdown of every background component started by this Bootstrap.
 
-        Currently only the EP-043 REST API server needs an explicit
-        stop -- every other subsystem built by `initialize()` is a
-        stateless, per-call client with no background thread or open
-        socket. Safe to call multiple times, and safe to call even if
-        the REST API server was never started/enabled.
+        EP-060 (`EP060_DESIGN.md` Section 9.5, Owner Decision D2):
+        delegates to `RuntimeService.shutdown()`, which coordinates an
+        ordered, idempotent shutdown of the REST API Server and the
+        Background Worker Service -- closing a previously confirmed gap
+        where this method stopped only the REST API Server and left the
+        Background Worker Pool's daemon threads running, un-drained,
+        until process exit (`EP060_DESIGN.md` Section 5.4). Falls back
+        to a direct `RestApiServer.stop()` call if `RuntimeService` was
+        never constructed (e.g. `initialize()` was never called), so
+        `shutdown()` remains safe to call regardless of initialization
+        state, exactly as before EP-060.
+
+        The Scheduler is deliberately not stopped here -- it exposes no
+        public shutdown primitive (`EP060_DESIGN.md` Section 5.2/Owner
+        Decision D5); `self._scheduler_service` is intentionally left
+        unset by this method.
+
+        Safe to call multiple times: `RuntimeService.shutdown()` is
+        itself idempotent (`EP060_DESIGN.md` Section 9.3), since both
+        underlying calls it makes already are.
         """
-        if self._rest_api_server is not None:
+        if self._runtime_service is not None:
+            self._runtime_service.shutdown()
+        elif self._rest_api_server is not None:
             self._rest_api_server.stop()
-            self._rest_api_server = None
+        self._rest_api_server = None
+        self._background_worker_service = None
 
     @staticmethod
     def _default_processes() -> list[Process]:
@@ -2811,3 +2844,27 @@ class Bootstrap:
             non-None.
         """
         return self._runtime_service
+
+    @property
+    def scheduler_service(self) -> SchedulerService | None:
+        """Return the SchedulerService built for EP-011, if available.
+
+        Added by EP-060 (`EP060_DESIGN.md` Section 5.9/9.5, Owner
+        Decision D6) -- previously discarded as a local variable inside
+        `_build_command_router()` once `SchedulerModule` was registered.
+        Exposed here for consistency with every other subsystem's own
+        property, and so `RuntimeService` can be handed this reference
+        at construction time.
+
+        Returns:
+            The SchedulerService instance, or None if
+            `run()`/`initialize()` has not completed. Like
+            `runtime_service` above, `SchedulerService` is constructed
+            unconditionally inside `_build_command_router()` --
+            `scheduler.enabled`/`scheduler.auto_start` gate only
+            whether its tick loop is actually started
+            (`EP060_DESIGN.md` Section 5.3), not whether the object
+            itself is built -- so this is always non-None once
+            `initialize()` has completed.
+        """
+        return self._scheduler_service

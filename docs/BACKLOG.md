@@ -10,12 +10,123 @@ Status: Active
 
 ## Next Engineering Package
 
+**None yet defined.** EP-060 (Jarvis Operating System) completed
+Phase 10 -- `docs/engineering/ENGINEERING_GUIDE.md`'s own Phase 10
+goal, "Complete the AI Operating System", shared with EP-059. No
+EP-061 or Phase 11 exists anywhere in this repository as of this
+release.
+
 ### EP-060 — Jarvis Operating System
 
-**NOT STARTED.** Per `docs/architecture/JARVIS_ROADMAP.md`'s Phase 10
-sequencing, EP-060 (Jarvis Operating System) is the next Engineering
-Package after EP-059's completion. No design, research, or
-implementation work has begun.
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), and STEP 4 (Finalization) all
+complete. EP-060 is marked **COMPLETE / AUDIT PASSED, NO BLOCKING
+FINDINGS** -- STEP 3 identified one non-blocking WARNING and zero
+blocking findings; STEP 4 resolved it (see below) rather than leaving
+it open, since resolving it required no design or scope change, only
+synchronizing one stale test assertion with the already-approved
+EP-060 contract -- see
+`docs/architecture/audits/EP060_ARCHITECTURE_AUDIT.md`. Full design,
+including Owner Decisions D1-D6: `docs/architecture/designs/
+EP060_DESIGN.md`.
+
+EP-060's roadmap entry ("Jarvis Operating System") had no functional
+specification anywhere in the repository beyond Phase 10's own
+one-sentence goal, shared with EP-059. STEP 1 found no textual anchor
+naming a specific EP-060 mechanism, but did find a real, code-verified
+gap: `Bootstrap.shutdown()` stopped only the REST API Server, never
+the Background Worker Pool, and the Scheduler auto-starts its own tick
+loop by default (`scheduler.enabled`/`scheduler.auto_start` both
+default `true` in `config/config.yaml`) with no public method to stop
+it at all -- directly correcting EP-059 Owner Decision D4's premise
+that Scheduler is never auto-started as a side effect of
+`initialize()`. STEP 1 recommended Owner Decision D1 = "Candidate A":
+widen EP-059's `RuntimeService`/`RuntimeModule` from a read-only
+introspection surface into a small, additive lifecycle control plane,
+rather than build a new registry (already built by EP-056's
+`CapabilityRegistryModule`), a generalized task queue (would require
+modifying EP-036's own core file), or an event-driven design (the
+existing `orchestrator.started`/`orchestrator.stopped` EventBus hooks
+have zero subscribers and are never even published by the running
+application today).
+
+Built by widening `src/services/runtime_service.py` (`RuntimeStatus`
+gains `scheduler_active`/`scheduler_jobs_registered`, both defaulted
+for backward compatibility with every EP-059 constructor/dataclass
+call site; `RuntimeService` gains exactly one new public method,
+`shutdown() -> RuntimeShutdownReport`, coordinating REST API Server
+then Background Worker Service shutdown, in that order, reusing only
+their own already-existing, already-idempotent `stop()`/`shutdown()`
+methods -- no new stop logic of its own) and `src/modules/
+runtime_module.py` (status formatting gains a Scheduler line; still
+exposes exactly `status`/`help` -- Owner Decision D3, no CLI/REST
+`runtime shutdown` action). In `src/bootstrap.py`: one new
+`_scheduler_service` attribute plus public property (Owner Decision
+D6), promoted from a previously-discarded local variable inside
+`_build_command_router()`; the existing `RuntimeService(...)`
+construction site widened with `scheduler_service=self.
+_scheduler_service`; and `shutdown()`'s existing body replaced (Owner
+Decision D2 -- the first non-purely-additive touch to this file across
+every EP's own history, disclosed and approved rather than assumed)
+to delegate to `RuntimeService.shutdown()`, with a fallback for when
+`RuntimeService` was never built, now also nulling
+`background_worker_service` (a new, symmetric postcondition alongside
+the pre-existing `rest_api_server` one). `self._scheduler_service` is
+deliberately left untouched by `shutdown()` -- Owner Decision D5:
+`src/services/scheduler_service.py` (EP-011) was not modified;
+Scheduler is observed, not controlled, in v1.
+
+Owner Decisions D1-D6 were all confirmed correctly implemented with
+zero findings against their literal text during STEP 3. The STEP 3
+audit identified exactly one further finding, a non-blocking WARNING:
+`tests/EP059/test_runtime.py::_test_service_exposes_only_status`
+asserted `RuntimeService`'s public method list equals `["status"]` --
+an EP-059 Owner-Decision-D5 guard assertion that, by construction,
+could not survive any future, legitimate widening of that surface, and
+had therefore begun (correctly) failing once EP-060's approved
+`shutdown()` method existed. STEP 3 classified this as an obsolete
+historical guard, not an EP-060 defect, since every other,
+compatibility-relevant assertion in that file (covering the original
+four constructor arguments, the original nine `RuntimeStatus` fields,
+`RuntimeModule` CLI dispatch, and real-`Bootstrap` wiring) continued to
+pass unmodified. STEP 4 updated the one assertion to `["shutdown",
+"status"]`, with a docstring explaining the change and citing the
+approved contract it now matches -- no test was weakened, skipped, or
+deleted; `tests/EP059/test_runtime.py`'s other 92 assertions were left
+completely untouched.
+
+Tests: EP-060 65/0/0, covering `RuntimeService`'s widened constructor/
+`status()` (backward compatibility with the original four-argument
+call shape; real, unmodified `SchedulerService` observed correctly
+under both `scheduler.auto_start: true` and `false`;
+`scheduler_jobs_registered` reflecting real registered jobs),
+`shutdown()` in isolation (all-`None` dependencies never raising; a
+real `RestApiServer` genuinely stopped; a real
+`BackgroundWorkerService` genuinely signaled to shut down; the
+disclosed, pinned `BackgroundWorkerService.status()` post-shutdown
+limitation, asserted explicitly rather than silently "fixed";
+idempotency across two consecutive calls; REST-API-before-
+Background-Workers ordering, verified via call-order-recording
+proxies), the `{status, shutdown}`/`{status, help}` public-surface
+guarantees, `RuntimeModule` status formatting, and real end-to-end
+`Bootstrap` wiring/shutdown (scheduler_service property population,
+object-identity confirmation that `RuntimeService` observes the exact
+live `SchedulerService` Bootstrap's own property exposes, `runtime
+status` reflecting Scheduler over a real `CommandRouter` dispatch, a
+full `initialize()` -> `shutdown()` cycle genuinely stopping the REST
+API Server and Background Worker Service, both properties nulled
+afterward, a second `shutdown()` call remaining safe, `shutdown()`
+remaining safe even when `initialize()` was never called, and
+Scheduler's own property remaining populated and identity-unchanged
+after `shutdown()`). Full regression: EP-059 93/0/0 (after the STEP 4
+synchronization above), EP-036 101/0/0, EP-036-STEP2 48/0/0,
+EP-036-STEP3 53/0/0, EP-043 83/0/0 -- all independently reproduced
+exactly at STEP 2, STEP 3, and STEP 4. `src/services/
+scheduler_service.py`, `src/core/scheduler/scheduler.py`,
+`src/core/scheduler/job.py`, `src/core/scheduler/job_registry.py`,
+`config/config.yaml`, and `requirements.txt` are all confirmed
+byte-identical/unmodified by EP-060 (independently re-hashed during
+STEP 3 and reconfirmed unchanged at STEP 4).
 
 ### EP-059 — Distributed Runtime
 

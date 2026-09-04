@@ -787,12 +787,26 @@ class RuntimeTest(BaseTest):
             self.assert_true(forbidden not in module._actions)  # noqa: SLF001
 
     def _test_service_exposes_only_status(self) -> None:
+        """RuntimeService's public surface, synchronized for EP-060.
+
+        Originally asserted `["status"]` only (EP-059 Owner Decision
+        D5: no control surface in v1). EP-060 (`EP060_DESIGN.md`
+        Section 9.2, Owner Decision D1, approved) widened this by
+        exactly one method, `shutdown()` -- a narrow, internal-only
+        lifecycle-coordination operation, not a general control API
+        (see `RuntimeModule`'s own, still-unchanged
+        `_test_module_exposes_only_status_and_help` guard immediately
+        above, which confirms no new CLI/REST action was introduced
+        alongside it). This assertion is updated to match that
+        approved contract (`EP060_ARCHITECTURE_AUDIT.md` Section 7)
+        rather than left contradicting it.
+        """
         public_methods = [
             name
             for name, member in inspect.getmembers(RuntimeService, predicate=inspect.isfunction)
             if not name.startswith("_")
         ]
-        self.assert_equal(public_methods, ["status"])
+        self.assert_equal(sorted(public_methods), ["shutdown", "status"])
 
     # ================= Real Bootstrap wiring =================
 

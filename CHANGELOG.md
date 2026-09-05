@@ -6,6 +6,176 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.21-ep062
+
+Released: 2026-09-05
+
+Status: EP-062 COMPLETE / STEP 3 PASS WITH WARNINGS, NO BLOCKING
+FINDINGS (STEP 1 Architecture Discovery & Design, STEP 2
+Implementation & Testing, STEP 3 Architecture Audit, STEP 4
+Documentation Synchronization all complete). STEP 3's verdict was
+**PASS WITH WARNINGS** -- two non-blocking findings (F1, F2) and two
+observations (F3, F4), zero blocking. Per explicit instruction, STEP 4
+did not remediate F1-F4: all four were reviewed and accepted as
+non-blocking/informational, not requiring a code, test, or design
+change, so STEP 4 performed documentation synchronization only. Final
+status after STEP 4: four release/project documentation files
+updated, zero production-code, test, or configuration change beyond
+what STEP 2 already implemented.
+
+Neither `docs/BACKLOG.md` nor `docs/architecture/JARVIS_ROADMAP.md`
+named an EP-062 scope -- both said "none yet defined," and, unlike
+EP-060 naming EP-061, EP-061's own design/audit documents did not name
+a specific "next EP" candidate either. STEP 1 found no textual anchor
+naming a specific EP-062 mechanism, but did find a real, code-verified
+gap disclosed by EP-060 and left open by EP-061:
+`BackgroundWorkerService.status()` (EP-036) derived `running`
+exclusively from whether it owned a pool object at all
+(`self._pool is not None`), never from whether `shutdown()` had
+already been called on that pool -- so `status().running` stayed
+`True` for the rest of the object's life once ever `True`, even after
+a full, confirmed shutdown. This was already disclosed by name in
+`EP060_DESIGN.md` Section 5.5, still pinned by an explicit,
+unfixed-limitation test in `tests/EP060/test_runtime_lifecycle.py`,
+and reachable live through the `worker status` CLI (`worker stop`
+followed by `worker status` printed "Running : YES" while a
+subsequent `worker submit` would immediately raise
+`PoolShutDownError`). STEP 1 recommended closing it at its source with
+the smallest possible change: `BackgroundWorkerPool` (EP-036) already
+exposed a public, thread-safe `is_shutdown` property that nothing
+above it consumed -- wiring that one property into `status()` fixes
+every downstream consumer (`RuntimeService`, `worker status`)
+automatically, with no change to either consumer.
+
+### Added
+
+- tests/EP062/test_background_worker_status.py: new, self-contained
+  EP-062 test suite (`NAME = "EP062"`), 39 assertions covering
+  `BackgroundWorkerService.status()` in isolation (disabled, never
+  shut down, shut down with `wait=True`/`wait=False`, called twice
+  after shutdown, `worker_count`/`task_count` unaffected by shutdown
+  state), `RuntimeService`'s corrected `status()`/`shutdown()`
+  behavior (including a second `shutdown()` call and `runtime status`
+  CLI output), `BackgroundWorkerModule` CLI consistency (`worker
+  status` after `worker stop`, `worker submit` still raising
+  afterward), and public-surface guards for `BackgroundWorkerService`
+  and `BackgroundWorkerStatus`
+- docs/architecture/designs/EP062_DESIGN.md: full design document,
+  including Owner Decisions D1-D3
+- docs/architecture/audits/EP062_ARCHITECTURE_AUDIT.md: EP-062
+  Architecture Audit, Final Verdict PASS WITH WARNINGS, NO BLOCKING
+  FINDINGS
+
+### Changed
+
+- src/services/background_worker_service.py: `status()`'s `running`
+  field changed from an unconditional `True` to
+  `not self._pool.is_shutdown` -- the one behavioral change this EP
+  makes. `status()`'s docstring and `BackgroundWorkerStatus.running`'s
+  field docstring were also updated to describe the corrected
+  semantics. No other line, method, or public surface in this file
+  changed (`BackgroundWorkerService` still exposes exactly `{status,
+  submit, get_task, list_tasks, shutdown}`; `BackgroundWorkerStatus`
+  still has exactly `{enabled, running, worker_count, task_count}`)
+- src/services/runtime_service.py: documentation-only --
+  `RuntimeShutdownReport.background_workers_was_active`'s docstring
+  updated to state that the limitation it previously described as
+  "disclosed, not fixed, by EP-060" is now fixed at its source by
+  EP-062. Zero executable lines changed; `status()` and `shutdown()`
+  are unmodified and still call `BackgroundWorkerService.status()`
+  exactly as before
+- tests/EP060/test_runtime_lifecycle.py: one test corrected, not
+  weakened -- `_test_shutdown_disclosed_background_worker_status_
+  limitation` (which pinned the pre-EP-062 bug) renamed to
+  `_test_shutdown_background_worker_status_reflects_shutdown_state`
+  and its two assertions updated from `assert_true` to `assert_false`
+  to match the now-corrected contract; its docstring and one module-
+  level docstring bullet updated to match. No other test in this file
+  changed (23 of its 24 test methods required no change at all)
+- src/modules/test_module.py: one added import line
+  (`import tests.EP062.test_background_worker_status`)
+- No existing method's signature, return type, or behavior changed for
+  `BackgroundWorkerPool`, `BackgroundWorkerModule`, `RuntimeModule`,
+  `Bootstrap`, `SchedulerService`, or `RestApiServer` -- all
+  independently confirmed unmodified. No existing `config/config.yaml`
+  key was added, removed, or had its meaning changed, and no new key
+  was added. No new dependency was added to `requirements.txt`.
+
+### Security
+
+- No new control surface reachable via CLI or REST: `worker`'s six
+  actions (`status, submit, list, info, stop, help`) and `runtime`'s
+  two actions (`status, help`) are unchanged in count and dispatch --
+  only the value displayed by `worker status`/`runtime status`
+  changes, at its one source
+
+### Validation
+
+```
+EP062 : 39 passed / 0 failed / 0 skipped
+EP036 : 101 passed / 0 failed / 0 skipped
+EP036-STEP2 : 48 passed / 0 failed / 0 skipped
+EP036-STEP3 : 53 passed / 0 failed / 0 skipped
+EP059 : 93 passed / 0 failed / 0 skipped
+EP060 : 65 passed / 0 failed / 0 skipped
+EP061 : 62 passed / 0 failed / 0 skipped
+```
+
+All figures above were independently reproduced from a clean process
+at STEP 2, STEP 3, and STEP 4 -- no figure changed between STEP 3 and
+STEP 4, since STEP 4 made no code or test change.
+
+### STEP 3 -- Architecture Audit
+
+Verdict: EP-062 STEP 3 -- **PASS WITH WARNINGS**, zero blocking
+findings. All three Owner Decisions (D1-D3) confirmed VERIFIED against
+direct source inspection, not merely against the STEP 2 report.
+`BackgroundWorkerPool`, `BackgroundWorkerModule`, `RuntimeModule`,
+`Bootstrap`, `SchedulerService`, `config/config.yaml`,
+`requirements.txt`, `docs/BACKLOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/architecture/JARVIS_ROADMAP.md`, and
+`docs/architecture/ARCHITECTURE_DEBT.md` were all independently
+confirmed untouched. Two non-blocking findings and two observations
+were identified:
+
+1. **(F1, non-blocking)** `background_worker_service.py`'s `status()`
+   and `BackgroundWorkerStatus.running`'s docstrings were expanded
+   beyond the design's literal "no other line changes" wording for
+   this file -- accurate and non-behavioral, but a deviation from the
+   design's stated scope.
+2. **(F2, non-blocking)** `src/modules/test_module.py`'s one added
+   import line and the new `tests/EP062/__init__.py` package marker
+   were not itemized anywhere in `EP062_DESIGN.md` Section 13 -- both
+   necessary for the new suite to register/import at all, and both
+   mirror identical precedent from EP-059/EP-060/EP-061's own STEP 2
+   work, none of which was itemized in those EPs' own design documents
+   either.
+3. **(F3, observation)** No test exercises a genuinely concurrent
+   `status()` call racing an in-progress `shutdown()` from a second
+   thread; verified safe by direct source inspection instead (both
+   operations share one short-lived lock, never held across a blocking
+   call), and not required by the design's own Testing Strategy.
+4. **(F4, observation)** A citation-accuracy note only, with no
+   bearing on correctness.
+
+The owner reviewed all four and directed STEP 4 to leave each
+unchanged, since none violated `EP062_DESIGN.md` or any approved Owner
+Decision (D1-D3) and none required a design, scope, or behavior
+change. Final status after STEP 4: zero code/test/config change. See
+`docs/architecture/audits/EP062_ARCHITECTURE_AUDIT.md` for the full
+audit.
+
+### STEP 4 -- Documentation Synchronization
+
+No STEP 3 finding was remediated (owner directed all four left
+unchanged, per above). Release/project documentation (`CHANGELOG.md`,
+`docs/BACKLOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/architecture/JARVIS_ROADMAP.md`) synchronized to mark EP-062
+COMPLETE / STEP 3 PASS WITH WARNINGS, NO BLOCKING FINDINGS. No further
+Engineering Package is yet named anywhere in this repository.
+
+---
+
 ## v0.1.20-ep061
 
 Released: 2026-09-05

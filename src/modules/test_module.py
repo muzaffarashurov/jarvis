@@ -60,6 +60,7 @@ import tests.EP058.test_autonomous_planning
 import tests.EP059.test_runtime
 import tests.EP060.test_runtime_lifecycle
 import tests.EP061.test_scheduler_shutdown
+import tests.EP062.test_background_worker_status
 
 class TestModule(CommandModule):
 

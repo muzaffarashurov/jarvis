@@ -122,6 +122,92 @@ Completed sub-packages:
 
 ## Current
 
+EP-062 BackgroundWorkerService Status/Shutdown Reconciliation —
+**COMPLETE** (STEP 1 Architecture Discovery & Design, STEP 2
+Implementation & Testing, STEP 3 Architecture Audit, STEP 4
+Documentation Synchronization all complete -- see
+docs/architecture/designs/EP062_DESIGN.md (including its Owner
+Decisions D1-D3) and
+docs/architecture/audits/EP062_ARCHITECTURE_AUDIT.md. **Final Verdict:
+STEP 3 — PASS WITH WARNINGS, NO
+BLOCKING FINDINGS** (two non-blocking findings F1-F2, two
+observational findings F3-F4; owner reviewed all four and directed
+STEP 4 to leave each unchanged -- see below). Not tied to any roadmap
+phase: neither this roadmap nor `docs/BACKLOG.md` named an EP-062
+scope, both saying "none yet defined," and unlike EP-060 naming
+EP-061 by name, EP-061's own design/audit documents did not name a
+specific "next EP" candidate either. STEP 1 found no textual anchor
+naming a specific EP-062 mechanism, but did find a real, code-verified
+gap disclosed by EP-060 (`EP060_DESIGN.md` Section 5.5) and left open
+by EP-061: `BackgroundWorkerService.status()` (EP-036) derived
+`running` exclusively from whether it owned a pool object at all, not
+whether `shutdown()` had been called on it, so `status().running`
+stayed `True` for the object's entire remaining life once ever `True`
+-- reachable live through `worker status` (`worker stop` followed by
+`worker status` printed "Running : YES" while a subsequent `worker
+submit` immediately raised `PoolShutDownError`), and inherited
+unchanged by `RuntimeService.status()`/`shutdown()` (EP-059/EP-060).
+STEP 1 recommended closing it at its source with the smallest possible
+change: `BackgroundWorkerPool` (EP-036) already exposed a public,
+thread-safe `is_shutdown` property nothing above it consumed -- wiring
+that one property into `status()` fixes every downstream consumer
+automatically, with zero change to either consumer. Owner Decision D1:
+the fix lives inside `BackgroundWorkerService.status()` itself, not in
+`RuntimeService` and not via a new passthrough property, so the fix is
+contained to one file and reaches both consumers (`RuntimeService`,
+`worker status`) without touching either. Owner Decision D2: `running`
+reflects "shutdown has been signaled" (`is_shutdown`), not "every
+worker thread has actually terminated" -- matching
+`SchedulerStatus.running`'s own, already-established coarse-liveness
+precedent; a caller needing the stronger guarantee already has
+`shutdown()`'s own return value for that. Owner Decision D3: the one
+disclosed test update (`tests/EP060/test_runtime_lifecycle.py`) and
+the `RuntimeShutdownReport` docstring correction were both deferred to
+STEP 2, not made during STEP 1, matching EP-061's own STEP 1
+precedent of deferring even docstring-only production-file edits.
+Built by changing exactly one expression inside
+`src/services/background_worker_service.py`'s existing `status()`
+method (`running=True` → `running=not self._pool.is_shutdown`) --
+`BackgroundWorkerPool`, `BackgroundWorkerModule`, `RuntimeModule`,
+`Bootstrap`, `SchedulerService`, `config/config.yaml`, and
+`requirements.txt` are all confirmed byte-identical/unmodified by
+EP-062 (independently re-verified during STEP 3, not merely re-cited
+from the STEP 2 report). Tests: EP-062 39/0/0 (new suite,
+`tests/EP062/test_background_worker_status.py`), covering
+`BackgroundWorkerService.status()` in isolation (disabled, never shut
+down, `wait=True`/`wait=False`, called twice after shutdown,
+`worker_count`/`task_count` unaffected), `RuntimeService`'s corrected
+`status()`/`shutdown()` behavior (including a second `shutdown()`
+call and `runtime status` CLI output), `BackgroundWorkerModule` CLI
+consistency (`worker status` after `worker stop`, `worker submit`
+still raising afterward), and public-surface guards for
+`BackgroundWorkerService`/`BackgroundWorkerStatus`. Full regression:
+EP-036 101/0/0, EP-036-STEP2 48/0/0, EP-036-STEP3 53/0/0, EP-059
+93/0/0, EP-060 65/0/0, EP-061 62/0/0 -- all independently reproduced
+at STEP 2, STEP 3, and STEP 4. **STEP 3 findings (two non-blocking,
+two observational; owner directed all four left unchanged during STEP
+4):** (1, non-blocking) `background_worker_service.py`'s `status()`
+and `BackgroundWorkerStatus.running` docstrings were expanded beyond
+the design's literal "no other line changes" wording for that file --
+accurate and non-behavioral; (2, non-blocking)
+`src/modules/test_module.py`'s one added import line and the new
+`tests/EP062/__init__.py` package marker were not itemized in
+`EP062_DESIGN.md` Section 13, mirroring identical, unitemized
+precedent from EP-059/EP-060/EP-061's own STEP 2 work; (3,
+observation) no test exercises a genuinely concurrent `status()` call
+racing an in-progress `shutdown()`, verified safe instead by direct
+source inspection (one short-lived shared lock, never held across a
+blocking call), and not required by the design's own Testing
+Strategy; (4, observation) a citation-accuracy note with no bearing on
+correctness.
+
+**Next Engineering Package: none yet defined.** EP-062 closed the
+disclosed limitation `EP060_DESIGN.md` Section 5.5 first named and
+`EP061_DESIGN.md` left untouched. It is not tied to any roadmap
+phase -- Phase 10 remains Jarvis's last currently-named phase,
+completed by EP-059/EP-060. No EP-063 or Phase 11 exists anywhere in
+this repository as of this release.
+
 EP-061 Scheduler Tick-Loop Shutdown — **COMPLETE** (STEP 1
 Architecture Discovery & Design, STEP 2 Implementation & Testing,
 STEP 3 Architecture Audit, STEP 4 Documentation Synchronization all

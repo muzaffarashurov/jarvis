@@ -88,13 +88,15 @@ class BackgroundWorkerStatus:
     Attributes:
         enabled: Whether 'background_workers.enabled' resolved True
             for this run.
-        running: Whether this service currently owns a live pool.
-            Always equal to `enabled` for a successfully constructed
-            `BackgroundWorkerService` (see the class docstring's
-            lifecycle note) -- kept as its own field for callers that
-            care about pool liveness specifically, and so this shape
-            stays stable if a future step introduces a state where
-            they can differ (e.g. a pause/resume step).
+        running: Whether this service currently owns a live,
+            not-yet-shut-down pool (`not pool.is_shutdown`, EP-062).
+            Equal to `enabled` until `shutdown()` is called on a
+            successfully constructed `BackgroundWorkerService`, and
+            `False` afterward -- the state EP-062 corrected this field
+            to distinguish (previously hard-set to `True` whenever a
+            pool existed at all; see `EP062_DESIGN.md` Section 1/6 and
+            `EP060_DESIGN.md` Section 5.5 for the disclosed limitation
+            this replaces).
         worker_count: Configured worker thread count, or 0 if not running.
         task_count: Number of tasks ever submitted to the live pool
             (across every status), or 0 if not running.
@@ -174,14 +176,28 @@ class BackgroundWorkerService:
     # ---------- Public API ----------
 
     def status(self) -> BackgroundWorkerStatus:
-        """Return the Background Worker subsystem's overall status."""
+        """Return the Background Worker subsystem's overall status.
+
+        `running` reflects the owned pool's own already-existing,
+        already-correct `is_shutdown` property (EP-062,
+        `EP062_DESIGN.md` Section 6) -- `True` only while a pool exists
+        and `shutdown()` has not been called on it; `False` once
+        `shutdown()` has been called, regardless of whether every
+        worker thread has fully joined yet (see `EP062_DESIGN.md`
+        Section 8 for why this is the correct granularity, matching
+        `SchedulerStatus.running`'s own precedent). Previously (EP-036
+        through EP-061) this was hard-set to `True` whenever `self.
+        _pool is not None`, which never became `False` again after
+        `shutdown()` -- a disclosed, now-fixed limitation (see
+        `EP060_DESIGN.md` Section 5.5).
+        """
         if self._pool is None:
             return BackgroundWorkerStatus(
                 enabled=False, running=False, worker_count=0, task_count=0
             )
         return BackgroundWorkerStatus(
             enabled=True,
-            running=True,
+            running=not self._pool.is_shutdown,
             worker_count=self._pool.worker_count,
             task_count=len(self._pool.list_tasks()),
         )

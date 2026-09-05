@@ -152,12 +152,16 @@ class RuntimeShutdownReport:
         background_workers_was_active: Whether the Background Worker
             Service reported `running=True` immediately before this
             call (False if no `BackgroundWorkerService` reference was
-            supplied). Per `EP060_DESIGN.md` Section 5.5/9.3, this
-            field inherits a pre-existing `BackgroundWorkerService.
-            status()` limitation: it cannot distinguish "running" from
-            "already shut down" -- a second `shutdown()` call may still
-            report this as True even though shutdown already completed.
-            This is disclosed, not fixed, by EP-060.
+            supplied, or if it was already shut down). Per
+            `EP060_DESIGN.md` Section 5.5/9.3, this field used to
+            inherit a `BackgroundWorkerService.status()` limitation
+            that could not distinguish "running" from "already shut
+            down" -- disclosed, not fixed, by EP-060. EP-062 fixed
+            that limitation at its source
+            (`BackgroundWorkerService.status()` now reads the owned
+            pool's own `is_shutdown` property, `EP062_DESIGN.md`
+            Section 6), so a second `shutdown()` call now correctly
+            reports this field as False.
         background_workers_stopped: The `bool` returned by
             `BackgroundWorkerService.shutdown()` unchanged (True if
             every worker was confirmed stopped, or if the subsystem was

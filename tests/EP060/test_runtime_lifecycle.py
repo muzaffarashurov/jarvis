@@ -44,11 +44,15 @@ Covers:
     - `RuntimeService.shutdown()` in isolation: all-`None` dependencies
       (never raises, reports "nothing to do" as success); a real,
       unmodified `RestApiServer` + a real, unmodified
-      `BackgroundWorkerService` (both genuinely stopped); the disclosed
-      Section 5.5 limitation (`background_workers_was_active` remains
-      `True` on a second call) pinned explicitly, not silently
-      "fixed"; idempotency (two consecutive calls, neither raises);
-      ordering (REST API stopped strictly before Background Workers).
+      `BackgroundWorkerService` (both genuinely stopped); the Section
+      5.5 limitation (`background_workers_was_active` remaining `True`
+      on a second call) that EP-060 disclosed but did not fix, and
+      that EP-062 has since fixed at its source
+      (`BackgroundWorkerService.status()`, `EP062_DESIGN.md` Section
+      6) -- the corresponding test now asserts the corrected `False`
+      result rather than pinning the old bug; idempotency (two
+      consecutive calls, neither raises); ordering (REST API stopped
+      strictly before Background Workers).
     - `RuntimeModule`/`RuntimeService` public-surface guarantees:
       `RuntimeModule` still exposes exactly `{"status", "help"}` (no
       new CLI action); `RuntimeService` now exposes exactly
@@ -507,7 +511,7 @@ class RuntimeLifecycleTest(BaseTest):
         self._test_shutdown_never_raises_with_all_none()
         self._test_shutdown_stops_real_rest_api_server()
         self._test_shutdown_stops_real_background_worker_service()
-        self._test_shutdown_disclosed_background_worker_status_limitation()
+        self._test_shutdown_background_worker_status_reflects_shutdown_state()
         self._test_shutdown_is_idempotent()
         self._test_shutdown_orders_rest_api_before_background_workers()
 
@@ -704,16 +708,21 @@ class RuntimeLifecycleTest(BaseTest):
             self.assert_true(report.background_workers_was_active)
             self.assert_true(report.background_workers_stopped)
 
-    def _test_shutdown_disclosed_background_worker_status_limitation(self) -> None:
-        """Pins `EP060_DESIGN.md` Section 5.5/9.3's disclosed limitation.
+    def _test_shutdown_background_worker_status_reflects_shutdown_state(self) -> None:
+        """`EP060_DESIGN.md` Section 5.5/9.3's limitation, fixed by EP-062.
 
-        `BackgroundWorkerService.status().running` cannot distinguish
-        "running" from "already shut down" (it only checks whether the
-        pool object exists, not whether `shutdown()` was called on it).
-        This test asserts that EXACT, documented, non-obvious behavior
-        so a future, silent change to `BackgroundWorkerService.status()`
-        is caught as a regression against this design, not discovered
-        by surprise.
+        `BackgroundWorkerService.status().running` used to be unable to
+        distinguish "running" from "already shut down" (it only checked
+        whether the pool object existed, not whether `shutdown()` had
+        been called on it) -- disclosed, not fixed, by EP-060. EP-062
+        (`EP062_DESIGN.md` Section 6) fixed this at its source by
+        having `status()` read the owned pool's own already-existing
+        `is_shutdown` property. This test now asserts the corrected
+        contract -- `status().running` becomes `False` once `shutdown()`
+        has been called, and a second `RuntimeService.shutdown()` call
+        correctly reports `background_workers_was_active=False` -- so a
+        future, silent regression back to the old behavior is caught,
+        not discovered by surprise.
         """
         with tempfile.TemporaryDirectory() as tmp:
             bg_service = _build_real_background_worker_service(Path(tmp), worker_count=1)
@@ -724,10 +733,10 @@ class RuntimeLifecycleTest(BaseTest):
                 shell=None,
             )
             service.shutdown()
-            # Disclosed, unfixed limitation: still reports running=True.
-            self.assert_true(bg_service.status().running)
+            # Fixed by EP-062: correctly reports running=False.
+            self.assert_false(bg_service.status().running)
             second_report = service.shutdown()
-            self.assert_true(second_report.background_workers_was_active)
+            self.assert_false(second_report.background_workers_was_active)
 
     def _test_shutdown_is_idempotent(self) -> None:
         router = CommandRouter()

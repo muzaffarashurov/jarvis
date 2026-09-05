@@ -2571,4 +2571,62 @@ EP061 : 62 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-062 — BackgroundWorkerService Status/Shutdown Reconciliation
+
+Status: Released (STEP 3 PASS WITH WARNINGS, NO BLOCKING FINDINGS --
+two non-blocking and two informational findings identified during the
+architecture audit and, on the owner's review, left unchanged before
+release, since none required a change; see "Known limitations" below)
+
+A note on scope: like EP-061, this release wasn't named by the roadmap
+or backlog at all -- both said "no next package defined yet." Instead,
+it closes a small, already-known gap: checking the background task
+pool's status after asking it to stop always said it was still
+running, even though it had, in fact, stopped. This release fixes
+that.
+
+Highlights:
+
+- "worker status" now correctly says a background task pool has
+  stopped after "worker stop" is run, instead of continuing to say it
+  is still running
+- "runtime status" now correctly shows the background task pool as
+  inactive (and hides its thread/task-count details) once it has been
+  shut down, instead of continuing to show it as active
+- Purely a status-reporting correction -- nothing about how the
+  background task pool itself runs, submits, or completes tasks
+  changed in any way
+- Every existing command and feature is completely unaffected -- this
+  is a narrow correctness fix to what one existing status field
+  reports, with no effect on how anything else already works
+
+Compatibility:
+
+Fully backward compatible with every prior EP, including EP-059,
+EP-060, and EP-061. No existing service, manager, or CLI command was
+renamed, removed, or had its available actions changed. The background
+task pool's own submission, execution, and shutdown logic are all
+unmodified.
+
+No breaking changes.
+
+Known limitations:
+
+- None outstanding. The architecture audit found two small,
+  non-behavioral documentation notes (some added explanatory notes in
+  the code went slightly beyond what the original plan described, and
+  two files needed for the new tests to run weren't listed in that
+  plan up front) and two purely informational observations, none of
+  which affected how Jarvis behaves or how it was tested. The owner
+  reviewed all four and chose to leave them as-is, since none needed a
+  change. See
+  `docs/architecture/audits/EP062_ARCHITECTURE_AUDIT.md` Section 7
+  for the details.
+
+Validation:
+
+EP062 : 39 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

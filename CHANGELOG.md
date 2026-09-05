@@ -6,6 +6,234 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.20-ep061
+
+Released: 2026-09-05
+
+Status: EP-061 COMPLETE / AUDIT PASSED, NO BLOCKING FINDINGS (STEP 1
+Architecture Discovery & Design, STEP 2 Implementation & Testing,
+STEP 3 Architecture Audit, STEP 4 Documentation Synchronization all
+complete). STEP 3's verdict was **AUDIT PASSED, NO BLOCKING FINDINGS**
+-- two non-blocking, documentation-only WARNINGs, zero blocking. STEP
+4 resolved both (rather than leaving them open) because doing so
+required no design, scope, or behavior change -- only correcting one
+stale test-helper docstring and one imprecise evidence citation in the
+design document itself. Final status after STEP 4: one test-helper
+docstring corrected, one design-document sentence corrected, four
+release/project documentation files synchronized, zero production-code
+behavior change and zero test-assertion change beyond what STEP 2
+already implemented.
+
+Neither `docs/BACKLOG.md` nor `docs/architecture/JARVIS_ROADMAP.md`
+named an EP-061 scope -- both said "none yet defined," since EP-060
+closed the roadmap's last currently-named phase (Phase 10). STEP 1
+found no textual anchor naming a specific EP-061 mechanism, but did
+find a real, code-verified gap that EP-060 itself explicitly flagged as
+its own most natural follow-up (`EP060_DESIGN.md` Section 15, Owner
+Decision D5): `SchedulerService`'s automatic tick loop had a private
+`_stop_event`/`_tick_thread` pair built for shutdown, but no public
+method to use it, so `RuntimeService.shutdown()`/`Bootstrap.shutdown()`
+could stop the REST API Server and the Background Worker Service but
+never the Scheduler -- it kept ticking as a daemon thread until the
+whole process exited. STEP 1 recommended closing that gap directly:
+add one new public method, `SchedulerService.shutdown()`, and wire it
+into the one coordination point that already existed for exactly this
+purpose.
+
+### Added
+
+- src/services/scheduler_service.py: one new public method,
+  `shutdown(wait=True, timeout=None) -> bool`, stopping the background
+  tick loop using the already-existing `_stop_event`/`_tick_thread`
+  mechanism -- idempotent, identity-guarded against a hypothetical
+  replacement thread, and deliberately releasing its internal lock
+  before the (bounded) thread join so a concurrent `status()`/`doctor()`
+  call is never blocked by an in-progress shutdown; a fixed
+  `_DEFAULT_SHUTDOWN_TIMEOUT = 5.0` class constant (not a new
+  configuration key -- see "Changed" below)
+- src/services/runtime_service.py: `RuntimeShutdownReport` gains
+  `scheduler_was_active`/`scheduler_stopped`, both defaulted and
+  appended after the four existing fields, so the one existing,
+  entirely-keyword-based construction call site is unaffected;
+  `shutdown()`'s body gains one new step, calling
+  `SchedulerService.shutdown()` -- placed between the REST API Server
+  step and the Background Worker Service step (Owner Decision D2:
+  independently verified during STEP 1 that `Scheduler` and
+  `BackgroundWorkerService` share no queue, pool, or execution engine,
+  so this ordering is chosen to silence both new-work triggers, REST
+  and Scheduler, before draining the Background Worker Service's own,
+  potentially much longer-running, already-accepted work)
+- tests/EP061/test_scheduler_shutdown.py: new, self-contained EP-061
+  test suite (`NAME = "EP061"`), 62 assertions covering
+  `SchedulerService.shutdown()` in isolation (never-started,
+  already-running, idempotent, `wait=False`, manual `run()` still
+  working afterward), genuine multi-threaded concurrent-shutdown
+  race-safety and a whitebox identity-guard regression test, the
+  widened `RuntimeService.shutdown()` (all-`None` defaults, a real
+  running Scheduler actually stopped, REST-API-then-Scheduler-then-
+  Background-Workers ordering via call-order-recording proxies,
+  idempotency, a lock-scope regression guard), real end-to-end
+  `Bootstrap` wiring (tick loop actually starts/stops,
+  `scheduler_service` reference identity-preserved, repeated/
+  uninitialized-state safety), and public-surface guards for
+  `SchedulerService`, `SchedulerModule`, and `RuntimeModule`
+- docs/architecture/designs/EP061_DESIGN.md: full design document,
+  including Owner Decisions D1-D4 and a documented, disclosed
+  correction made during STEP 1 validation (an initial "Scheduler
+  stops last" ordering draft was revised to "second" after
+  independently verifying, from source, that the initial rationale's
+  premise -- a shared execution path with Background Workers -- was
+  factually incorrect)
+- docs/architecture/audits/EP061_ARCHITECTURE_AUDIT.md: EP-061
+  Architecture Audit, Final Verdict AUDIT PASSED, NO BLOCKING FINDINGS
+
+### Changed
+
+- src/bootstrap.py: `shutdown()`'s docstring updated to describe the
+  new three-subsystem ordering and the (unchanged) decision not to
+  null `self._scheduler_service`; the method's executable body has
+  zero changed lines -- confirmed by diff against the pre-EP-061
+  baseline
+- src/modules/test_module.py: one added import line
+  (`import tests.EP061.test_scheduler_shutdown`)
+- tests/EP060/test_runtime_lifecycle.py: two documentation-only
+  changes, no assertion changed --
+  (1) the comment inside
+  `_test_bootstrap_shutdown_does_not_touch_scheduler_service` updated
+  to describe the new, widened `shutdown()` behavior (made during
+  STEP 2, per the approved design's explicit, narrow authorization);
+  (2) `_stop_scheduler_tick_loop_for_test_cleanup()`'s docstring
+  updated during STEP 4 to no longer claim, in the present tense, that
+  `SchedulerService` exposes no public shutdown method -- it now notes
+  that `SchedulerService.shutdown()` exists (EP-061) and that this
+  whitebox helper is retained only as a minimal, already-proven
+  test-cleanup convenience predating that method, not because no
+  public alternative exists today (STEP 3 finding, `EP061_
+  ARCHITECTURE_AUDIT.md` Section 7, resolved in STEP 4)
+- docs/architecture/designs/EP061_DESIGN.md: one wording correction
+  made during STEP 4, resolving the second STEP 3 finding
+  (`EP061_ARCHITECTURE_AUDIT.md` Section 5/D4/7) -- the document
+  previously stated that "every executor...uses `subprocess.Popen(...)`
+  with no `.wait()` call...confirmed by grepping all four executor
+  files," which overstated uniformity: three of the four
+  (`process_executor.py`, `python_executor.py`, `file_executor.py`)
+  use `subprocess.Popen()`, while the fourth (`url_executor.py`) uses
+  the standard library's `webbrowser.open()`, a different but equally
+  non-blocking mechanism. The wording was corrected everywhere it
+  appeared (Sections 2.1, 6, 10, 14, and Owner Decision D2) to
+  accurately describe both mechanisms while preserving the actual
+  architectural conclusion this evidence supports -- unchanged: none
+  of the four executor paths blocks the tick thread on arbitrary,
+  long-running external execution, so `SchedulerService.shutdown()`'s
+  fixed, unconfigurable join timeout (Owner Decision D4) remains
+  correctly justified
+- No existing method's signature, return type, or behavior changed
+  for `RestApiServer`, `BackgroundWorkerService`, `Scheduler`,
+  `JobRegistry`, `ExecutionEngine` (EP-003, confirmed byte-identical),
+  `SchedulerModule`, `RuntimeModule`, `CommandRouter`, or
+  `InteractiveShell`. No existing `config/config.yaml` key was added,
+  removed, or had its meaning changed, and no new `scheduler.*` key
+  was added (`SchedulerService.shutdown()`'s join timeout is a fixed
+  class constant, not a configuration value -- Owner Decision D4). No
+  new dependency was added to `requirements.txt`.
+
+### Security
+
+- No new control surface reachable via CLI or REST:
+  `scheduler list`/`status`/`doctor`/`run`/`start`/`stop`/`info`/
+  `help` remain the only eight `SchedulerModule` actions (Owner
+  Decision D1); `runtime status`/`runtime help` remain the only two
+  `RuntimeModule` actions (unchanged from EP-060); the new
+  `SchedulerService.shutdown()` is invoked exclusively by
+  `RuntimeService.shutdown()`, itself invoked exclusively by
+  `Bootstrap.shutdown()` at genuine process exit -- never dispatchable
+  through `CommandRouter`/`ApiRouter`
+- `shutdown()` never forcefully terminates anything: the tick loop is
+  signaled via `threading.Event.set()` and joined via `Thread.join()`
+  with a bounded, disclosed timeout; no `os.kill`/`SIGKILL`/thread
+  interrupt is used anywhere in this EP
+
+### Validation
+
+```
+EP061 : 62 passed / 0 failed / 0 skipped
+EP060 : 65 passed / 0 failed / 0 skipped
+EP059 : 93 passed / 0 failed / 0 skipped
+EP034 : 113 passed / 0 failed / 0 skipped
+EP035 : 143 passed / 0 failed / 0 skipped
+EP037 : 87 passed / 0 failed / 0 skipped
+Full repository regression : 6838 passed / 0 failed / 3 skipped
+  (3 skips pre-existing, environment-gated, unrelated to EP-061 --
+  confirmed present and unmodified in the pre-EP-061 baseline commit)
+```
+
+All figures above were independently reproduced from a clean process
+at STEP 2, STEP 3, and STEP 4 -- no figure changed between STEP 3 and
+STEP 4, since STEP 4's two documentation corrections touched no
+assertion.
+
+### STEP 3 -- Architecture Audit
+
+Verdict: EP-061 STEP 3 -- **AUDIT PASSED, NO BLOCKING FINDINGS**. All
+four Owner Decisions (D1-D4) confirmed correctly implemented against a
+`git diff` taken against the exact pre-STEP-1 baseline commit, not
+merely against the STEP 2 report. Every explicitly-protected file
+(`src/core/scheduler/*.py`, `scheduler_module.py`, `runtime_module.py`,
+`background_worker_service.py`, `rest_api_server.py`,
+`execution/engine.py`, `config/config.yaml`, `requirements.txt`,
+`pyproject.toml`, `tests/EP059/test_runtime.py`) confirmed
+byte-identical to that baseline. Owner Decision D2's factual basis
+(that `Scheduler` and `BackgroundWorkerService` share no execution
+path) was independently re-derived from source during the audit, not
+merely re-cited from the design document. Exactly two non-blocking
+findings were identified:
+
+1. **(WARNING, non-blocking)** `tests/EP060/test_runtime_lifecycle.py`'s
+   `_stop_scheduler_tick_loop_for_test_cleanup()` docstring made a
+   present-tense claim -- "`SchedulerService` exposes no public method
+   to stop its tick loop" -- that EP-061 made false. Did not affect any
+   assertion.
+2. **(WARNING, non-blocking)** `EP061_DESIGN.md`'s evidence citation
+   for "no executor blocks the tick thread" overstated that all four
+   executors use `subprocess.Popen()`; one (`url_executor.py`) actually
+   uses `webbrowser.open()`. The underlying architectural conclusion
+   was unaffected.
+
+File scope confirmed to exactly match the approved STEP 2 scope
+(8 files, `git diff <baseline> --stat`), with zero unauthorized changes
+anywhere. See `docs/architecture/audits/EP061_ARCHITECTURE_AUDIT.md`
+for the full audit.
+
+### STEP 4 -- Documentation Synchronization
+
+Both non-blocking WARNINGs were resolved, documentation-only, with
+zero behavior or assertion change:
+
+1. `tests/EP060/test_runtime_lifecycle.py`'s
+   `_stop_scheduler_tick_loop_for_test_cleanup()` docstring was
+   updated to note that `SchedulerService.shutdown()` now exists
+   (EP-061) and that this whitebox helper is retained only as a
+   pre-existing test-cleanup convenience, not because no public
+   alternative exists. No `assert_*` line in this file was touched.
+2. `EP061_DESIGN.md`'s executor-evidence wording was corrected in
+   every location it appeared (Sections 2.1, 6, 10, 14, Owner Decision
+   D2) to accurately describe three `Popen`-based executors and one
+   `webbrowser.open()`-based executor, while explicitly preserving the
+   conclusion that evidence supports: none of the four executor paths
+   causes `SchedulerService.shutdown()`'s fixed join timeout to bound
+   arbitrary, long-running external execution.
+
+The full regression suite was re-run fresh after both corrections and
+reproduced the exact same figures as STEP 2/STEP 3 (Validation,
+above) -- as expected, since neither correction touched executable
+code or test assertions. Release/project documentation (`CHANGELOG.md`,
+`docs/BACKLOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/architecture/JARVIS_ROADMAP.md`) synchronized to mark EP-061
+COMPLETE / AUDIT PASSED, NO BLOCKING FINDINGS. No further Engineering
+Package is yet named beyond Phase 10 anywhere in this repository.
+
+---
+
 ## v0.1.19-ep060
 
 Released: 2026-09-04

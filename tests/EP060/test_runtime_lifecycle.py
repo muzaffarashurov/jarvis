@@ -204,13 +204,19 @@ def _build_real_scheduler_service(
 def _stop_scheduler_tick_loop_for_test_cleanup(scheduler_service: SchedulerService) -> None:
     """Whitebox test-cleanup helper only -- NOT part of any public API.
 
-    `SchedulerService` (EP-011) exposes no public method to stop its
-    tick loop (`EP060_DESIGN.md` Section 5.2/9.3, Owner Decision D5) --
-    this is exactly the confirmed gap EP-060 deliberately leaves
-    unclosed in production code. Reaching into the private
-    `_stop_event`/`_tick_thread` here exists solely so this test suite
-    does not leak an un-joined daemon thread per test; it is not, and
-    must not be read as, a production-facing shutdown mechanism.
+    At the time this EP-060 suite was written, `SchedulerService`
+    (EP-011) exposed no public method to stop its tick loop
+    (`EP060_DESIGN.md` Section 5.2/9.3, Owner Decision D5). EP-061
+    (`EP061_DESIGN.md` Section 7.1) has since added a public
+    `SchedulerService.shutdown()` that closes that gap -- see
+    `tests/EP061/test_scheduler_shutdown.py` for its dedicated
+    coverage. This helper is retained here unchanged, reaching into
+    the private `_stop_event`/`_tick_thread` directly, purely as a
+    minimal, already-proven test-cleanup convenience predating that
+    public method, not because no public alternative exists today; it
+    still exists solely so this suite does not leak an un-joined
+    daemon thread per test, and must not be read as a production-facing
+    shutdown mechanism.
     """
     scheduler_service._stop_event.set()  # noqa: SLF001
     thread = scheduler_service._tick_thread  # noqa: SLF001
@@ -938,10 +944,19 @@ class RuntimeLifecycleTest(BaseTest):
                     )
 
     def _test_bootstrap_shutdown_does_not_touch_scheduler_service(self) -> None:
-        # Owner Decision D5: Scheduler is observed, not controlled --
-        # `bootstrap.scheduler_service` must remain populated (not
-        # nulled out) after `shutdown()`, unlike REST API/Background
-        # Workers, since this document does not claim to have stopped it.
+        # EP-061 Owner Decision D3: `RuntimeService.shutdown()` now
+        # does stop the Scheduler's tick loop (via the new
+        # `SchedulerService.shutdown()`), closing the gap EP-060 Owner
+        # Decision D5 deferred -- but `bootstrap.scheduler_service`
+        # must still remain populated (not nulled out) after
+        # `shutdown()`, unlike REST API/Background Workers, because
+        # `SchedulerService` remains a fully usable object once its
+        # tick loop is stopped (status()/doctor()/list_jobs()/manual
+        # run() all still work). This test's config uses the default
+        # `scheduler_section` (`auto_start: false`), so the tick loop
+        # is never actually started here either way; the assertions
+        # below only cover reference identity/non-nullness, which
+        # holds regardless.
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             _write_full_bootstrap_config(directory)

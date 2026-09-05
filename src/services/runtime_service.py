@@ -44,15 +44,16 @@ control surface of any kind. EP-060 (`EP060_DESIGN.md` Section 9.2-9.3,
 Owner Decision D1/D2) adds exactly one new, narrow control operation --
 `shutdown()` -- coordinating an already-fixed, already-ordered shutdown
 of the two execution contexts that already expose a public, idempotent
-shutdown primitive (REST API Server, Background Worker Service). It
-does not become a general control API: no `start()`/`restart()`/
-per-component-targeted operation is added, and the Scheduler's tick
-loop is deliberately left unstopped (no public primitive exists to
-stop it without modifying an EP-011 core file -- EP-060 Owner Decision
-D5, recommended option (a), out of scope for this EP). `shutdown()` is
-invoked exclusively by `Bootstrap.shutdown()` -- it is never exposed
-as a `RuntimeModule` CLI/REST action (EP-060 Owner Decision D3,
-recommended option (a)); see `runtime_module.py`.
+shutdown primitive (REST API Server, Background Worker Service). EP-061
+(`EP061_DESIGN.md` Section 7.2, Owner Decision D2) widens this same
+`shutdown()` to also stop the Scheduler's tick loop, now that
+`SchedulerService.shutdown()` (EP-061) exists -- closing the gap
+EP-060 Owner Decision D5 explicitly deferred rather than solved. It
+still does not become a general control API: no `start()`/`restart()`/
+per-component-targeted operation is added. `shutdown()` is invoked
+exclusively by `Bootstrap.shutdown()` -- it is never exposed as a
+`RuntimeModule` CLI/REST action (EP-060 Owner Decision D3, unchanged by
+EP-061); see `runtime_module.py`.
 
 Per Owner Decision D6, no `runtime.*` configuration key is read or
 introduced -- `RuntimeService` is constructed unconditionally whenever
@@ -60,7 +61,10 @@ introduced -- `RuntimeService` is constructed unconditionally whenever
 has nothing to gate. `shutdown()` reuses
 `BackgroundWorkerService.shutdown()`'s own already-existing default
 timeout resolution (`background_workers.shutdown_timeout`) rather than
-introducing a new configuration key (EP-060 Section 14).
+introducing a new configuration key (EP-060 Section 14); likewise, the
+new Scheduler-shutdown step reuses `SchedulerService.shutdown()`'s own
+already-existing, EP-061-introduced default timeout resolution --
+no new configuration key is read here for that step either.
 """
 
 from __future__ import annotations
@@ -136,7 +140,7 @@ class RuntimeStatus:
 
 @dataclass(frozen=True)
 class RuntimeShutdownReport:
-    """Result of `RuntimeService.shutdown()` (EP-060).
+    """Result of `RuntimeService.shutdown()` (EP-060; widened by EP-061).
 
     Attributes:
         rest_api_was_active: Whether the REST API Server was running
@@ -160,12 +164,34 @@ class RuntimeShutdownReport:
             disabled this run; False if termination was not verified or
             timed out). True if no `BackgroundWorkerService` reference
             was supplied.
+        scheduler_was_active: Whether the Scheduler's tick loop was
+            running (`SchedulerService.status().running`) immediately
+            before this call (False if no `SchedulerService` reference
+            was supplied, or if it was already stopped). Added by
+            EP-061.
+        scheduler_stopped: The `bool` returned by
+            `SchedulerService.shutdown()` unchanged (True if the tick
+            loop is confirmed not running after this call, including
+            if it was never running to begin with; False if the join
+            timed out). True if no `SchedulerService` reference was
+            supplied. Added by EP-061.
+
+    Note: `scheduler_was_active`/`scheduler_stopped` are declared last,
+    after the two pre-existing pairs, purely for dataclass
+    backward-compatibility (defensive, in case of a future positional
+    construction call site -- today's one call site, in `shutdown()`
+    below, is entirely keyword-based). This does **not** reflect
+    execution order: the Scheduler is actually stopped second, between
+    the REST API Server and the Background Worker Service (see
+    `shutdown()`'s docstring and `EP061_DESIGN.md` Section 7.2).
     """
 
     rest_api_was_active: bool
     rest_api_stopped: bool
     background_workers_was_active: bool
     background_workers_stopped: bool
+    scheduler_was_active: bool = False
+    scheduler_stopped: bool = True
 
 
 class RuntimeService:
@@ -227,10 +253,9 @@ class RuntimeService:
                 Keyword-defaulted to `None` so every existing EP-059
                 call site continues to construct a valid
                 `RuntimeService` unchanged (`EP060_DESIGN.md` Section
-                9.1). Only `.status()` is ever read -- `shutdown()`
-                (EP-060) deliberately does not call anything on this
-                dependency; the Scheduler's tick loop is observed, not
-                controlled, in v1 (Owner Decision D5).
+                9.1). `.status()` is read by `status()`; `.shutdown()`
+                is read by `shutdown()` (EP-061) -- see `shutdown()`'s
+                own docstring for ordering.
         """
         self._started_at = started_at
         self._rest_api_server = rest_api_server
@@ -290,41 +315,57 @@ class RuntimeService:
     def shutdown(self) -> RuntimeShutdownReport:
         """Coordinate graceful shutdown of the execution contexts this
         service already observes that already expose a public, idempotent
-        stop/shutdown primitive: the REST API Server and the Background
-        Worker Service (`EP060_DESIGN.md` Section 9.3).
+        stop/shutdown primitive: the REST API Server, the Scheduler, and
+        the Background Worker Service (`EP060_DESIGN.md` Section 9.3;
+        widened by `EP061_DESIGN.md` Section 7.2 to include the
+        Scheduler).
 
-        Deliberately excludes the Scheduler -- `SchedulerService`
-        (EP-011) exposes no public method to stop its tick loop; adding
-        one would mean modifying an already-completed EP's own core
-        file, which `EP060_DESIGN.md` Owner Decision D5 treats as a
-        separate, future decision, not a default action. Deliberately
-        excludes the Shell -- `InteractiveShell` owns no background
-        thread or held OS resource of its own to release; its lifecycle
-        is owned by whichever loop is running it (`main.py`), not by
-        this service.
+        Deliberately excludes the Shell -- `InteractiveShell` owns no
+        background thread or held OS resource of its own to release;
+        its lifecycle is owned by whichever loop is running it
+        (`main.py`), not by this service.
 
-        Ordering: the REST API Server is stopped first, then the
-        Background Worker Service is shut down second (`wait=True`,
-        using its own already-resolved
-        'background_workers.shutdown_timeout' default) -- closing the
-        external, network-reachable listener before background
-        execution is signaled to stop, so no new HTTP-triggered command
-        can be dispatched while workers are draining.
+        Ordering (`EP061_DESIGN.md` Section 6/8, Owner Decision D2):
+        1. The REST API Server is stopped first -- closing the
+           external, network-reachable trigger before any internal
+           trigger, so no new HTTP-triggered command (including a
+           `scheduler run <job>` dispatched through
+           `ApiRouter`/`CommandRouter`) can arrive during the rest of
+           this sequence.
+        2. The Scheduler's tick loop is stopped second, via
+           `SchedulerService.shutdown()` (EP-061) -- closing the
+           internal, automatic trigger next. `Scheduler` and
+           `BackgroundWorkerService` are structurally independent
+           (verified: the Scheduler executes jobs synchronously through
+           EP-003's `ExecutionEngine`; Background Workers run EP-033
+           workflows through EP-030's `PlanExecutionEngine` -- no
+           shared queue or pool), so there is no correctness
+           requirement to order these two relative to each other; this
+           order is chosen so the Scheduler is not left ticking for the
+           Background Worker Service's own, potentially much longer,
+           `background_workers.shutdown_timeout`-bounded drain window.
+        3. The Background Worker Service is shut down last (`wait=True`,
+           using its own already-resolved
+           'background_workers.shutdown_timeout' default) -- draining
+           already-accepted, potentially long-running work only after
+           both new-work triggers are silenced.
 
         Idempotent: safe to call more than once. Every underlying call
-        (`RestApiServer.stop()`, `BackgroundWorkerService.shutdown()`)
-        is already independently idempotent, so a second call is a
-        no-op for a subsystem already stopped. This method holds no
-        additional "already shut down" state of its own.
+        (`RestApiServer.stop()`, `SchedulerService.shutdown()`,
+        `BackgroundWorkerService.shutdown()`) is already independently
+        idempotent, so a second call is a no-op for a subsystem already
+        stopped. This method holds no additional "already shut down"
+        state of its own.
 
         Partial failure handling: no `try`/`except` is added here.
         `RestApiServer.stop()` propagates any OS-level exception
         unguarded, unchanged from `Bootstrap.shutdown()`'s own,
-        pre-EP-060 behavior. `BackgroundWorkerService.shutdown()`
-        already returns `False` rather than raising on a timeout; that
-        `bool` is forwarded into the report unchanged. Because the REST
-        API Server is stopped first, an exception there means the
-        Background Worker Service is never reached for that call.
+        pre-EP-060 behavior. `SchedulerService.shutdown()` and
+        `BackgroundWorkerService.shutdown()` both return `False` rather
+        than raising on a timeout; those `bool`s are forwarded into the
+        report unchanged. Because the REST API Server is stopped first,
+        an exception there means neither the Scheduler nor the
+        Background Worker Service is reached for that call.
 
         Returns:
             A `RuntimeShutdownReport` describing which subsystems were
@@ -340,6 +381,13 @@ class RuntimeService:
             self._rest_api_server is None or not self._rest_api_server.is_running
         )
 
+        scheduler_was_active = False
+        if self._scheduler_service is not None:
+            scheduler_was_active = self._scheduler_service.status().running
+        scheduler_stopped = True
+        if self._scheduler_service is not None:
+            scheduler_stopped = self._scheduler_service.shutdown()
+
         background_workers_was_active = False
         if self._background_worker_service is not None:
             background_workers_was_active = self._background_worker_service.status().running
@@ -352,4 +400,6 @@ class RuntimeService:
             rest_api_stopped=rest_api_stopped,
             background_workers_was_active=background_workers_was_active,
             background_workers_stopped=background_workers_stopped,
+            scheduler_was_active=scheduler_was_active,
+            scheduler_stopped=scheduler_stopped,
         )

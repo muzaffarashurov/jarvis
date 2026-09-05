@@ -59,6 +59,7 @@ import tests.EP057.test_memory_optimization
 import tests.EP058.test_autonomous_planning
 import tests.EP059.test_runtime
 import tests.EP060.test_runtime_lifecycle
+import tests.EP061.test_scheduler_shutdown
 
 class TestModule(CommandModule):
 

@@ -2176,14 +2176,25 @@ class Bootstrap:
         `shutdown()` remains safe to call regardless of initialization
         state, exactly as before EP-060.
 
-        The Scheduler is deliberately not stopped here -- it exposes no
-        public shutdown primitive (`EP060_DESIGN.md` Section 5.2/Owner
-        Decision D5); `self._scheduler_service` is intentionally left
-        unset by this method.
+        EP-061 (`EP061_DESIGN.md` Section 7.3, Owner Decision D3):
+        `RuntimeService.shutdown()` now also stops the Scheduler's tick
+        loop as part of that same delegated call -- closing the gap
+        EP-060 Owner Decision D5 explicitly deferred. This method's own
+        body is unchanged by EP-061: `self._scheduler_service` is
+        deliberately **not** nulled out the way `_rest_api_server`/
+        `_background_worker_service` are, because `SchedulerService`
+        remains a fully usable object after its tick loop is stopped --
+        `status()`, `doctor()`, `list_jobs()`, and manual `run(job_id)`
+        all continue to work correctly, unlike the REST API Server
+        (which cannot be meaningfully used once stopped) or the
+        Background Worker Service reference (nulled here for symmetry
+        with the REST API Server, not because the object itself becomes
+        unusable). `bootstrap.scheduler_service` therefore remains
+        non-`None` and identity-preserved across `shutdown()`.
 
         Safe to call multiple times: `RuntimeService.shutdown()` is
-        itself idempotent (`EP060_DESIGN.md` Section 9.3), since both
-        underlying calls it makes already are.
+        itself idempotent (`EP060_DESIGN.md` Section 9.3), since all
+        three underlying calls it makes already are.
         """
         if self._runtime_service is not None:
             self._runtime_service.shutdown()

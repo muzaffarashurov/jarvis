@@ -2511,4 +2511,64 @@ EP060 : 65 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-061 — Scheduler Tick-Loop Shutdown
+
+Status: Released (AUDIT PASSED, NO BLOCKING FINDINGS -- two
+non-blocking documentation observations identified during the
+architecture audit and resolved before release; see "Known
+limitations" below)
+
+A note on scope: unlike most EPs, this one wasn't named by the
+roadmap or backlog at all -- both said "no next package defined yet."
+Instead, it closes a gap the previous release (EP-060) found and
+explicitly flagged as its own natural next step: Jarvis's automatic
+task Scheduler had no way to be told to stop. When Jarvis shut down,
+its web API and background task pool were both signaled to finish up
+cleanly (thanks to EP-060), but the Scheduler's own background clock
+just kept ticking in the background until the whole program exited.
+This release fixes that.
+
+Highlights:
+
+- Shutting down Jarvis now also tells the Scheduler to stop its
+  automatic tick loop, in addition to the web API and background task
+  pool -- the last piece of Jarvis's shutdown sequence that wasn't
+  covered
+- The Scheduler is stopped early in the sequence (right after the web
+  API, before the background task pool), so no new scheduled job can
+  start firing while everything else finishes shutting down
+- Purely internal coordination -- nothing new is reachable through the
+  command shell or the web API; shutting down still happens
+  automatically when Jarvis exits, exactly as before
+- Every existing scheduled job, its enabled/disabled state, and manual
+  "run this job now" behavior are completely unaffected -- this is an
+  internal improvement to how Jarvis shuts itself down, with no effect
+  on how scheduling itself already works
+
+Compatibility:
+
+Fully backward compatible with every prior EP, including EP-059 and
+EP-060. No existing service, manager, or CLI command was renamed,
+removed, or had its user-facing behavior changed. The Scheduler's own
+job-scheduling logic, the web API server, and the background task
+pool's own internal logic are all unmodified.
+
+No breaking changes.
+
+Known limitations:
+
+- None outstanding. The architecture audit found two small, purely
+  internal documentation inaccuracies -- one in an old test file's
+  internal comment, one in this release's own design notes -- neither
+  of which affected how Jarvis behaves or how it was tested. Both were
+  corrected before release. See
+  `docs/architecture/audits/EP061_ARCHITECTURE_AUDIT.md` Sections 5
+  and 7 for the details.
+
+Validation:
+
+EP061 : 62 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

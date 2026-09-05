@@ -13,6 +13,16 @@ tick loop that makes job execution automatic, driven by
 when 'scheduler.enabled' and 'scheduler.auto_start' are true (see
 config/config.yaml). The loop only ever calls Scheduler.tick(); it
 never calls any business-logic module directly.
+
+Per EP-060 (`EP060_DESIGN.md` Section 15, Owner Decision D5) this
+class originally exposed no public counterpart to `_start_tick_loop()`
+at all -- EP-061 (`EP061_DESIGN.md` Section 7.1) closes that gap with
+one new, additive public method, `shutdown()`, that stops the tick
+loop using the already-existing `_stop_event`/`_tick_thread`
+mechanism. No other public method's signature or behavior changes.
+`shutdown()` is invoked exclusively by `RuntimeService.shutdown()`
+(EP-060/EP-061) -- it is never exposed as a `SchedulerModule`
+CLI/REST action (EP-061 Owner Decision D1); see `scheduler_module.py`.
 """
 
 from __future__ import annotations
@@ -81,6 +91,23 @@ class SchedulerService:
     'scheduler.*' settings), matching EP-011's architecture:
     SchedulerModule -> SchedulerService -> Scheduler -> JobRegistry ->
     ExecutionEngine. Implements no business logic of its own.
+
+    EP-061 adds `shutdown()`, a public, idempotent way to stop the
+    automatic tick loop (see module docstring). It does not add a
+    restart/resume method -- once stopped, the only way to run jobs
+    again is the already-existing manual `run(job_id)`, or process
+    restart.
+    """
+
+    _DEFAULT_SHUTDOWN_TIMEOUT: float = 5.0
+    """Fixed join timeout for `shutdown()` (EP-061 Owner Decision D4).
+
+    Not a configuration key: `_tick_loop()`'s `_stop_event.wait()`
+    unblocks immediately once `_stop_event.set()` is called, and every
+    `Executor` (`src/core/execution/executors/*.py`) launches via
+    non-blocking `subprocess.Popen()` with no `.wait()`, so this bound
+    only needs to cover a tick already in progress, not arbitrary
+    external work. See `EP061_DESIGN.md` Section 10.
     """
 
     def __init__(self, config: Config, scheduler: Scheduler) -> None:
@@ -97,6 +124,7 @@ class SchedulerService:
         self._tick_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._lifecycle_lock = threading.Lock()
+        self._shutdown_timeout = self._resolve_shutdown_timeout()
 
         if bool(self._config.get("scheduler.enabled", True)) and bool(
             self._config.get("scheduler.auto_start", True)
@@ -220,6 +248,55 @@ class SchedulerService:
             next_run_calculable=diagnostics.next_run_calculable,
         )
 
+    def shutdown(self, wait: bool = True, timeout: float | None = None) -> bool:
+        """Stop the background tick loop, if one is running.
+
+        Safe to call regardless of whether the tick loop was ever
+        started (e.g. 'scheduler.auto_start: false', or already
+        stopped) -- reports success immediately since there is nothing
+        to stop. Does not affect any registered Job's enabled/disabled
+        state, and does not prevent `run(job_id)` from being called
+        manually afterward -- only the automatic tick loop is stopped.
+
+        This is the EP-061 counterpart to `_start_tick_loop()`; unlike
+        that method, this one is public, matching
+        `BackgroundWorkerService.shutdown()`'s naming/shape (EP-036).
+        It is invoked internally by `RuntimeService.shutdown()` and is
+        not exposed as a `SchedulerModule` CLI/REST action (EP-061
+        Owner Decision D1).
+
+        Args:
+            wait: If True (default), block until the tick thread has
+                exited or `timeout` elapses. If False, signal the stop
+                and return immediately without joining.
+            timeout: Maximum seconds to wait when `wait` is True.
+                Defaults to `_shutdown_timeout` (see
+                `_resolve_shutdown_timeout`) when not given explicitly.
+
+        Returns:
+            True if the tick loop is confirmed not running after this
+            call (including if it was never running to begin with);
+            False if `wait=True` and the thread did not exit within
+            `timeout`.
+        """
+        with self._lifecycle_lock:
+            thread = self._tick_thread
+            if thread is None:
+                return True
+            self._stop_event.set()
+
+        if not wait:
+            return not thread.is_alive()
+
+        resolved_timeout = timeout if timeout is not None else self._shutdown_timeout
+        thread.join(timeout=resolved_timeout)
+        stopped = not thread.is_alive()
+        if stopped:
+            with self._lifecycle_lock:
+                if self._tick_thread is thread:
+                    self._tick_thread = None
+        return stopped
+
     # ---------- Internal helpers ----------
 
     def _ensure_enabled(self) -> CommandResult | None:
@@ -233,6 +310,19 @@ class SchedulerService:
             return None
         logger.error("Scheduler operation rejected: Scheduler stopped.")
         return CommandResult(success=False, message="Scheduler stopped.")
+
+    def _resolve_shutdown_timeout(self) -> float:
+        """Return the fixed tick-loop join timeout used by `shutdown()`.
+
+        Unlike 'background_workers.shutdown_timeout', no
+        'scheduler.shutdown_timeout' configuration key is read
+        (`EP061_DESIGN.md` Section 10, Owner Decision D4) -- the tick
+        loop's own `_stop_event.wait()` unblocks immediately once
+        `_stop_event.set()` is called, regardless of
+        'scheduler.tick_interval', so a short, fixed join timeout is a
+        defensive bound, not a tunable operational setting.
+        """
+        return self._DEFAULT_SHUTDOWN_TIMEOUT
 
     def _start_tick_loop(self) -> None:
         """Start the background thread that calls Scheduler.tick() periodically."""

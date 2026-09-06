@@ -336,22 +336,30 @@ class Bootstrap:
 
         # EP-059: constructed last, only after every dependency it
         # reads (`_rest_api_server`, `_background_worker_service`/
-        # `_scheduler_service` -- both already assigned inside
-        # `_build_command_router` above -- and `_shell`) has already
-        # been assigned this run, so a `None` reference here correctly
-        # reflects "this run didn't build/enable that subsystem," never
-        # a not-yet-constructed one (see `EP059_DESIGN.md` Section 8,
-        # clarified per Owner-approved documentation update).
+        # `_scheduler_service`/`_workflow_scheduler_service` -- all
+        # already assigned inside `_build_command_router` above -- and
+        # `_shell`) has already been assigned this run, so a `None`
+        # reference here correctly reflects "this run didn't
+        # build/enable that subsystem," never a not-yet-constructed one
+        # (see `EP059_DESIGN.md` Section 8, clarified per Owner-approved
+        # documentation update).
         # `scheduler_service` added by EP-060 (`EP060_DESIGN.md` Section
         # 9.1/9.5) -- read-only observation only; RuntimeService never
         # starts, stops, or reconfigures any of the objects it is
         # handed, including this one (Owner Decision D5).
+        # `workflow_scheduler_service` added by EP-063
+        # (`EP063_DESIGN.md` Section 6.5/6.6) -- same read-only
+        # observation contract; `self._workflow_scheduler_service` was
+        # already a stored `Bootstrap` attribute before this EP (built
+        # for EP-035's own purposes), this is only its first use by
+        # `RuntimeService`.
         self._runtime_service = RuntimeService(
             started_at=self._started_at,
             rest_api_server=self._rest_api_server,
             background_worker_service=self._background_worker_service,
             shell=self._shell,
             scheduler_service=self._scheduler_service,
+            workflow_scheduler_service=self._workflow_scheduler_service,
         )
         self._command_router.register(RuntimeModule(self._runtime_service))
 
@@ -2192,9 +2200,23 @@ class Bootstrap:
         unusable). `bootstrap.scheduler_service` therefore remains
         non-`None` and identity-preserved across `shutdown()`.
 
+        EP-063 (`EP063_DESIGN.md` Section 6.6, Owner Decision D4):
+        `RuntimeService.shutdown()` now also stops the Workflow
+        Scheduler's tick loop as part of that same delegated call --
+        closing the identical kind of gap EP-061 closed for the
+        Scheduler, for `WorkflowSchedulerService` instead. This
+        method's own body is unchanged by EP-063, for the same reason
+        it was unchanged by EP-061: `self._workflow_scheduler_service`
+        is deliberately **not** nulled out, because
+        `WorkflowSchedulerService` remains a fully usable object after
+        its tick loop is stopped -- `status()`, `list_entries()`,
+        `get_entry()`, and manual `run(entry_id)` all continue to work
+        correctly. `bootstrap.workflow_scheduler_service` therefore
+        remains non-`None` and identity-preserved across `shutdown()`.
+
         Safe to call multiple times: `RuntimeService.shutdown()` is
         itself idempotent (`EP060_DESIGN.md` Section 9.3), since all
-        three underlying calls it makes already are.
+        four underlying calls it makes already are.
         """
         if self._runtime_service is not None:
             self._runtime_service.shutdown()

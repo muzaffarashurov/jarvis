@@ -10,10 +10,141 @@ Status: Active
 
 ## Next Engineering Package
 
-**None yet defined.** EP-062 (BackgroundWorkerService Status/Shutdown
-Reconciliation) closed the disclosed limitation `EP060_DESIGN.md`
-Section 5.5 first named and EP-061 left untouched. No EP-063 or Phase
-11 exists anywhere in this repository as of this release.
+**None yet defined.** EP-063 (WorkflowSchedulerService Shutdown
+Coordination) closed a real, code-verified gap in a sibling subsystem
+to the one EP-061 already fixed -- `WorkflowSchedulerService` (EP-034)
+had the same "auto-started background tick thread, no public shutdown"
+defect `SchedulerService` (EP-011) had before EP-061. No EP-064 or
+Phase 11 exists anywhere in this repository as of this release.
+
+### EP-063 — WorkflowSchedulerService Shutdown Coordination
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), and STEP 4 (Documentation
+Synchronization) all complete. EP-063 is marked **COMPLETE / STEP 3
+PASS WITH NON-BLOCKING FINDINGS, NO BLOCKING FINDINGS** -- STEP 3
+identified one MEDIUM finding, four LOW findings, and one NOTE, zero
+blocking; the owner reviewed all six and directed STEP 4 to leave each
+unchanged (see below), since none required a design, scope, or
+behavior change -- see
+`docs/architecture/audits/EP063_ARCHITECTURE_AUDIT.md`. Full design,
+including Owner Decisions D1-D4: `docs/architecture/designs/
+EP063_DESIGN.md`.
+
+Neither this backlog nor `docs/architecture/JARVIS_ROADMAP.md` named
+an EP-063 scope -- both said "none yet defined," and, like EP-061 and
+EP-062 before it, no prior EP's design/audit document named a specific
+"next EP" candidate either. STEP 1 found no textual anchor naming a
+specific EP-063 mechanism, but did find a real, code-verified gap:
+`WorkflowSchedulerService` (EP-034) owned an auto-started background
+tick thread (driven by `workflow_scheduler.tick_interval` whenever
+`workflow_scheduler.auto_start` is true) with no public method
+anywhere in this codebase that could stop it -- `start(entry_id)`/
+`stop(entry_id)` only toggle one registered scheduled workflow entry,
+never the tick loop itself, and `WorkflowSchedulerModule`'s CLI
+namespace ("autoflow") exposed nothing that reached it either. This
+was the exact same defect `SchedulerService` had before EP-061, but it
+had gone unnoticed across five subsequent Runtime-focused EPs
+(EP-059 through EP-062) because each of their own scope statements
+explicitly fenced `WorkflowSchedulerService` out as an unrelated
+subsystem. STEP 1 also investigated and rejected several other
+candidates for this EP's scope, most notably Telegram Gateway shutdown
+coordination (a structurally similar gap, but one with a manual
+escape hatch already available and zero pre-existing test coverage,
+making it a larger, riskier undertaking than closing
+`WorkflowSchedulerService`'s already-well-tested gap) and REST API
+authentication (a real, repeatedly disclosed gap, but architecturally
+enormous compared to this EP's scope).
+
+Built by adding one new public method,
+`WorkflowSchedulerService.shutdown(wait=True, timeout=None) -> bool`,
+structurally mirroring `SchedulerService.shutdown()` (EP-061), and
+wiring it into `RuntimeService`'s existing shutdown-coordination
+sequence as a new, fourth step. Unlike `SchedulerService.shutdown()`'s
+fixed, unconfigurable join timeout, this EP's `shutdown()` reads its
+default timeout from a new `workflow_scheduler.shutdown_timeout`
+configuration key (default 10 seconds, mirroring
+`BackgroundWorkerService.shutdown()`'s own convention) -- because
+`WorkflowSchedulerEngine.tick()`, unlike `Scheduler.tick()`, can itself
+block for as long as a scheduled workflow's `WorkflowEngine.run()`
+call takes (independently re-verified from source during both STEP 1
+and STEP 3). `RuntimeStatus`/`RuntimeShutdownReport` were widened with
+two new, defaulted fields each; `RuntimeService.__init__` gained one
+new, keyword-defaulted parameter; `Bootstrap.initialize()`'s existing
+`RuntimeService(...)` call gained one new keyword argument, reusing a
+`self._workflow_scheduler_service` attribute that already existed on
+`Bootstrap` before this EP; `runtime status` gained one new display
+block. No CLI/REST/Telegram action was added or changed (Owner
+Decision D1); the new shutdown step is placed third of four, after the
+Scheduler and before the Background Worker Service (Owner Decision
+D2); the timeout is configurable, not fixed (Owner Decision D3); and
+`self._workflow_scheduler_service` is not nulled after shutdown, since
+the object remains fully usable afterward (Owner Decision D4).
+
+Owner Decisions D1-D4 were all confirmed VERIFIED during STEP 3,
+checked directly against current source and, for D2 and D3, against
+genuine, non-mocked executed proof (a real call-order-recording-proxy
+test; a real, controllably slow workflow-execution stub proving
+`shutdown()` actually waits for an in-progress scheduled workflow run)
+-- not merely against the STEP 2 report. Every explicitly-protected
+file (`workflow_scheduler_engine.py`, `scheduled_workflow_registry.py`,
+`scheduled_workflow.py`, `workflow_scheduler_module.py`,
+`scheduler_service.py`, `scheduler_module.py`,
+`background_worker_service.py`, `background_worker_module.py`,
+`background_worker_pool.py`, `rest_api_server.py`, `workflow_engine.py`,
+`telegram_service.py`, `telegram_module.py`, `config/config.yaml`
+beyond the one new key, `requirements.txt`, `tests/EP034/
+test_workflow_scheduler.py`, `docs/BACKLOG.md`, `CHANGELOG.md`,
+`docs/RELEASE_NOTES.md`, `docs/architecture/JARVIS_ROADMAP.md`,
+`docs/architecture/ARCHITECTURE_DEBT.md`) was independently confirmed
+untouched. STEP 3 identified exactly six findings, none blocking:
+
+1. **(F1, MEDIUM)** No test exercises concurrent `shutdown()` calls
+   from multiple threads, unlike `tests/EP061/test_scheduler_shutdown.py`'s
+   three dedicated tests for the structurally identical
+   `SchedulerService.shutdown()` code shape -- verified safe instead by
+   direct source inspection (identical lock-scope shape, never held
+   across the blocking join).
+2. **(F2, LOW)** The design's own narrative describes a single
+   blocking workflow run, but `WorkflowSchedulerEngine.tick()`
+   (unmodified) actually processes every currently-due entry
+   sequentially per tick -- a documentation completeness note only.
+3. **(F3, LOW)** No test directly asserts a `ScheduledWorkflow`'s
+   `enabled` field is unaffected by `shutdown()`, though trivially
+   guaranteed by code inspection.
+4. **(F4, NOTE)** The `wait=False` branch's stale-thread-reference
+   behavior is inherited, byte-for-byte identical to `SchedulerService.
+   shutdown()` (EP-061), not new, and currently unreachable.
+5. **(F5, LOW)** `shutdown_timeout: 0` and boolean values are correctly
+   rejected by code inspection but not independently exercised by a
+   dedicated test.
+6. **(F6, LOW)** One test assertion is causally guaranteed true by
+   `Thread.join()`'s happens-before semantics rather than being a
+   discriminating check; did not manifest as an issue in any executed
+   run.
+
+The owner reviewed all six and directed STEP 4 to leave each
+unchanged, since none violated `EP063_DESIGN.md` or any approved Owner
+Decision (D1-D4).
+
+Tests: EP-063 78/0/0, covering `WorkflowSchedulerService.shutdown()`
+in isolation (never-started, already-running, idempotent, `wait=False`,
+manual `run()` still working afterward, default/configured/explicit-
+override timeout resolution, invalid-configuration rejection), a
+genuine, non-mocked blocking-tick scenario proving `shutdown()` waits
+for an in-progress scheduled workflow run and correctly times out if it
+does not, `RuntimeService`'s widened `status()`/`shutdown()` behavior
+(including REST-Scheduler-Workflow-Scheduler-Background-Workers
+ordering via call-order-recording proxies), real end-to-end `Bootstrap`
+wiring, and public-surface guards confirming `WorkflowSchedulerService`
+still exposes exactly nine public methods and neither
+`WorkflowSchedulerModule` nor `RuntimeModule` gained any new action.
+Full regression: EP-034 113/0/0, EP-036 101/0/0, EP-036-STEP2 48/0/0,
+EP-036-STEP3 53/0/0, EP-043 83/0/0, EP-059 93/0/0, EP-060 65/0/0,
+EP-061 62/0/0, EP-062 39/0/0 -- all independently reproduced exactly at
+STEP 2, STEP 3, and STEP 4 (STEP 4 made no code or test change, so
+every figure is identical across all three steps). Combined total
+across all nine required suites: 735/0/0.
 
 ### EP-062 — BackgroundWorkerService Status/Shutdown Reconciliation
 

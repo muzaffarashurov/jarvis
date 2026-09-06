@@ -108,4 +108,13 @@ class RuntimeModule:
         )
         if status.scheduler_active:
             lines.append(f"Scheduler jobs registered : {status.scheduler_jobs_registered}")
+        lines.append(
+            f"Workflow Scheduler : "
+            f"{'ACTIVE' if status.workflow_scheduler_active else 'INACTIVE'}"
+        )
+        if status.workflow_scheduler_active:
+            lines.append(
+                f"Workflow Scheduler entries registered : "
+                f"{status.workflow_scheduler_entries_registered}"
+            )
         return CommandResult(success=True, message="\n\n".join(lines))

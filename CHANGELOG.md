@@ -6,6 +6,240 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.22-ep063
+
+Released: 2026-09-06
+
+Status: EP-063 COMPLETE / STEP 3 PASS WITH NON-BLOCKING FINDINGS, NO
+BLOCKING FINDINGS (STEP 1 Architecture Discovery & Design, STEP 2
+Implementation & Testing, STEP 3 Architecture Audit, STEP 4
+Documentation Synchronization all complete). STEP 3's verdict was
+**PASS WITH NON-BLOCKING FINDINGS** -- one MEDIUM finding (F1), four
+LOW findings (F2, F3, F5, F6), and one NOTE (F4), zero blocking. Per
+explicit instruction, STEP 4 did not remediate F1-F6: all six were
+reviewed and accepted as non-blocking test-coverage-completeness or
+documentation-precision observations, none requiring a code, test, or
+design change, so STEP 4 performed documentation synchronization
+only. Final status after STEP 4: four release/project documentation
+files updated, zero production-code, test, or configuration change
+beyond what STEP 2 already implemented.
+
+Neither `docs/BACKLOG.md` nor `docs/architecture/JARVIS_ROADMAP.md`
+named an EP-063 scope -- both said "none yet defined," and, like
+EP-061 and EP-062 before it, no prior EP's design/audit document named
+a specific "next EP" candidate either. STEP 1 found no textual anchor
+naming a specific EP-063 mechanism, but did find a real, code-verified
+gap in a sibling subsystem to the one EP-061 already fixed:
+`WorkflowSchedulerService` (EP-034) owned an auto-started background
+tick thread with no public method anywhere in this codebase that could
+stop it -- the exact same defect `SchedulerService` (EP-011) had
+before EP-061 closed it, unnoticed by EP-059 through EP-062 because
+each of those EPs' own scope statements explicitly fenced
+`WorkflowSchedulerService` out as an unrelated subsystem. Unlike
+Telegram's structurally similar (and also-investigated, also-rejected
+as this EP's primary scope) gap, `WorkflowSchedulerService` has no
+manual escape hatch of any kind once its tick loop starts, and already
+has a substantial, pre-existing dedicated test suite
+(`tests/EP034/test_workflow_scheduler.py`) to build alongside safely.
+
+### Added
+
+- src/services/workflow_scheduler_service.py: one new public method,
+  `shutdown(wait=True, timeout=None) -> bool`, stopping the background
+  tick loop using the already-existing `_stop_event`/`_tick_thread`
+  mechanism, structurally mirroring `SchedulerService.shutdown()`
+  (EP-061); one new private helper, `_resolve_shutdown_timeout()`,
+  mirroring `BackgroundWorkerService`'s own coercion/validation shape
+  exactly (Owner Decision D3 -- see "Changed" below for why this EP's
+  timeout is configurable rather than a fixed constant, unlike
+  EP-061's own precedent)
+- config/config.yaml: one new key, `workflow_scheduler.shutdown_timeout:
+  10`, with an explanatory comment distinguishing it from
+  `scheduler`'s own fixed, unconfigurable join timeout
+- src/services/runtime_service.py: `RuntimeStatus` gains
+  `workflow_scheduler_active`/`workflow_scheduler_entries_registered`,
+  both defaulted and appended after the two existing `scheduler_*`
+  fields; `RuntimeShutdownReport` gains
+  `workflow_scheduler_was_active`/`workflow_scheduler_stopped`, same
+  convention; `shutdown()`'s body gains one new step, calling
+  `WorkflowSchedulerService.shutdown()` -- placed third of four, after
+  the Scheduler and before the Background Worker Service (Owner
+  Decision D2: independently verified that `WorkflowSchedulerService`
+  shares no shutdown-correctness dependency with either the Scheduler
+  or the Background Worker Service, even though it shares one
+  `WorkflowEngine` instance with the latter for *running* a workflow;
+  placed after the Scheduler specifically because
+  `WorkflowSchedulerEngine.tick()`, unlike `Scheduler.tick()`, can
+  itself block for as long as a scheduled workflow's
+  `WorkflowEngine.run()` call takes, so the two fast-to-settle triggers
+  are grouped before the one that may need meaningfully longer)
+- tests/EP063/test_workflow_scheduler_shutdown.py: new, self-contained
+  EP-063 test suite (`NAME = "EP063"`), 78 assertions covering
+  `WorkflowSchedulerService.shutdown()` in isolation (never-started,
+  already-running, idempotent, `wait=False`, manual `run()` still
+  working afterward, default/configured/explicit-override timeout
+  resolution, invalid-configuration rejection), a genuine,
+  non-mocked blocking-tick scenario (a real, controllably slow
+  `PlanExecutionEngine` stub proving `shutdown()` actually waits for
+  an in-progress scheduled workflow run to finish, and correctly times
+  out if it does not), the widened `RuntimeService.status()`/
+  `shutdown()` (all-`None` defaults, a real running Workflow Scheduler
+  actually stopped, REST-Scheduler-Workflow-Scheduler-Background-
+  Workers ordering via call-order-recording proxies, idempotency),
+  real end-to-end `Bootstrap` wiring (tick loop actually starts/stops,
+  `workflow_scheduler_service` reference identity-preserved, repeated/
+  uninitialized-state safety, `runtime status` CLI output), and
+  public-surface guards for `WorkflowSchedulerService`,
+  `WorkflowSchedulerModule`, and `RuntimeModule`
+- docs/architecture/designs/EP063_DESIGN.md: full design document,
+  including Owner Decisions D1-D4 and a documented record of the
+  candidates investigated and rejected during scope discovery
+  (Architecture Debt items, Telegram Gateway shutdown coordination,
+  REST API authentication, generalizing the Background Worker Pool,
+  reviving unused `EventBus` hooks, a CLI/REST-reachable `runtime
+  shutdown` action)
+- docs/architecture/audits/EP063_ARCHITECTURE_AUDIT.md: EP-063
+  Architecture Audit, Final Verdict PASS WITH NON-BLOCKING FINDINGS,
+  NO BLOCKING FINDINGS
+
+### Changed
+
+- src/bootstrap.py: one line added to the existing `RuntimeService(...)`
+  constructor call inside `initialize()`
+  (`workflow_scheduler_service=self._workflow_scheduler_service`);
+  `shutdown()`'s docstring updated to describe the new fourth
+  subsystem and the (unchanged) decision not to null
+  `self._workflow_scheduler_service` -- the method's executable body
+  has zero changed lines, confirmed by diff against the pre-EP-063
+  baseline
+- src/modules/runtime_module.py: `_status()` gains one new,
+  unconditional `Workflow Scheduler : ACTIVE/INACTIVE` display line
+  (plus a conditional entries-registered line), following the exact
+  formatting convention of the existing `Scheduler` block immediately
+  above it; `_actions` is unchanged (`{status, help}`, 2 total)
+- src/modules/test_module.py: one added import line
+  (`import tests.EP063.test_workflow_scheduler_shutdown`)
+- No existing method's signature, return type, or behavior changed for
+  `WorkflowSchedulerEngine`, `ScheduledWorkflowRegistry`,
+  `ScheduledWorkflow`, `WorkflowEngine`, `PlanExecutionEngine`,
+  `SchedulerService`, `BackgroundWorkerService`/`BackgroundWorkerPool`,
+  `RestApiServer`, `TelegramService`, or `TelegramModule` -- all
+  independently confirmed byte-identical to the pre-EP-063 baseline.
+  No existing `config/config.yaml` key was added, removed, or had its
+  meaning changed beyond the one new key above. No new dependency was
+  added to `requirements.txt`.
+
+### Security
+
+- No new control surface reachable via CLI, REST, or Telegram:
+  `autoflow`'s seven actions (`list, status, run, start, stop, info,
+  help`) remain unchanged (Owner Decision D1); `runtime status`/
+  `runtime help` remain the only two `RuntimeModule` actions; the new
+  `WorkflowSchedulerService.shutdown()` is invoked exclusively by
+  `RuntimeService.shutdown()`, itself invoked exclusively by
+  `Bootstrap.shutdown()` at genuine process exit -- independently
+  re-verified during STEP 3 at the CLI, REST (`ApiRouter`'s
+  pass-through into `CommandRouter`'s exact-match dispatch), and
+  Telegram (same shared `CommandRouter`) layers, not merely asserted
+- `shutdown()` never forcefully terminates anything: the tick loop is
+  signaled via `threading.Event.set()` and joined via `Thread.join()`
+  with a bounded, disclosed, configurable timeout; no `os.kill`/
+  `SIGKILL`/thread interrupt is used anywhere in this EP; an
+  in-progress scheduled workflow run is allowed to finish naturally,
+  never cancelled mid-step
+
+### Validation
+
+```
+EP063 : 78 passed / 0 failed / 0 skipped
+EP034 : 113 passed / 0 failed / 0 skipped
+EP036 : 101 passed / 0 failed / 0 skipped
+EP036-STEP2 : 48 passed / 0 failed / 0 skipped
+EP036-STEP3 : 53 passed / 0 failed / 0 skipped
+EP043 : 83 passed / 0 failed / 0 skipped
+EP059 : 93 passed / 0 failed / 0 skipped
+EP060 : 65 passed / 0 failed / 0 skipped
+EP061 : 62 passed / 0 failed / 0 skipped
+EP062 : 39 passed / 0 failed / 0 skipped
+Combined (all nine suites, single process) : 735 passed / 0 failed / 0 skipped
+```
+
+All figures above were independently reproduced from a clean process
+at STEP 2, STEP 3, and STEP 4 -- no figure changed between STEP 3 and
+STEP 4, since STEP 4 made no code or test change. These are the nine
+suites `EP063_DESIGN.md`'s own Testing Strategy and Acceptance
+Criteria named as required; no claim is made here about the full
+repository's complete test count, since STEP 2/STEP 3 for this EP did
+not execute it.
+
+### STEP 3 -- Architecture Audit
+
+Verdict: EP-063 STEP 3 -- **PASS WITH NON-BLOCKING FINDINGS**, zero
+blocking findings. All four Owner Decisions (D1-D4) confirmed VERIFIED
+against direct source inspection and, for D2 and D3, against genuine,
+non-mocked executed proof (a real call-order-recording-proxy test for
+ordering; a real, controllably slow workflow-execution stub for the
+blocking-timeout behavior) -- not merely against the STEP 2 report.
+Every explicitly-protected file (`workflow_scheduler_engine.py`,
+`scheduled_workflow_registry.py`, `scheduled_workflow.py`,
+`workflow_scheduler_module.py`, `scheduler_service.py`,
+`scheduler_module.py`, `background_worker_service.py`,
+`background_worker_module.py`, `background_worker_pool.py`,
+`rest_api_server.py`, `workflow_engine.py`, `telegram_service.py`,
+`telegram_module.py`, `ARCHITECTURE_DEBT.md`, every EP-059 through
+EP-062 design/audit document, `tests/EP034/test_workflow_scheduler.py`)
+was independently confirmed byte-identical to the pre-EP-063 baseline
+via `diff`/`md5sum`. Six findings were identified, zero blocking:
+
+1. **(F1, MEDIUM)** No test in the new EP-063 suite exercises
+   concurrent `shutdown()` calls from multiple threads, unlike
+   `tests/EP061/test_scheduler_shutdown.py`'s three dedicated tests for
+   the structurally identical `SchedulerService.shutdown()` code shape
+   -- a test-coverage gap, not a proven defect; the underlying
+   lock-scope/join structure was independently verified safe by direct
+   code inspection during the audit.
+2. **(F2, LOW)** The design's own narrative (Section 2.2) describes a
+   single blocking workflow run, but `WorkflowSchedulerEngine.tick()`
+   (unmodified, pre-existing EP-034 code) actually processes every
+   currently-due entry sequentially per tick -- a documentation
+   completeness note with no implementation-correctness impact.
+3. **(F3, LOW)** No test asserts directly that a `ScheduledWorkflow`'s
+   `enabled` field is unaffected by `shutdown()`, though this is
+   trivially guaranteed by code inspection (`shutdown()` never touches
+   the registry or any entry).
+4. **(F4, NOTE)** The `wait=False` branch does not clear
+   `self._tick_thread` even if the thread has already exited -- inherited,
+   byte-for-byte identical behavior from `SchedulerService.shutdown()`
+   (EP-061), not a new inconsistency, and currently unreachable since
+   no restart path exists.
+5. **(F5, LOW)** `shutdown_timeout: 0` and boolean values are correctly
+   rejected by code inspection, but not independently exercised by a
+   dedicated test (only `-1` and a non-numeric string are tested).
+6. **(F6, LOW)** One test assertion is causally guaranteed true by
+   `Thread.join()`'s happens-before semantics rather than being a
+   discriminating check, and a hypothetical future regression at that
+   exact point would surface as an uncaught exception rather than a
+   clean failed-assertion report; did not manifest in any executed run.
+
+The owner reviewed all six and directed STEP 4 to leave each
+unchanged, since none violated `EP063_DESIGN.md` or any approved Owner
+Decision (D1-D4) and none required a design, scope, or behavior
+change. Final status after STEP 4: zero code/test/config change. See
+`docs/architecture/audits/EP063_ARCHITECTURE_AUDIT.md` for the full
+audit.
+
+### STEP 4 -- Documentation Synchronization
+
+No STEP 3 finding was remediated (owner directed all six left
+unchanged, per above). Release/project documentation (`CHANGELOG.md`,
+`docs/BACKLOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/architecture/JARVIS_ROADMAP.md`) synchronized to mark EP-063
+COMPLETE / STEP 3 PASS WITH NON-BLOCKING FINDINGS, NO BLOCKING
+FINDINGS. No further Engineering Package is yet named anywhere in this
+repository.
+
+---
+
 ## v0.1.21-ep062
 
 Released: 2026-09-05

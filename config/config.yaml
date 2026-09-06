@@ -983,6 +983,15 @@ workflow_scheduler:
   enabled: true
   auto_start: false
   tick_interval: 5
+  # EP-063. "shutdown_timeout" bounds how long
+  # WorkflowSchedulerService.shutdown() waits for an in-progress
+  # scheduled workflow run (WorkflowEngine.run(), potentially long and
+  # workflow-dependent) to finish before giving up -- mirroring
+  # "background_workers.shutdown_timeout" below, not "scheduler"'s own
+  # fixed, unconfigurable join timeout, since unlike Scheduler.tick(),
+  # WorkflowSchedulerEngine.tick() can itself block for as long as the
+  # scheduled workflow it dispatches takes to run.
+  shutdown_timeout: 10
 
 automation:
   # EP-035 Automation Engine. Chains one EP-033 workflow's completion

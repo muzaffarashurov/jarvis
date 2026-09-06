@@ -16,6 +16,25 @@ mirroring EP-011's `SchedulerService` exactly, as its own, entirely
 separate background thread (no shared state with EP-011's Scheduler).
 The loop only ever calls `WorkflowSchedulerEngine.tick()`; it never
 calls any business-logic module directly.
+
+Per EP-063 (`EP063_DESIGN.md` Section 1) this class originally
+exposed no public counterpart to `_start_tick_loop()` at all -- unlike
+EP-011's `Scheduler`, which EP-061 already closed this same gap for.
+EP-063 closes it here with one new, additive public method,
+`shutdown()`, that stops the tick loop using the already-existing
+`_stop_event`/`_tick_thread` mechanism. No other public method's
+signature or behavior changes. Unlike `SchedulerService.shutdown()`
+(whose join timeout is a fixed constant, since `Scheduler.tick()`
+never blocks), this class's `shutdown()` resolves its default timeout
+from 'workflow_scheduler.shutdown_timeout' configuration, mirroring
+`BackgroundWorkerService.shutdown()`'s own
+'background_workers.shutdown_timeout' -- because
+`WorkflowSchedulerEngine.tick()` can itself block for as long as a
+scheduled workflow's `WorkflowEngine.run()` call takes
+(`EP063_DESIGN.md` Section 2.2, Owner Decision D3). `shutdown()` is
+invoked exclusively by `RuntimeService.shutdown()` (EP-060/EP-063) --
+it is never exposed as a `WorkflowSchedulerModule` CLI/REST action
+(EP-063 Owner Decision D1); see `workflow_scheduler_module.py`.
 """
 
 from __future__ import annotations
@@ -33,6 +52,8 @@ from src.core.workflow_scheduler.workflow_scheduler_engine import (
     WorkflowSchedulerEngine,
     WorkflowSchedulerError,
 )
+
+_DEFAULT_SHUTDOWN_TIMEOUT = 10.0
 
 
 @dataclass(frozen=True)
@@ -62,12 +83,21 @@ class WorkflowSchedulerService:
                 'workflow_scheduler.tick_interval'.
             engine: The WorkflowSchedulerEngine used to register, run,
                 and track scheduled workflows.
+
+        Raises:
+            WorkflowSchedulerError: If 'workflow_scheduler.shutdown_timeout'
+                is present but not a positive number (EP-063). Reuses
+                this module's existing error type, rather than
+                introducing a new one, so `Bootstrap`'s existing
+                `except WorkflowSchedulerError` handling around this
+                class's construction already covers it unchanged.
         """
         self._config = config
         self._engine = engine
         self._tick_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._lifecycle_lock = threading.Lock()
+        self._shutdown_timeout = self._resolve_shutdown_timeout()
 
         if bool(self._config.get("workflow_scheduler.enabled", True)) and bool(
             self._config.get("workflow_scheduler.auto_start", False)
@@ -181,6 +211,70 @@ class WorkflowSchedulerService:
             entries_enabled=sum(1 for entry in entries if entry.enabled),
         )
 
+    def shutdown(self, wait: bool = True, timeout: float | None = None) -> bool:
+        """Stop the background tick loop, if one is running.
+
+        Safe to call regardless of whether the tick loop was ever
+        started (e.g. 'workflow_scheduler.auto_start: false', or
+        already stopped) -- reports success immediately since there is
+        nothing to stop. Does not affect any registered entry's
+        enabled/disabled state, and does not prevent `run(entry_id)`
+        from being called manually afterward -- only the automatic
+        tick loop is stopped.
+
+        This is the EP-063 counterpart to `_start_tick_loop()`; unlike
+        that method, this one is public, matching
+        `SchedulerService.shutdown()`'s (EP-061) and
+        `BackgroundWorkerService.shutdown()`'s (EP-036) naming/shape.
+        It is invoked internally by `RuntimeService.shutdown()` and is
+        not exposed as a `WorkflowSchedulerModule` CLI/REST action
+        (EP-063 Owner Decision D1).
+
+        Unlike `SchedulerService.shutdown()`, this method's default
+        timeout is read from 'workflow_scheduler.shutdown_timeout'
+        configuration, not a fixed constant -- because
+        `WorkflowSchedulerEngine.tick()` can itself block for as long
+        as a scheduled workflow's `WorkflowEngine.run()` call takes,
+        unlike `Scheduler.tick()`'s non-blocking dispatch
+        (`EP063_DESIGN.md` Section 2.2, Owner Decision D3). A tick
+        genuinely in progress when this is called is not interrupted
+        -- this method can only wait for it to finish naturally, up to
+        `timeout`.
+
+        Args:
+            wait: If True (default), block until the tick thread has
+                exited or `timeout` elapses. If False, signal the stop
+                and return immediately without joining.
+            timeout: Maximum seconds to wait when `wait` is True.
+                Defaults to this service's resolved
+                `_shutdown_timeout` (see `_resolve_shutdown_timeout`)
+                when not given explicitly.
+
+        Returns:
+            True if the tick loop is confirmed not running after this
+            call (including if it was never running to begin with);
+            False if `wait=True` and the thread did not exit within
+            `timeout` (e.g. a scheduled workflow run was still in
+            progress).
+        """
+        with self._lifecycle_lock:
+            thread = self._tick_thread
+            if thread is None:
+                return True
+            self._stop_event.set()
+
+        if not wait:
+            return not thread.is_alive()
+
+        resolved_timeout = timeout if timeout is not None else self._shutdown_timeout
+        thread.join(timeout=resolved_timeout)
+        stopped = not thread.is_alive()
+        if stopped:
+            with self._lifecycle_lock:
+                if self._tick_thread is thread:
+                    self._tick_thread = None
+        return stopped
+
     # ---------- Internal helpers ----------
 
     def _ensure_enabled(self) -> CommandResult | None:
@@ -194,6 +288,27 @@ class WorkflowSchedulerService:
             return None
         logger.error("Workflow Scheduler operation rejected: Workflow Scheduler stopped.")
         return CommandResult(success=False, message="Workflow Scheduler stopped.")
+
+    def _resolve_shutdown_timeout(self) -> float:
+        """Resolve and validate 'workflow_scheduler.shutdown_timeout'.
+
+        Returns:
+            The configured shutdown timeout in seconds (default
+            `_DEFAULT_SHUTDOWN_TIMEOUT`).
+
+        Raises:
+            WorkflowSchedulerError: If the configured value is not a
+                positive number.
+        """
+        value = self._config.get(
+            "workflow_scheduler.shutdown_timeout", _DEFAULT_SHUTDOWN_TIMEOUT
+        )
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            raise WorkflowSchedulerError(
+                "Invalid value for 'workflow_scheduler.shutdown_timeout': expected a "
+                f"positive number, got {value!r}."
+            )
+        return float(value)
 
     def _start_tick_loop(self) -> None:
         """Start the background thread that calls WorkflowSchedulerEngine.tick() periodically."""

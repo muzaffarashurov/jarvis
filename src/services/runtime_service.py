@@ -65,6 +65,18 @@ introducing a new configuration key (EP-060 Section 14); likewise, the
 new Scheduler-shutdown step reuses `SchedulerService.shutdown()`'s own
 already-existing, EP-061-introduced default timeout resolution --
 no new configuration key is read here for that step either.
+
+EP-063 (`EP063_DESIGN.md`) widens `RuntimeStatus`/`RuntimeShutdownReport`
+and `shutdown()` a third time, to also observe and coordinate the
+Workflow Scheduler (EP-034): `WorkflowSchedulerService` has the exact
+same "auto-started background tick thread with no public shutdown"
+defect `SchedulerService` had before EP-061 -- unnoticed by every
+prior Runtime-focused EP because each one's own scope statement
+explicitly fenced `WorkflowSchedulerService` out as an unrelated
+subsystem. The new shutdown step reuses
+`WorkflowSchedulerService.shutdown()`'s own new, EP-063-introduced
+default timeout resolution (`workflow_scheduler.shutdown_timeout`) --
+no new configuration key is read here for that step either.
 """
 
 from __future__ import annotations
@@ -77,6 +89,7 @@ from src.core.api.rest_api_server import RestApiServer
 from src.core.shell import InteractiveShell
 from src.services.background_worker_service import BackgroundWorkerService
 from src.services.scheduler_service import SchedulerService
+from src.services.workflow_scheduler_service import WorkflowSchedulerService
 
 
 @dataclass(frozen=True)
@@ -123,6 +136,22 @@ class RuntimeStatus:
             registered with the Scheduler
             (`SchedulerService.status().jobs_registered`), or 0 if
             `scheduler_active` is False. Added by EP-060.
+        workflow_scheduler_active: Whether the Workflow Scheduler's
+            tick loop is currently running
+            (`WorkflowSchedulerService.status().running`), or False if
+            no `WorkflowSchedulerService` reference was supplied this
+            run. Added by EP-063, closing the same kind of
+            observability gap EP-060 closed for the Scheduler --
+            `workflow_scheduler.auto_start` defaults to `False`, but
+            unlike Telegram's identical-looking default, it is the
+            only way this subsystem's automatic-execution feature can
+            ever run (`EP063_DESIGN.md` Section 2.3/2.4), so this
+            field is not a corner case.
+        workflow_scheduler_entries_registered: The number of scheduled
+            workflow entries currently registered with the Workflow
+            Scheduler (`WorkflowSchedulerService.status().
+            entries_registered`), or 0 if `workflow_scheduler_active`
+            is False. Added by EP-063.
     """
 
     pid: int
@@ -136,6 +165,8 @@ class RuntimeStatus:
     background_worker_task_count: int
     scheduler_active: bool = False
     scheduler_jobs_registered: int = 0
+    workflow_scheduler_active: bool = False
+    workflow_scheduler_entries_registered: int = 0
 
 
 @dataclass(frozen=True)
@@ -179,15 +210,31 @@ class RuntimeShutdownReport:
             if it was never running to begin with; False if the join
             timed out). True if no `SchedulerService` reference was
             supplied. Added by EP-061.
+        workflow_scheduler_was_active: Whether the Workflow
+            Scheduler's tick loop was running
+            (`WorkflowSchedulerService.status().running`) immediately
+            before this call (False if no `WorkflowSchedulerService`
+            reference was supplied, or if it was already stopped).
+            Added by EP-063.
+        workflow_scheduler_stopped: The `bool` returned by
+            `WorkflowSchedulerService.shutdown()` unchanged (True if
+            the tick loop is confirmed not running after this call,
+            including if it was never running to begin with; False if
+            the join timed out -- e.g. a scheduled workflow run was
+            still in progress). True if no `WorkflowSchedulerService`
+            reference was supplied. Added by EP-063.
 
-    Note: `scheduler_was_active`/`scheduler_stopped` are declared last,
-    after the two pre-existing pairs, purely for dataclass
+    Note: `scheduler_was_active`/`scheduler_stopped` and
+    `workflow_scheduler_was_active`/`workflow_scheduler_stopped` are
+    declared last, after the pre-existing pairs, purely for dataclass
     backward-compatibility (defensive, in case of a future positional
     construction call site -- today's one call site, in `shutdown()`
     below, is entirely keyword-based). This does **not** reflect
-    execution order: the Scheduler is actually stopped second, between
-    the REST API Server and the Background Worker Service (see
-    `shutdown()`'s docstring and `EP061_DESIGN.md` Section 7.2).
+    execution order: the Scheduler is actually stopped second and the
+    Workflow Scheduler third, both between the REST API Server and the
+    Background Worker Service (see `shutdown()`'s docstring,
+    `EP061_DESIGN.md` Section 7.2, and `EP063_DESIGN.md` Owner
+    Decision D2).
     """
 
     rest_api_was_active: bool
@@ -196,6 +243,8 @@ class RuntimeShutdownReport:
     background_workers_stopped: bool
     scheduler_was_active: bool = False
     scheduler_stopped: bool = True
+    workflow_scheduler_was_active: bool = False
+    workflow_scheduler_stopped: bool = True
 
 
 class RuntimeService:
@@ -225,6 +274,7 @@ class RuntimeService:
         background_worker_service: BackgroundWorkerService | None,
         shell: InteractiveShell | None,
         scheduler_service: SchedulerService | None = None,
+        workflow_scheduler_service: WorkflowSchedulerService | None = None,
     ) -> None:
         """Initialize the RuntimeService.
 
@@ -260,12 +310,23 @@ class RuntimeService:
                 9.1). `.status()` is read by `status()`; `.shutdown()`
                 is read by `shutdown()` (EP-061) -- see `shutdown()`'s
                 own docstring for ordering.
+            workflow_scheduler_service: The already-constructed
+                EP-034 `WorkflowSchedulerService` for this run, or
+                None if the Workflow Scheduler subsystem is disabled
+                or was not yet built. Keyword-defaulted to `None` so
+                every existing EP-059 through EP-062 call site
+                continues to construct a valid `RuntimeService`
+                unchanged (`EP063_DESIGN.md` Section 6.5). `.status()`
+                is read by `status()`; `.shutdown()` is read by
+                `shutdown()` (EP-063) -- see `shutdown()`'s own
+                docstring for ordering.
         """
         self._started_at = started_at
         self._rest_api_server = rest_api_server
         self._background_worker_service = background_worker_service
         self._shell = shell
         self._scheduler_service = scheduler_service
+        self._workflow_scheduler_service = workflow_scheduler_service
 
     # ---------- Public API ----------
 
@@ -302,6 +363,13 @@ class RuntimeService:
             scheduler_active = scheduler_status.running
             scheduler_jobs_registered = scheduler_status.jobs_registered
 
+        workflow_scheduler_active = False
+        workflow_scheduler_entries_registered = 0
+        if self._workflow_scheduler_service is not None:
+            wf_scheduler_status = self._workflow_scheduler_service.status()
+            workflow_scheduler_active = wf_scheduler_status.running
+            workflow_scheduler_entries_registered = wf_scheduler_status.entries_registered
+
         return RuntimeStatus(
             pid=os.getpid(),
             uptime_seconds=time.monotonic() - self._started_at,
@@ -314,22 +382,27 @@ class RuntimeService:
             background_worker_task_count=background_worker_task_count,
             scheduler_active=scheduler_active,
             scheduler_jobs_registered=scheduler_jobs_registered,
+            workflow_scheduler_active=workflow_scheduler_active,
+            workflow_scheduler_entries_registered=workflow_scheduler_entries_registered,
         )
 
     def shutdown(self) -> RuntimeShutdownReport:
         """Coordinate graceful shutdown of the execution contexts this
         service already observes that already expose a public, idempotent
-        stop/shutdown primitive: the REST API Server, the Scheduler, and
-        the Background Worker Service (`EP060_DESIGN.md` Section 9.3;
-        widened by `EP061_DESIGN.md` Section 7.2 to include the
-        Scheduler).
+        stop/shutdown primitive: the REST API Server, the Scheduler, the
+        Workflow Scheduler, and the Background Worker Service
+        (`EP060_DESIGN.md` Section 9.3; widened by `EP061_DESIGN.md`
+        Section 7.2 to include the Scheduler; widened by
+        `EP063_DESIGN.md` Section 6.4/Owner Decision D2 to include the
+        Workflow Scheduler).
 
         Deliberately excludes the Shell -- `InteractiveShell` owns no
         background thread or held OS resource of its own to release;
         its lifecycle is owned by whichever loop is running it
         (`main.py`), not by this service.
 
-        Ordering (`EP061_DESIGN.md` Section 6/8, Owner Decision D2):
+        Ordering (`EP061_DESIGN.md` Section 6/8; `EP063_DESIGN.md`
+        Owner Decision D2):
         1. The REST API Server is stopped first -- closing the
            external, network-reachable trigger before any internal
            trigger, so no new HTTP-triggered command (including a
@@ -348,14 +421,32 @@ class RuntimeService:
            order is chosen so the Scheduler is not left ticking for the
            Background Worker Service's own, potentially much longer,
            `background_workers.shutdown_timeout`-bounded drain window.
-        3. The Background Worker Service is shut down last (`wait=True`,
+        3. The Workflow Scheduler's tick loop is stopped third, via
+           `WorkflowSchedulerService.shutdown()` (EP-063) -- also an
+           internal, automatic trigger, structurally independent of
+           both the Scheduler and the Background Worker Service for
+           shutdown-ordering purposes (verified: `WorkflowSchedulerService`
+           and `BackgroundWorkerService` share the same underlying
+           `WorkflowEngine` instance for *running* a workflow, but
+           neither one's shutdown depends on or blocks the other --
+           `EP063_DESIGN.md` Section 2.5). Placed after the Scheduler
+           (whose join is near-instant, since `Scheduler.tick()` never
+           blocks) and before the Background Worker Service, because
+           `WorkflowSchedulerEngine.tick()`, unlike `Scheduler.tick()`,
+           can itself block for as long as a scheduled workflow's
+           `WorkflowEngine.run()` call takes (`EP063_DESIGN.md` Section
+           2.2) -- grouping the two fast-to-settle triggers before the
+           one that may need meaningfully longer, itself before the
+           Background Worker Service's own drain window.
+        4. The Background Worker Service is shut down last (`wait=True`,
            using its own already-resolved
            'background_workers.shutdown_timeout' default) -- draining
            already-accepted, potentially long-running work only after
-           both new-work triggers are silenced.
+           every new-work trigger is silenced.
 
         Idempotent: safe to call more than once. Every underlying call
         (`RestApiServer.stop()`, `SchedulerService.shutdown()`,
+        `WorkflowSchedulerService.shutdown()`,
         `BackgroundWorkerService.shutdown()`) is already independently
         idempotent, so a second call is a no-op for a subsystem already
         stopped. This method holds no additional "already shut down"
@@ -364,12 +455,14 @@ class RuntimeService:
         Partial failure handling: no `try`/`except` is added here.
         `RestApiServer.stop()` propagates any OS-level exception
         unguarded, unchanged from `Bootstrap.shutdown()`'s own,
-        pre-EP-060 behavior. `SchedulerService.shutdown()` and
-        `BackgroundWorkerService.shutdown()` both return `False` rather
+        pre-EP-060 behavior. `SchedulerService.shutdown()`,
+        `WorkflowSchedulerService.shutdown()`, and
+        `BackgroundWorkerService.shutdown()` all return `False` rather
         than raising on a timeout; those `bool`s are forwarded into the
         report unchanged. Because the REST API Server is stopped first,
-        an exception there means neither the Scheduler nor the
-        Background Worker Service is reached for that call.
+        an exception there means none of the Scheduler, Workflow
+        Scheduler, or Background Worker Service is reached for that
+        call.
 
         Returns:
             A `RuntimeShutdownReport` describing which subsystems were
@@ -392,6 +485,13 @@ class RuntimeService:
         if self._scheduler_service is not None:
             scheduler_stopped = self._scheduler_service.shutdown()
 
+        workflow_scheduler_was_active = False
+        if self._workflow_scheduler_service is not None:
+            workflow_scheduler_was_active = self._workflow_scheduler_service.status().running
+        workflow_scheduler_stopped = True
+        if self._workflow_scheduler_service is not None:
+            workflow_scheduler_stopped = self._workflow_scheduler_service.shutdown()
+
         background_workers_was_active = False
         if self._background_worker_service is not None:
             background_workers_was_active = self._background_worker_service.status().running
@@ -406,4 +506,6 @@ class RuntimeService:
             background_workers_stopped=background_workers_stopped,
             scheduler_was_active=scheduler_was_active,
             scheduler_stopped=scheduler_stopped,
+            workflow_scheduler_was_active=workflow_scheduler_was_active,
+            workflow_scheduler_stopped=workflow_scheduler_stopped,
         )

@@ -122,6 +122,106 @@ Completed sub-packages:
 
 ## Current
 
+EP-063 WorkflowSchedulerService Shutdown Coordination — **COMPLETE**
+(STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
+Testing, STEP 3 Architecture Audit, STEP 4 Documentation
+Synchronization all complete -- see
+docs/architecture/designs/EP063_DESIGN.md (including its Owner
+Decisions D1-D4) and
+docs/architecture/audits/EP063_ARCHITECTURE_AUDIT.md. **Final Verdict:
+STEP 3 — PASS WITH NON-BLOCKING FINDINGS, NO
+BLOCKING FINDINGS** (one MEDIUM finding F1, four LOW findings
+F2/F3/F5/F6, one NOTE F4; owner reviewed all six and directed STEP 4
+to leave each unchanged -- see below). Not tied to any roadmap phase:
+neither this roadmap nor `docs/BACKLOG.md` named an EP-063 scope, both
+saying "none yet defined," and, like EP-061 and EP-062 before it, no
+prior EP's design/audit document named a specific "next EP" candidate
+either. STEP 1 found no textual anchor naming a specific EP-063
+mechanism, but did find a real, code-verified gap in a sibling
+subsystem to the one EP-061 already fixed:
+`WorkflowSchedulerService` (EP-034) owned an auto-started background
+tick thread with no public method anywhere in this codebase that could
+stop it -- the exact same defect `SchedulerService` (EP-011) had
+before EP-061, unnoticed by EP-059 through EP-062 because each of
+their own scope statements explicitly fenced `WorkflowSchedulerService`
+out as an unrelated subsystem. STEP 1 also investigated and rejected
+Telegram Gateway shutdown coordination (structurally similar, but with
+a manual escape hatch already available and zero pre-existing test
+coverage) and REST API authentication (real and repeatedly disclosed,
+but architecturally enormous compared to this EP's scope) as this EP's
+primary candidate. Owner Decision D1: `shutdown()` remains
+internal-only, invoked exclusively by `RuntimeService.shutdown()` --
+no new CLI/REST/Telegram action exists, independently re-verified
+during STEP 3 at all three layers. Owner Decision D2: the new shutdown
+step is placed third of four (REST → Scheduler → Workflow Scheduler →
+Background Workers) -- independently verified that
+`WorkflowSchedulerService` shares no shutdown-correctness dependency
+with either the Scheduler or the Background Worker Service, so this
+ordering groups the two fast-to-settle triggers (REST, Scheduler)
+before the one that may need meaningfully longer to settle
+(`WorkflowSchedulerEngine.tick()` can itself block for as long as a
+scheduled workflow's `WorkflowEngine.run()` call takes, unlike
+`Scheduler.tick()`), itself before the Background Worker Service's own
+drain window. Owner Decision D3: the join timeout is a new,
+configurable `workflow_scheduler.shutdown_timeout` key (default 10
+seconds), not a fixed constant like `SchedulerService.shutdown()`'s
+own precedent -- because unlike Scheduler's executors,
+`WorkflowSchedulerEngine.tick()` genuinely blocks on workflow-dependent
+execution time, so a fixed short constant would make `shutdown()`
+return `False` routinely rather than as a rare edge case. Owner
+Decision D4: `self._workflow_scheduler_service` is not nulled after
+`Bootstrap.shutdown()`, since `status()`, `list_entries()`,
+`get_entry()`, and manual `run(entry_id)` all remain correct
+afterward, matching `SchedulerService`'s own EP-061 precedent. Built
+by adding one new public method,
+`WorkflowSchedulerService.shutdown(wait=True, timeout=None) -> bool`,
+structurally mirroring `SchedulerService.shutdown()`, plus one new
+private helper, `_resolve_shutdown_timeout()`, mirroring
+`BackgroundWorkerService`'s own coercion/validation shape --
+`WorkflowSchedulerEngine`, `ScheduledWorkflowRegistry`,
+`ScheduledWorkflow`, `WorkflowEngine`, `PlanExecutionEngine`,
+`SchedulerService`, `BackgroundWorkerService`/`BackgroundWorkerPool`,
+`RestApiServer`, `TelegramService`, and `TelegramModule` are all
+confirmed byte-identical/unmodified by EP-063 (independently
+re-verified during STEP 3 via `diff`/`md5sum` against the pre-EP-063
+baseline, not merely re-cited from the STEP 2 report). Tests: EP-063
+78/0/0 (new suite, `tests/EP063/test_workflow_scheduler_shutdown.py`),
+covering `WorkflowSchedulerService.shutdown()` in isolation
+(never-started, already-running, idempotent, `wait=False`, manual
+`run()` still working, timeout resolution/override/invalid-config
+rejection), a genuine, non-mocked blocking-tick scenario, the widened
+`RuntimeService.status()`/`shutdown()` (including ordering via
+call-order-recording proxies), real end-to-end `Bootstrap` wiring, and
+public-surface guards for `WorkflowSchedulerService`/
+`WorkflowSchedulerModule`/`RuntimeModule`. Full regression: EP-034
+113/0/0, EP-036 101/0/0, EP-036-STEP2 48/0/0, EP-036-STEP3 53/0/0,
+EP-043 83/0/0, EP-059 93/0/0, EP-060 65/0/0, EP-061 62/0/0, EP-062
+39/0/0 -- all independently reproduced at STEP 2, STEP 3, and STEP 4;
+combined total across all nine required suites 735/0/0. **STEP 3
+findings (one MEDIUM, four LOW, one NOTE; owner directed all six left
+unchanged during STEP 4):** (F1, MEDIUM) no test exercises concurrent
+`shutdown()` calls, unlike EP-061's own three tests for the
+structurally identical `SchedulerService.shutdown()` -- verified safe
+by direct source inspection instead; (F2, LOW) the design's narrative
+describes a single blocking workflow run, but `tick()` actually
+processes every due entry sequentially per tick -- documentation
+completeness only; (F3, LOW) no test directly asserts a
+`ScheduledWorkflow.enabled` is unaffected by `shutdown()`, though
+trivially guaranteed by inspection; (F4, NOTE) the `wait=False` branch's
+stale-thread-reference behavior is inherited unchanged from EP-061,
+not new, and currently unreachable; (F5, LOW) `shutdown_timeout: 0`
+and boolean values are correctly rejected by inspection but not
+independently tested; (F6, LOW) one test assertion is causally
+guaranteed true by `Thread.join()` semantics rather than being a
+discriminating check.
+
+**Next Engineering Package: none yet defined.** EP-063 closed the
+same class of gap EP-061 closed for the Scheduler, this time for the
+Workflow Scheduler. It is not tied to any roadmap phase -- Phase 10
+remains Jarvis's last currently-named phase, completed by
+EP-059/EP-060. No EP-064 or Phase 11 exists anywhere in this
+repository as of this release.
+
 EP-062 BackgroundWorkerService Status/Shutdown Reconciliation —
 **COMPLETE** (STEP 1 Architecture Discovery & Design, STEP 2
 Implementation & Testing, STEP 3 Architecture Audit, STEP 4

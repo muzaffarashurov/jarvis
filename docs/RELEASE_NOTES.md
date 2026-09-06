@@ -2629,4 +2629,78 @@ EP062 : 39 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-063 — WorkflowSchedulerService Shutdown Coordination
+
+Status: Released (STEP 3 PASS WITH NON-BLOCKING FINDINGS, NO BLOCKING
+FINDINGS -- one moderate and four minor findings plus one informational
+note identified during the architecture audit and, on the owner's
+review, left unchanged before release, since none required a change;
+see "Known limitations" below)
+
+A note on scope: like EP-061 and EP-062, this release wasn't named by
+the roadmap or backlog at all -- both said "no next package defined
+yet." Instead, it closes a gap in a different, related feature: the
+Workflow Scheduler (which runs saved workflows automatically on a
+schedule) had no way to be told to stop its automatic clock, the same
+problem the Scheduler itself had before it was fixed two releases ago.
+When Jarvis shut down, its web API, Scheduler, and background task
+pool were all signaled to finish up cleanly, but if the Workflow
+Scheduler's automatic-run feature was turned on, its own background
+clock just kept ticking until the whole program exited. This release
+fixes that.
+
+Highlights:
+
+- Shutting down Jarvis now also tells the Workflow Scheduler to stop
+  its automatic clock, in addition to the web API, the Scheduler, and
+  the background task pool -- closing the last piece of Jarvis's
+  shutdown sequence that wasn't covered
+- If a scheduled workflow is actually running when Jarvis is asked to
+  shut down, Jarvis now waits (up to 10 seconds by default, and this
+  can be adjusted) for it to finish naturally before moving on, instead
+  of abandoning it instantly
+- "runtime status" now also shows whether the Workflow Scheduler's
+  automatic clock is running, and how many scheduled workflows are
+  registered, matching the same information already shown for the
+  Scheduler
+- Purely internal coordination -- nothing new is reachable through the
+  command shell, the web API, or Telegram; shutting down still happens
+  automatically when Jarvis exits, exactly as before
+- Every existing scheduled workflow, its enabled/disabled state, and
+  manually running it on demand are completely unaffected -- this is
+  an internal improvement to how Jarvis shuts itself down, with no
+  effect on how scheduling itself already works
+
+Compatibility:
+
+Fully backward compatible with every prior EP, including EP-059,
+EP-060, EP-061, and EP-062. No existing service, manager, or CLI
+command was renamed, removed, or had its available actions changed.
+The Workflow Scheduler's own scheduling logic, the Scheduler, the web
+API server, and the background task pool are all unmodified.
+
+No breaking changes.
+
+Known limitations:
+
+- None outstanding. The architecture audit found one finding worth a
+  closer look before a future release (the new automatic tests don't
+  yet check what happens if two shutdown requests happen at the exact
+  same moment from different parts of the program, even though this
+  was checked by hand and found to be safe), four smaller notes (some
+  documentation could be more precise, and a couple of rare
+  configuration values weren't specifically tested even though they're
+  handled correctly), and one purely informational observation, none
+  of which affected how Jarvis behaves or how it was tested. The owner
+  reviewed all six and chose to leave them as-is, since none needed a
+  change. See
+  `docs/architecture/audits/EP063_ARCHITECTURE_AUDIT.md` Section 9
+  for the details.
+
+Validation:
+
+EP063 : 78 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

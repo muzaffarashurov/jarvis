@@ -62,6 +62,7 @@ import tests.EP060.test_runtime_lifecycle
 import tests.EP061.test_scheduler_shutdown
 import tests.EP062.test_background_worker_status
 import tests.EP063.test_workflow_scheduler_shutdown
+import tests.EP064.test_memory_persistence_shutdown
 
 class TestModule(CommandModule):
 

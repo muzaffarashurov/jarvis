@@ -353,6 +353,11 @@ class Bootstrap:
         # already a stored `Bootstrap` attribute before this EP (built
         # for EP-035's own purposes), this is only its first use by
         # `RuntimeService`.
+        # `memory_service` added by EP-064 (`EP064_DESIGN.md` Section
+        # 6.9) -- same read-only observation contract;
+        # `self._memory_service` was already a stored `Bootstrap`
+        # attribute before this EP (built for `MemoryModule`'s own
+        # purposes), this is only its first use by `RuntimeService`.
         self._runtime_service = RuntimeService(
             started_at=self._started_at,
             rest_api_server=self._rest_api_server,
@@ -360,6 +365,7 @@ class Bootstrap:
             shell=self._shell,
             scheduler_service=self._scheduler_service,
             workflow_scheduler_service=self._workflow_scheduler_service,
+            memory_service=self._memory_service,
         )
         self._command_router.register(RuntimeModule(self._runtime_service))
 

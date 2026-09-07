@@ -77,6 +77,26 @@ subsystem. The new shutdown step reuses
 `WorkflowSchedulerService.shutdown()`'s own new, EP-063-introduced
 default timeout resolution (`workflow_scheduler.shutdown_timeout`) --
 no new configuration key is read here for that step either.
+
+EP-064 (`EP064_DESIGN.md`) widens `RuntimeStatus`/`RuntimeShutdownReport`
+and `shutdown()` a fourth time, to also observe and coordinate
+`MemoryPersistence`'s (EP-013.2) background auto-save loop, via
+`MemoryService.status()`/`MemoryService.shutdown()`: unlike Scheduler
+and Workflow Scheduler, this auto-started daemon thread had **no**
+public stop method anywhere in the codebase before EP-064, and
+`memory.enabled`/`memory.persistent`/`memory.auto_save` all default to
+`true`, so it runs in every default installation. The new shutdown
+step reuses `MemoryPersistence.shutdown()`'s own new, EP-064-introduced
+fixed timeout (Owner Decision D4) -- no new configuration key is read
+here for that step either. Per Owner Decision D2, this step is placed
+after the Workflow Scheduler and before the Background Worker Service:
+grouped with the other fast-to-settle internal loops (a repository-wide
+search found no reference to `memory_service` in the
+`workflow_engine`/`plan_execution`/`background_workers`/`tool`
+execution paths, so there is no verified shutdown-ordering dependency
+between Memory auto-save and any other coordinated subsystem), keeping
+the Background Worker Service's own, potentially much longer drain
+last.
 """
 
 from __future__ import annotations
@@ -88,6 +108,7 @@ from dataclasses import dataclass
 from src.core.api.rest_api_server import RestApiServer
 from src.core.shell import InteractiveShell
 from src.services.background_worker_service import BackgroundWorkerService
+from src.services.memory_service import MemoryService
 from src.services.scheduler_service import SchedulerService
 from src.services.workflow_scheduler_service import WorkflowSchedulerService
 
@@ -152,6 +173,21 @@ class RuntimeStatus:
             Scheduler (`WorkflowSchedulerService.status().
             entries_registered`), or 0 if `workflow_scheduler_active`
             is False. Added by EP-063.
+        memory_persistence_active: Whether the Memory subsystem's
+            background auto-save thread is actually alive right now
+            (`MemoryService.status().auto_save_running`), or False if
+            no `MemoryService` reference was supplied this run. Added
+            by EP-064, closing the same kind of observability gap
+            EP-060 closed for the Scheduler and EP-063 closed for the
+            Workflow Scheduler -- `memory.enabled`/`memory.persistent`/
+            `memory.auto_save` all default to `True`, so this is the
+            only one of the three that is active in every default
+            installation.
+        memory_persistence_entries_saved: The number of entries
+            currently marked persistent (`MemoryService.status().
+            persistent_entries`), i.e. eligible to be written by the
+            next auto-save, or 0 if `memory_persistence_active` is
+            False. Added by EP-064.
     """
 
     pid: int
@@ -167,6 +203,8 @@ class RuntimeStatus:
     scheduler_jobs_registered: int = 0
     workflow_scheduler_active: bool = False
     workflow_scheduler_entries_registered: int = 0
+    memory_persistence_active: bool = False
+    memory_persistence_entries_saved: int = 0
 
 
 @dataclass(frozen=True)
@@ -223,17 +261,31 @@ class RuntimeShutdownReport:
             the join timed out -- e.g. a scheduled workflow run was
             still in progress). True if no `WorkflowSchedulerService`
             reference was supplied. Added by EP-063.
+        memory_persistence_was_active: Whether the Memory subsystem's
+            background auto-save thread was alive
+            (`MemoryService.status().auto_save_running`) immediately
+            before this call (False if no `MemoryService` reference
+            was supplied, or if it was already stopped). Added by
+            EP-064.
+        memory_persistence_stopped: The `bool` returned by
+            `MemoryService.shutdown()` unchanged (True if the
+            auto-save loop is confirmed not running after this call,
+            including if it was never running to begin with; False if
+            the join timed out). True if no `MemoryService` reference
+            was supplied. Added by EP-064.
 
-    Note: `scheduler_was_active`/`scheduler_stopped` and
-    `workflow_scheduler_was_active`/`workflow_scheduler_stopped` are
+    Note: `scheduler_was_active`/`scheduler_stopped`,
+    `workflow_scheduler_was_active`/`workflow_scheduler_stopped`, and
+    `memory_persistence_was_active`/`memory_persistence_stopped` are
     declared last, after the pre-existing pairs, purely for dataclass
     backward-compatibility (defensive, in case of a future positional
     construction call site -- today's one call site, in `shutdown()`
     below, is entirely keyword-based). This does **not** reflect
-    execution order: the Scheduler is actually stopped second and the
-    Workflow Scheduler third, both between the REST API Server and the
-    Background Worker Service (see `shutdown()`'s docstring,
-    `EP061_DESIGN.md` Section 7.2, and `EP063_DESIGN.md` Owner
+    execution order: the Scheduler is actually stopped second, the
+    Workflow Scheduler third, and Memory Persistence fourth, all
+    between the REST API Server and the Background Worker Service (see
+    `shutdown()`'s docstring, `EP061_DESIGN.md` Section 7.2,
+    `EP063_DESIGN.md` Owner Decision D2, and `EP064_DESIGN.md` Owner
     Decision D2).
     """
 
@@ -245,6 +297,8 @@ class RuntimeShutdownReport:
     scheduler_stopped: bool = True
     workflow_scheduler_was_active: bool = False
     workflow_scheduler_stopped: bool = True
+    memory_persistence_was_active: bool = False
+    memory_persistence_stopped: bool = True
 
 
 class RuntimeService:
@@ -275,6 +329,7 @@ class RuntimeService:
         shell: InteractiveShell | None,
         scheduler_service: SchedulerService | None = None,
         workflow_scheduler_service: WorkflowSchedulerService | None = None,
+        memory_service: MemoryService | None = None,
     ) -> None:
         """Initialize the RuntimeService.
 
@@ -320,6 +375,15 @@ class RuntimeService:
                 is read by `status()`; `.shutdown()` is read by
                 `shutdown()` (EP-063) -- see `shutdown()`'s own
                 docstring for ordering.
+            memory_service: The already-constructed EP-013.2
+                `MemoryService` for this run, or None if it was not yet
+                built (e.g. an invalid 'memory.default_provider').
+                Keyword-defaulted to `None` so every existing EP-059
+                through EP-063 call site continues to construct a
+                valid `RuntimeService` unchanged (`EP064_DESIGN.md`
+                Section 6.6). `.status()` is read by `status()`;
+                `.shutdown()` is read by `shutdown()` (EP-064) -- see
+                `shutdown()`'s own docstring for ordering.
         """
         self._started_at = started_at
         self._rest_api_server = rest_api_server
@@ -327,6 +391,7 @@ class RuntimeService:
         self._shell = shell
         self._scheduler_service = scheduler_service
         self._workflow_scheduler_service = workflow_scheduler_service
+        self._memory_service = memory_service
 
     # ---------- Public API ----------
 
@@ -370,6 +435,14 @@ class RuntimeService:
             workflow_scheduler_active = wf_scheduler_status.running
             workflow_scheduler_entries_registered = wf_scheduler_status.entries_registered
 
+        memory_persistence_active = False
+        memory_persistence_entries_saved = 0
+        if self._memory_service is not None:
+            memory_status = self._memory_service.status()
+            memory_persistence_active = memory_status.auto_save_running
+            if memory_persistence_active:
+                memory_persistence_entries_saved = memory_status.persistent_entries
+
         return RuntimeStatus(
             pid=os.getpid(),
             uptime_seconds=time.monotonic() - self._started_at,
@@ -384,17 +457,20 @@ class RuntimeService:
             scheduler_jobs_registered=scheduler_jobs_registered,
             workflow_scheduler_active=workflow_scheduler_active,
             workflow_scheduler_entries_registered=workflow_scheduler_entries_registered,
+            memory_persistence_active=memory_persistence_active,
+            memory_persistence_entries_saved=memory_persistence_entries_saved,
         )
 
     def shutdown(self) -> RuntimeShutdownReport:
         """Coordinate graceful shutdown of the execution contexts this
         service already observes that already expose a public, idempotent
         stop/shutdown primitive: the REST API Server, the Scheduler, the
-        Workflow Scheduler, and the Background Worker Service
-        (`EP060_DESIGN.md` Section 9.3; widened by `EP061_DESIGN.md`
-        Section 7.2 to include the Scheduler; widened by
+        Workflow Scheduler, Memory Persistence, and the Background Worker
+        Service (`EP060_DESIGN.md` Section 9.3; widened by
+        `EP061_DESIGN.md` Section 7.2 to include the Scheduler; widened by
         `EP063_DESIGN.md` Section 6.4/Owner Decision D2 to include the
-        Workflow Scheduler).
+        Workflow Scheduler; widened by `EP064_DESIGN.md` Owner Decision
+        D2 to include Memory Persistence).
 
         Deliberately excludes the Shell -- `InteractiveShell` owns no
         background thread or held OS resource of its own to release;
@@ -402,7 +478,7 @@ class RuntimeService:
         (`main.py`), not by this service.
 
         Ordering (`EP061_DESIGN.md` Section 6/8; `EP063_DESIGN.md`
-        Owner Decision D2):
+        Owner Decision D2; `EP064_DESIGN.md` Owner Decision D2):
         1. The REST API Server is stopped first -- closing the
            external, network-reachable trigger before any internal
            trigger, so no new HTTP-triggered command (including a
@@ -438,7 +514,23 @@ class RuntimeService:
            2.2) -- grouping the two fast-to-settle triggers before the
            one that may need meaningfully longer, itself before the
            Background Worker Service's own drain window.
-        4. The Background Worker Service is shut down last (`wait=True`,
+        4. Memory Persistence's background auto-save loop is stopped
+           fourth, via `MemoryService.shutdown()` (EP-064) -- not a
+           command-dispatch trigger at all, but a passive, periodic
+           side-effect loop, structurally independent of the Scheduler,
+           Workflow Scheduler, and Background Worker Service for
+           shutdown-ordering purposes (verified: a repository-wide
+           search found no reference to `memory_service` in the
+           `workflow_engine`, `plan_execution`, `background_workers`,
+           or `tool` execution paths, so there is no verified
+           correctness dependency in either direction --
+           `EP064_DESIGN.md` Owner Decision D2). Placed after the
+           Workflow Scheduler because its own join settles just as fast
+           as the Scheduler's (`save()` is a single bounded local file
+           write, not workflow-dependent blocking work), and before the
+           Background Worker Service to keep that subsystem's own,
+           potentially much longer drain window last.
+        5. The Background Worker Service is shut down last (`wait=True`,
            using its own already-resolved
            'background_workers.shutdown_timeout' default) -- draining
            already-accepted, potentially long-running work only after
@@ -446,7 +538,7 @@ class RuntimeService:
 
         Idempotent: safe to call more than once. Every underlying call
         (`RestApiServer.stop()`, `SchedulerService.shutdown()`,
-        `WorkflowSchedulerService.shutdown()`,
+        `WorkflowSchedulerService.shutdown()`, `MemoryService.shutdown()`,
         `BackgroundWorkerService.shutdown()`) is already independently
         idempotent, so a second call is a no-op for a subsystem already
         stopped. This method holds no additional "already shut down"
@@ -456,13 +548,13 @@ class RuntimeService:
         `RestApiServer.stop()` propagates any OS-level exception
         unguarded, unchanged from `Bootstrap.shutdown()`'s own,
         pre-EP-060 behavior. `SchedulerService.shutdown()`,
-        `WorkflowSchedulerService.shutdown()`, and
-        `BackgroundWorkerService.shutdown()` all return `False` rather
-        than raising on a timeout; those `bool`s are forwarded into the
-        report unchanged. Because the REST API Server is stopped first,
-        an exception there means none of the Scheduler, Workflow
-        Scheduler, or Background Worker Service is reached for that
-        call.
+        `WorkflowSchedulerService.shutdown()`, `MemoryService.shutdown()`,
+        and `BackgroundWorkerService.shutdown()` all return `False`
+        rather than raising on a timeout; those `bool`s are forwarded
+        into the report unchanged. Because the REST API Server is
+        stopped first, an exception there means none of the Scheduler,
+        Workflow Scheduler, Memory Persistence, or Background Worker
+        Service is reached for that call.
 
         Returns:
             A `RuntimeShutdownReport` describing which subsystems were
@@ -492,6 +584,13 @@ class RuntimeService:
         if self._workflow_scheduler_service is not None:
             workflow_scheduler_stopped = self._workflow_scheduler_service.shutdown()
 
+        memory_persistence_was_active = False
+        if self._memory_service is not None:
+            memory_persistence_was_active = self._memory_service.status().auto_save_running
+        memory_persistence_stopped = True
+        if self._memory_service is not None:
+            memory_persistence_stopped = self._memory_service.shutdown()
+
         background_workers_was_active = False
         if self._background_worker_service is not None:
             background_workers_was_active = self._background_worker_service.status().running
@@ -508,4 +607,6 @@ class RuntimeService:
             scheduler_stopped=scheduler_stopped,
             workflow_scheduler_was_active=workflow_scheduler_was_active,
             workflow_scheduler_stopped=workflow_scheduler_stopped,
+            memory_persistence_was_active=memory_persistence_was_active,
+            memory_persistence_stopped=memory_persistence_stopped,
         )

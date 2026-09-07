@@ -1,4 +1,4 @@
-"""Runtime module: CLI command surface for EP-059/EP-060 RuntimeService.
+"""Runtime module: CLI command surface for EP-059/EP-060/EP-064 RuntimeService.
 
 Exposes the "runtime" command namespace (status, help) as thin
 CommandModule handlers, following the same pattern as
@@ -116,5 +116,14 @@ class RuntimeModule:
             lines.append(
                 f"Workflow Scheduler entries registered : "
                 f"{status.workflow_scheduler_entries_registered}"
+            )
+        lines.append(
+            f"Memory Auto-Save : "
+            f"{'ACTIVE' if status.memory_persistence_active else 'INACTIVE'}"
+        )
+        if status.memory_persistence_active:
+            lines.append(
+                f"Memory entries pending auto-save : "
+                f"{status.memory_persistence_entries_saved}"
             )
         return CommandResult(success=True, message="\n\n".join(lines))

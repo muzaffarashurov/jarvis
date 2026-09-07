@@ -2703,4 +2703,75 @@ EP063 : 78 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-064 — MemoryPersistence Shutdown Coordination
+
+Status: Released (STEP 3 PASS WITH NON-BLOCKING FINDINGS, NO BLOCKING
+FINDINGS -- four minor findings plus two informational notes
+identified during the architecture audit and, on the owner's review,
+left unchanged before release, since none required a change; see
+"Known limitations" below)
+
+A note on scope: like EP-061, EP-062, and EP-063, this release wasn't
+named by the roadmap or backlog at all -- both said "no next package
+defined yet." Instead, it closes a gap in Jarvis's Memory subsystem:
+whenever Jarvis is configured to save its memory to disk automatically
+(the default setting), a background process quietly keeps doing that
+in the background -- but until now, there was no way to tell that
+background process to stop. Every other automatic background process
+in Jarvis (the web API, the Scheduler, the background task pool, and,
+since the last release, the Workflow Scheduler) already had a proper
+"stop cleanly" button; Memory's automatic saving did not, and unlike
+those other cases, it didn't even have a manual workaround. Because
+this automatic saving is turned on by default, this gap affected every
+normal installation, not just a special configuration.
+
+Highlights:
+
+- Shutting down Jarvis now also tells Memory's automatic-save process
+  to stop, in addition to the web API, the Scheduler, the Workflow
+  Scheduler, and the background task pool -- closing the last piece of
+  Jarvis's shutdown sequence that wasn't covered
+- "runtime status" now also shows whether Memory's automatic-save
+  process is currently running, and how many memory entries are
+  waiting to be saved next, matching the same kind of information
+  already shown for the Scheduler and Workflow Scheduler
+- The new stop mechanism waits up to 5 seconds for an in-progress save
+  to finish naturally before giving up, rather than cutting it off
+  abruptly
+- Purely internal coordination -- nothing new is reachable through the
+  command shell, the web API, or Telegram; shutting down still happens
+  automatically when Jarvis exits, exactly as before
+- Every existing memory entry, and every other way of reading or
+  writing memory (getting, setting, deleting, exporting, importing,
+  manually saving), is completely unaffected -- this is an internal
+  improvement to how Jarvis shuts itself down, with no effect on how
+  memory itself already works
+
+Compatibility:
+
+Fully backward compatible with every prior EP, including EP-059
+through EP-063. No existing service, manager, or CLI command was
+renamed, removed, or had its available actions changed. Memory's own
+read/write behavior, the Scheduler, the Workflow Scheduler, the web API
+server, and the background task pool are all unmodified.
+
+No breaking changes.
+
+Known limitations:
+
+- None outstanding. The architecture audit found four smaller notes
+  (mostly about test coverage that could be a little more thorough,
+  and a documentation line that's now slightly out of date) and two
+  purely informational observations, none of which affected how Jarvis
+  behaves or how it was tested. The owner reviewed all six and chose
+  to leave them as-is, since none needed a change. See
+  `docs/architecture/audits/EP064_ARCHITECTURE_AUDIT.md` Section 8 for
+  the details.
+
+Validation:
+
+EP064 : 93 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

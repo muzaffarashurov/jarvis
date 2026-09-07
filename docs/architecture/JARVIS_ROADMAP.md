@@ -122,6 +122,108 @@ Completed sub-packages:
 
 ## Current
 
+EP-064 MemoryPersistence Shutdown Coordination — **COMPLETE** (STEP 1
+Architecture Discovery & Design, STEP 2 Implementation & Testing, STEP
+3 Architecture Audit, STEP 4 Documentation Synchronization all
+complete -- see docs/architecture/designs/EP064_DESIGN.md (including
+its Owner Decisions D1-D8) and
+docs/architecture/audits/EP064_ARCHITECTURE_AUDIT.md. **Final Verdict:
+STEP 3 — PASS WITH NON-BLOCKING FINDINGS, NO
+BLOCKING FINDINGS** (four LOW findings F1-F4, two NOTEs F5-F6, zero
+MEDIUM, zero blocking; owner reviewed all six and directed STEP 4 to
+leave each unchanged -- see below). Not tied to any roadmap phase:
+neither this roadmap nor `docs/BACKLOG.md` named an EP-064 scope, both
+saying "none yet defined," and, like EP-061 through EP-063 before it,
+no prior EP's design/audit document named a specific "next EP"
+candidate either. STEP 1 found no textual anchor naming a specific
+EP-064 mechanism, but did find a real, code-verified gap strictly more
+severe than two other candidates it investigated and rejected:
+`MemoryPersistence` (EP-013.2) owned an auto-started background
+auto-save thread, active in every default installation
+(`memory.enabled`/`memory.persistent`/`memory.auto_save` all default
+`true`), with no public method anywhere in this codebase that could
+stop it -- not even a manual CLI escape hatch, unlike Telegram's
+structurally similar gap. STEP 1 investigated and rejected Telegram
+Gateway shutdown coordination (the same candidate EP-063 itself
+already investigated and rejected, for the same two
+independently-reconfirmed reasons: a manual `telegram stop` escape
+hatch already exists, and zero pre-existing test coverage) and REST
+API authentication (real and repeatedly disclosed, but architecturally
+enormous compared to this EP's scope) as this EP's primary candidate.
+Owner Decision D1: `shutdown()` remains internal-only, invoked
+exclusively by `RuntimeService.shutdown()` -- no new CLI/REST/Telegram
+action exists, independently re-verified during STEP 3 at all three
+layers. Owner Decision D2: the new shutdown step is placed fourth of
+five (REST → Scheduler → Workflow Scheduler → Memory Persistence →
+Background Workers) -- independently verified, by a repository-wide
+search, that `memory_service` is never referenced in the
+`workflow_engine`/`plan_execution`/`background_workers`/`tool`
+execution paths, so this ordering groups Memory Persistence with the
+other fast-to-settle internal loops, itself before the Background
+Worker Service's own drain window. Owner Decision D3: `shutdown()` is
+public on `MemoryPersistence`, matching `SchedulerService.shutdown()`'s
+own visibility, enabling isolation testing. Owner Decision D4: the
+join timeout is a fixed, unconfigurable 5.0-second constant, like
+`SchedulerService.shutdown()`'s own precedent, not a new configurable
+key like `WorkflowSchedulerService.shutdown()`'s -- because `save()` is
+a single bounded local file write, not workflow-dependent blocking
+work. Owner Decision D5: `MemoryStatus` is reused with one new field
+(`auto_save_running`) rather than introducing a parallel dataclass.
+Owner Decision D6: `_auto_save_loop()` itself is not refactored. Owner
+Decision D7: `MemoryService.shutdown()` is kept to the smallest
+possible passthrough, despite the file already exceeding the 500-line
+soft guideline. Owner Decision D8: `self._memory_service` is not
+nulled after `Bootstrap.shutdown()`, since `set()`, `get()`, `status()`,
+and manual `save()` all remain correct afterward, and `main.py`'s
+post-shutdown final save depends on it, matching
+`SchedulerService`/`WorkflowSchedulerService`'s own precedent. Built by
+adding one new public method, `MemoryPersistence.shutdown(wait=True,
+timeout=None) -> bool`, structurally mirroring
+`SchedulerService.shutdown()`, plus a thin `MemoryService.shutdown()`
+passthrough -- `MemoryStore`, `MemoryManager`, `MemoryProvider`,
+`MemoryModule`, `SchedulerService`, `WorkflowSchedulerService`,
+`BackgroundWorkerService`/`BackgroundWorkerPool`, `RestApiServer`,
+`TelegramService`, and `TelegramModule` are all confirmed
+byte-identical/unmodified by EP-064 (independently re-verified during
+STEP 3 via `diff`/`git diff` against the pre-EP-064 baseline, not
+merely re-cited from the STEP 2 report). Tests: EP-064 93/0/0 (new
+suite, `tests/EP064/test_memory_persistence_shutdown.py`), covering
+`MemoryPersistence.shutdown()` in isolation (never-started,
+not-persistent, auto-save-disabled, already-running, idempotent,
+concurrent-call race-safety, `wait=False`, manual `save()` still
+working, the fixed 5-second timeout), a genuine, non-mocked
+controlled-blocking scenario, the widened `RuntimeService.status()`/
+`shutdown()` (including ordering via call-order-recording proxies),
+real end-to-end `Bootstrap` wiring (including final-save
+compatibility), and public-surface guards for `MemoryPersistence`/
+`MemoryService`/`MemoryModule`/`RuntimeModule`. Full regression:
+EP-023 330/0/0, EP-025 442/0/0, EP-026 204/0/0, EP-054 76/0/0, EP-059
+93/0/0, EP-060 65/0/0, EP-061 62/0/0, EP-062 39/0/0, EP-063 78/0/0 --
+all independently reproduced at STEP 2 and STEP 3; combined total
+across all ten required suites 1482/0/0. The complete repository suite
+(every registered EP) was also independently run at both STEP 2 and
+STEP 3: 7048/0/3 (3 pre-existing skips, unrelated to EP-064). **STEP 3
+findings (four LOW, two NOTE; owner directed all six left unchanged
+during STEP 4):** (F1, LOW/NOTE) `_auto_save_loop()` lacks the broad
+exception guard `SchedulerService._tick_loop()` has -- pre-existing,
+not introduced by EP-064; (F2, LOW) the lock-during-join test only
+checks lock state after `shutdown()` returns, not during an in-flight
+`join()`; (F3, LOW) no test exercises `wait=False` while `save()` is
+genuinely in progress; (F4, LOW/NOTE) `Bootstrap.shutdown()`'s
+unchanged docstring now says "four" calls when there are five; (F5,
+NOTE) a module docstring header omits EP-063; (F6, NOTE) the STEP 2
+report's test count ("34") was corrected to the actual figure (33
+methods, 93 assertions).
+
+**Next Engineering Package: none yet defined.** EP-064 closed the same
+class of gap EP-061 closed for the Scheduler and EP-063 closed for the
+Workflow Scheduler, this time for Memory's automatic-save loop -- the
+most severe instance of the three, since it is active in every default
+installation and had no manual escape hatch at all. It is not tied to
+any roadmap phase -- Phase 10 remains Jarvis's last currently-named
+phase, completed by EP-059/EP-060. No EP-065 or Phase 11 exists
+anywhere in this repository as of this release.
+
 EP-063 WorkflowSchedulerService Shutdown Coordination — **COMPLETE**
 (STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
 Testing, STEP 3 Architecture Audit, STEP 4 Documentation

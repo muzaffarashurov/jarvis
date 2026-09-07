@@ -56,7 +56,18 @@ class MemoryPersistence:
     Reads only its own settings from Config ('memory.persistent',
     'memory.storage_file', 'memory.auto_save',
     'memory.auto_save_interval') and depends only on MemoryStore.
+
+    EP-064 adds `shutdown()`, a public, idempotent way to stop the
+    auto-save loop, following the SchedulerService.shutdown() pattern
+    (EP-061) using a fixed join timeout rather than a configurable one
+    (EP-064 Owner Decision D4): the auto-save loop's per-iteration
+    work (`save()`) is a single bounded local file write, not
+    workflow-dependent blocking work, so a short, fixed bound is a
+    defensive constant, not a tunable operational setting.
     """
+
+    _DEFAULT_SHUTDOWN_TIMEOUT: float = 5.0
+    """Fixed join timeout for `shutdown()` (EP-064 Owner Decision D4)."""
 
     def __init__(self, config: Config, store: MemoryStore) -> None:
         """Initialize the persistence lifecycle (does not start it).
@@ -159,6 +170,56 @@ class MemoryPersistence:
         """Return whether the background auto-save thread is alive."""
         with self._save_lock:
             return self._save_thread is not None and self._save_thread.is_alive()
+
+    def shutdown(self, wait: bool = True, timeout: float | None = None) -> bool:
+        """Stop the background auto-save loop, if one is running.
+
+        Safe to call regardless of whether the auto-save loop was ever
+        started (e.g. 'memory.auto_save: false', or already stopped) --
+        reports success immediately since there is nothing to stop.
+        Does not affect any entry already written to
+        'memory.storage_file' or the in-memory MemoryStore -- only the
+        periodic background save is stopped; `save()` remains callable
+        manually afterward.
+
+        This is the EP-064 counterpart to `_start_auto_save_loop()`;
+        unlike that method, this one is public, matching
+        `SchedulerService.shutdown()`'s naming/shape (EP-061). It is
+        invoked internally by `RuntimeService.shutdown()` (via
+        `MemoryService.shutdown()`) and is not exposed as a
+        `MemoryModule` CLI/REST action (EP-064 Owner Decision D1).
+
+        Args:
+            wait: If True (default), block until the auto-save thread
+                has exited or `timeout` elapses. If False, signal the
+                stop and return immediately without joining.
+            timeout: Maximum seconds to wait when `wait` is True.
+                Defaults to `_DEFAULT_SHUTDOWN_TIMEOUT` (5.0) when not
+                given explicitly.
+
+        Returns:
+            True if the auto-save loop is confirmed not running after
+            this call (including if it was never running to begin
+            with); False if `wait=True` and the thread did not exit
+            within `timeout`.
+        """
+        with self._save_lock:
+            thread = self._save_thread
+            if thread is None:
+                return True
+            self._stop_event.set()
+
+        if not wait:
+            return not thread.is_alive()
+
+        resolved_timeout = timeout if timeout is not None else self._DEFAULT_SHUTDOWN_TIMEOUT
+        thread.join(timeout=resolved_timeout)
+        stopped = not thread.is_alive()
+        if stopped:
+            with self._save_lock:
+                if self._save_thread is thread:
+                    self._save_thread = None
+        return stopped
 
     def diagnostics(self, enabled: bool) -> PersistenceDiagnostics:
         """Return the persistence-related checks for `memory doctor`.

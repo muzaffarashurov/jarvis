@@ -71,6 +71,10 @@ class MemoryStatus:
         max_entries: Maximum entries allowed ('memory.max_entries').
         default_ttl: Default TTL in seconds, or None for no expiration
             ('memory.default_ttl').
+        auto_save_running: Whether the background auto-save thread is
+            actually alive right now (`MemoryPersistence.is_running()`),
+            distinct from `auto_save` above, which reflects only the
+            configuration flag. Added by EP-064.
     """
 
     total_entries: int
@@ -84,6 +88,7 @@ class MemoryStatus:
     auto_save_interval: float
     max_entries: int
     default_ttl: float | None
+    auto_save_running: bool
 
 
 @dataclass(frozen=True)
@@ -340,6 +345,7 @@ class MemoryService:
             storage_file=str(self._persistence.storage_path()),
             auto_save=self._persistence.is_auto_save(),
             auto_save_interval=self._persistence.auto_save_interval(),
+            auto_save_running=self._persistence.is_running(),
             max_entries=self._max_entries(),
             default_ttl=self._default_ttl(),
         )
@@ -446,6 +452,19 @@ class MemoryService:
 
         success, message = self._persistence.save()
         return CommandResult(success=success, message=message)
+
+    def shutdown(self, wait: bool = True, timeout: float | None = None) -> bool:
+        """Stop the Memory subsystem's background auto-save loop, if running.
+
+        Passthrough to `MemoryPersistence.shutdown()`. Invoked
+        internally by `RuntimeService.shutdown()` -- not exposed as a
+        `MemoryModule` CLI/REST/Telegram action (EP-064 Owner Decision
+        D1). Does not affect the in-memory MemoryStore, the Memory
+        Manager, or any registered provider -- `set`/`get`/`delete`/
+        `clear`/`list_entries`/`export`/`import_`/manual `save()` all
+        remain correct and callable afterward.
+        """
+        return self._persistence.shutdown(wait=wait, timeout=timeout)
 
     # ---------- EP-023: Memory Manager orchestration ----------
 

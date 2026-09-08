@@ -2774,4 +2774,75 @@ EP064 : 93 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-065 — CommandRouter Malformed-Input Dispatch Safety
+
+Status: Released (STEP 3 PASS WITH NON-BLOCKING FINDINGS, NO BLOCKING
+FINDINGS -- two minor findings plus one informational note identified
+during the architecture audit and, on the owner's review, left
+unchanged before release, since none required a change; see "Known
+limitations" below)
+
+A note on scope: like EP-061 through EP-064, this release wasn't named
+by the roadmap or backlog at all -- both said "no next package defined
+yet." Instead, it closes a gap in a much more central part of Jarvis:
+the single place that reads every command you type, whether at the
+console, in a Telegram message, or through the web API. If that text
+contained an accidentally unmatched quotation mark, Jarvis would fail
+in one of two ways depending on where the command came from -- typing
+it at the console crashed the whole program (skipping the normal,
+graceful shutdown steps added in recent releases, including the final
+memory save), and sending it as a Telegram message permanently stopped
+Jarvis from listening to that chat until it was manually restarted.
+The web API was never affected by this.
+
+Highlights:
+
+- A command line with a stray, unmatched quotation mark (for example,
+  typing `system status "oops` and forgetting the closing quote) is
+  now handled the same way any other typing mistake is handled: Jarvis
+  reports that the command's syntax was invalid and keeps running,
+  instead of crashing
+- The console (Interactive Shell) no longer crashes because of this;
+  it prints a clear "invalid command syntax" message and returns to
+  the prompt, exactly as it already does for an unrecognized command
+- Telegram no longer stops listening because of this; it replies with
+  the same "invalid command syntax" message and keeps checking for new
+  messages, exactly as it already does for a failed command
+- The web API was never affected by this issue and behaves exactly as
+  it did before
+- The error message does not repeat back the command you typed --
+  since commands can contain passwords or other sensitive text, only a
+  short, generic reason (such as "no closing quotation") is shown or
+  written to the log, never the original text
+- Purely an internal reliability fix -- nothing new is reachable
+  through the command shell, the web API, or Telegram, and every other
+  command continues to work exactly as before, including commands that
+  use quotation marks correctly
+
+Compatibility:
+
+Fully backward compatible with every prior EP, including EP-059
+through EP-064. No existing service, manager, or CLI command was
+renamed, removed, or had its available actions changed. The console,
+Telegram, the web API, Memory, the Scheduler, the Workflow Scheduler,
+and the background task pool are all unmodified.
+
+No breaking changes.
+
+Known limitations:
+
+- None outstanding. The architecture audit found two smaller notes
+  (about test coverage that could be a little more thorough) and one
+  purely informational observation, none of which affected how Jarvis
+  behaves or how it was tested. The owner reviewed all three and chose
+  to leave them as-is, since none needed a change. See
+  `docs/architecture/audits/EP065_ARCHITECTURE_AUDIT.md` for the
+  details.
+
+Validation:
+
+EP065 : 42 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

@@ -10,15 +10,162 @@ Status: Active
 
 ## Next Engineering Package
 
-**None yet defined.** EP-064 (MemoryPersistence Shutdown Coordination)
-closed a real, code-verified gap that was strictly more severe than
-the sibling gaps EP-061 and EP-063 already fixed -- `MemoryPersistence`
-(EP-013.2) had the same "auto-started background thread, no public
-shutdown" defect, but unlike Scheduler or Workflow Scheduler before
-their own fixes, it is active in every default installation
-(`memory.enabled`/`memory.persistent`/`memory.auto_save` all default
-`true`) and had no manual escape hatch of any kind. No EP-065 or Phase
-11 exists anywhere in this repository as of this release.
+**None yet defined.** EP-065 (CommandRouter Malformed-Input Dispatch
+Safety) closed a real, code-verified gap in a more foundational part
+of Jarvis than any of EP-061 through EP-064's own auto-started-
+background-thread family: `CommandRouter.dispatch()`, the single
+shared dispatch path used by the Interactive Shell, Telegram, and REST
+alike, raised an uncaught `ValueError` for any command text containing
+an unbalanced quote character, crashing the entire Shell process (and
+skipping every prior EP's shutdown-coordination work) or permanently
+killing the Telegram polling thread, depending on which interface
+received it. No EP-066 or Phase 11 exists anywhere in this repository
+as of this release.
+
+### EP-065 — CommandRouter Malformed-Input Dispatch Safety
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), and STEP 4 (Documentation
+Synchronization) all complete. EP-065 is marked **COMPLETE / STEP 3
+PASS WITH NON-BLOCKING FINDINGS, NO BLOCKING FINDINGS** -- STEP 3
+identified two LOW findings and one NOTE, zero MEDIUM, zero blocking;
+the owner reviewed all three and directed STEP 4 to leave each
+unchanged (see below), since none required a design, scope, or
+behavior change -- see
+`docs/architecture/audits/EP065_ARCHITECTURE_AUDIT.md`. Full design,
+including Owner Decisions D1-D10 (and a documented STEP 1
+design-correction pass): `docs/architecture/designs/EP065_DESIGN.md`.
+
+Neither this backlog nor `docs/architecture/JARVIS_ROADMAP.md` named
+an EP-065 scope -- both said "none yet defined," and, like EP-061
+through EP-064 before it, no prior EP's design/audit document named a
+specific "next EP" candidate either. STEP 1 found no textual anchor
+naming a specific EP-065 mechanism, but did find a real, code-verified
+gap: `CommandRouter._tokenize()` (`src/core/command_router.py`)
+delegates to Python's standard-library `shlex`, which raises a plain
+`ValueError("No closing quotation")` for any input containing an
+unbalanced `"` or `'` character, and `dispatch()` -- the method's only
+call site for `_tokenize()` -- did not catch it, despite `dispatch()`
+already converting one other failure class (`module.execute()`
+raising) into a graceful `CommandResult`. Because `CommandRouter` is
+shared by every interface, this produced two independently-
+reproducible, more severe failure modes than any single EP-061 through
+EP-064 background-thread gap: `InteractiveShell.run()` only catches
+`KeyboardInterrupt`/`EOFError`, so a malformed line crashed the whole
+process -- and since `src/main.py` calls `shell.run()` ->
+`bootstrap.shutdown()` -> the final memory save with no surrounding
+`try`/`except`, this also silently skipped every shutdown-coordination
+step EP-059 through EP-064 built, plus the final memory save;
+separately, `TelegramService._poll_loop()` has no guard around
+`_poll_once()` at all, so the identical text sent as a Telegram
+message permanently killed the `"telegram-poll"` daemon thread with no
+auto-restart. STEP 1 independently verified, by direct code reading
+and Python reproduction, that the REST path is structurally immune
+(`ApiRouter.dispatch_command()` re-escapes every token via
+`shlex.quote()` before rejoining). STEP 1 investigated and rejected
+Telegram Gateway shutdown coordination (the same candidate EP-063 and
+EP-064 each already investigated and rejected, for the same two
+independently-reconfirmed reasons: a manual `telegram stop` escape
+hatch already exists, and zero pre-existing test coverage), REST API
+authentication (a real, repeatedly disclosed gap, but architecturally
+enormous compared to this EP's scope), every Architecture Debt item
+(categorically ineligible for a normal EP), and
+`MemoryPersistence._auto_save_loop()`'s own narrower exception guard
+(EP064-F1 -- real, but a single-thread blast radius, smaller than a
+whole-process crash; explicitly deferred, not absorbed into EP-065).
+
+Built by adding exactly one new `try`/`except ValueError` block inside
+`CommandRouter.dispatch()`, wrapping only the pre-existing
+`self._tokenize(raw_input.strip())` call, converting the parser's
+`ValueError` into the existing `CommandResult(success=False, ...)`
+convention with a new, distinct message
+(`f"Invalid command syntax: {exc}"`) and a matching
+`logger.error(...)` call. `_tokenize()` itself is completely
+unchanged (Owner Decision D2). Neither the new message nor the new log
+line includes the raw command text (Owner Decision D4 -- revised
+during a dedicated STEP 1 design-correction pass, since
+`CommandRouter` can receive arbitrary command arguments that may
+contain credentials or other sensitive values) -- only the parser's
+own short, fixed-vocabulary exception reason. No new exception type or
+`CommandResult` field was introduced (Owner Decision D8); no
+Shell/Telegram/REST production file required any change to close this
+specific defect (Owner Decisions D6/D7 -- a narrow claim only, not a
+general exception-safety claim about those files); EP064-F1,
+Architecture Debt AD-001, Telegram's own narrower
+`except TelegramClientError` guards, and REST authentication all
+remain explicitly deferred and untouched (Owner Decision D9). Tests
+live in a new, dedicated, self-contained `tests/EP065/` package (Owner
+Decision D10 -- also revised during the STEP 1 design-correction pass,
+after inspecting `tests/EP061/` through `tests/EP064/` and confirming
+this is the actual, consistently-applied current convention, rather
+than the initially-proposed extension of `tests/EP002/test_shell.py`).
+
+Owner Decisions D1-D10 were all confirmed PASS during STEP 3, checked
+directly against current source and, for the critical exception-
+boundary claim and the raw-input-leakage claim, against genuine,
+freshly-authored executed proof (a module whose `execute()`
+deliberately raises `ValueError`, confirmed to still take the
+pre-existing "Internal error while executing ..." path rather than the
+new branch; a fresh sensitive-marker string, confirmed absent from
+both the returned message and a live `loguru` capture sink) -- not
+merely against the STEP 2 report. Every explicitly-protected file
+(`tests/EP002/test_shell.py`, `src/core/shell.py`,
+`src/services/telegram_service.py`,
+`src/core/telegram/telegram_router.py`,
+`src/core/telegram/telegram_client.py`, `src/modules/telegram_module.py`,
+`src/core/api/api_router.py`, `src/core/api/rest_api_server.py`,
+`src/core/api/dto.py`, `src/core/memory/memory_persistence.py`,
+`src/services/memory_service.py`,
+`src/services/workflow_scheduler_service.py`,
+`src/services/runtime_service.py`, `src/bootstrap.py`, `src/main.py`,
+`config/config.yaml`, `docs/architecture/ARCHITECTURE_DEBT.md`,
+`CHANGELOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/architecture/JARVIS_ROADMAP.md`, and every EP-059 through EP-064
+design/audit document and named regression test file) was
+independently confirmed byte-identical to the pre-EP-065 baseline
+(this repository has no `.git` metadata, so the untouched original
+archive was used for comparison). STEP 3 identified exactly three
+findings, none blocking:
+
+1. **(F1, LOW)** `tests/EP065/` does not itself include a test where
+   `module.execute()` raises `ValueError` specifically (only a generic
+   `Exception` is used) -- independently exercised instead by STEP 3's
+   own script, which passed.
+2. **(F2, LOW)** `tests/EP065/` does not itself re-assert blank-input
+   behavior -- still covered by the untouched `tests/EP002/`, verified
+   at STEP 3.
+3. **(F3, NOTE)** The Telegram survival test relies on real-thread,
+   bounded-deadline polling rather than a fully deterministic
+   synchronization primitive -- inherent to real-thread integration
+   testing, consistent with EP-061/EP-063/EP-064's own style.
+
+The owner reviewed all three and directed STEP 4 to leave each
+unchanged, since none violated `EP065_DESIGN.md` or any approved Owner
+Decision (D1-D10).
+
+Tests: EP-065 42/0/0, covering `CommandRouter.dispatch()`'s
+containment of four distinct malformed-quoting shapes, the new
+message's distinct wording and its absence from logs/results, no
+module-execution for a syntax error, idempotent repeated malformed
+input, regression coverage for well-formed quoting and EP-052's
+Windows-path handling, byte-for-byte regression coverage for both
+pre-existing `dispatch()` failure paths, a real `InteractiveShell`
+survival test, a real `TelegramService` polling-thread survival test,
+and a real `ApiRouter.dispatch_command()` immunity test. Full
+regression: EP-002 21/0/0, EP-043 83/0/0, EP-051 105/0/0, EP-052
+135/0/0, EP-059 93/0/0, EP-060 65/0/0, EP-061 62/0/0, EP-062 39/0/0,
+EP-063 78/0/0, EP-064 93/0/0 -- all independently reproduced exactly
+at STEP 2 and STEP 3 (STEP 4 made no code or test change, so every
+figure is identical across both). Combined total across all eleven
+required suites: 816/0/0. The complete repository suite (every
+registered EP) was also independently run at both STEP 2 and STEP 3:
+6917/3/1 across 51 completed suites, with 2 suites (EP046, EP048)
+unable to execute at all -- all four affected suites (EP046-EP049)
+were independently re-run against the completely untouched pre-EP-065
+baseline archive and produced byte-identical failures/crashes there
+too, conclusively confirming these are pre-existing environment/
+dependency limitations (a missing `vosk` package and a missing
+`sounddevice`/PortAudio runtime), unrelated to EP-065.
 
 ### EP-064 — MemoryPersistence Shutdown Coordination
 

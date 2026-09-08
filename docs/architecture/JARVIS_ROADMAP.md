@@ -122,6 +122,132 @@ Completed sub-packages:
 
 ## Current
 
+EP-065 CommandRouter Malformed-Input Dispatch Safety — **COMPLETE**
+(STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
+Testing, STEP 3 Architecture Audit, STEP 4 Documentation
+Synchronization all complete -- see
+docs/architecture/designs/EP065_DESIGN.md (including its Owner
+Decisions D1-D10 and a documented STEP 1 design-correction pass) and
+docs/architecture/audits/EP065_ARCHITECTURE_AUDIT.md. **Final Verdict:
+STEP 3 — PASS WITH NON-BLOCKING FINDINGS, NO
+BLOCKING FINDINGS** (two LOW findings F1-F2, one NOTE F3, zero MEDIUM,
+zero blocking; owner reviewed all three and directed STEP 4 to leave
+each unchanged -- see below). Not tied to any roadmap phase: neither
+this roadmap nor `docs/BACKLOG.md` named an EP-065 scope, both saying
+"none yet defined," and, like EP-061 through EP-064 before it, no
+prior EP's design/audit document named a specific "next EP" candidate
+either. Unlike EP-061 through EP-064 (each closing an
+auto-started-background-thread/no-public-shutdown gap in one
+subsystem), STEP 1 found a different, more foundational class of
+defect: `CommandRouter.dispatch()` (`src/core/command_router.py`), the
+single dispatch path shared by the Interactive Shell, Telegram, and
+REST alike, raised an uncaught `ValueError` for any command text
+containing an unbalanced quote character -- crashing the entire Shell
+process (and, since `src/main.py` calls `shell.run()` ->
+`bootstrap.shutdown()` -> the final memory save with no surrounding
+`try`/`except`, silently skipping every shutdown-coordination step
+EP-059 through EP-064 built, plus the final memory save) or
+permanently killing the Telegram polling thread, depending on which
+interface received it -- both more severe than any single background-
+thread gap EP-061 through EP-064 closed. STEP 1 independently verified
+the REST path is structurally immune
+(`ApiRouter.dispatch_command()`'s own `shlex.quote()` re-escaping).
+STEP 1 investigated and rejected Telegram Gateway shutdown
+coordination (the same candidate EP-063 and EP-064 each already
+investigated and rejected, for the same two independently-reconfirmed
+reasons: a manual `telegram stop` escape hatch already exists, and
+zero pre-existing test coverage), REST API authentication (real and
+repeatedly disclosed, but architecturally enormous compared to this
+EP's scope), every Architecture Debt item (categorically ineligible
+for a normal EP), and `MemoryPersistence._auto_save_loop()`'s own
+narrower exception guard (EP064-F1 -- real, but a single-thread blast
+radius, smaller than a whole-process crash; explicitly deferred, not
+absorbed) as this EP's primary candidate. Owner Decision D1: the guard
+lives inside `CommandRouter.dispatch()` itself, wrapping only the
+`_tokenize()` call, not duplicated across each transport. Owner
+Decision D2: `_tokenize()` itself is completely unchanged -- confirmed
+by direct diff against the pre-EP-065 baseline. Owner Decision D3: a
+new, distinct message (`"Invalid command syntax: ..."`) is used,
+continuing `dispatch()`'s own existing convention of a different
+message per failure class rather than reusing "Internal error while
+executing ...". Owner Decision D4 (revised during a dedicated STEP 1
+design-correction pass): neither the new message nor the new log line
+includes the raw command text -- only the parser's own short,
+fixed-vocabulary exception reason -- since `CommandRouter` can receive
+arbitrary command arguments that may contain credentials or other
+sensitive values. Owner Decision D5: the new failure is logged via
+`logger.error(...)`, matching the pre-existing, unmodified
+`module.execute()` handler's own severity. Owner Decisions D6/D7: no
+Shell, Telegram, or REST production file required any change to close
+this specific defect -- a narrow claim only, independently
+re-verified at runtime for all three at STEP 3, not a general
+exception-safety claim about those files. Owner Decision D8: no new
+exception type or `CommandResult` field was introduced -- the existing,
+untyped `CommandResult(success=False, message=...)` shape is reused
+exactly. Owner Decision D9: EP064-F1, Architecture Debt AD-001,
+Telegram's own narrower `except TelegramClientError` guards, and REST
+authentication all remain explicitly deferred and untouched. Owner
+Decision D10 (revised during the same STEP 1 design-correction pass):
+tests live in a new, dedicated, self-contained `tests/EP065/` package,
+following the actual, consistently-applied `tests/EP061/` through
+`tests/EP064/` convention, rather than the initially-proposed
+extension of `tests/EP002/test_shell.py`. Built by adding exactly one
+new `try`/`except ValueError` block inside `dispatch()` -- `_tokenize()`,
+`register()`, `register_modules()`, `CommandResult`, `CommandModule`,
+`InteractiveShell`, `TelegramService`, `TelegramRouter`,
+`TelegramClient`, `TelegramModule`, `ApiRouter`, `RestApiServer`,
+`MemoryPersistence`, `MemoryService`, `WorkflowSchedulerService`,
+`RuntimeService`, `Bootstrap`, and `main.py` are all confirmed
+byte-identical/unmodified by EP-065 (independently re-verified during
+STEP 3 via `diff` against the untouched original archive -- this
+repository has no `.git` metadata -- not merely re-cited from the
+STEP 2 report; the critical exception-boundary claim was additionally
+re-verified with a fresh module whose `execute()` deliberately raises
+`ValueError`, confirmed to still take the pre-existing "Internal
+error" path). Tests: EP-065 42/0/0 (new suite,
+`tests/EP065/test_command_router_malformed_input.py`), covering
+`dispatch()`'s containment of four distinct malformed-quoting shapes,
+the new message's distinct wording and its absence from logs/results
+(verified with a live `loguru` capture sink and a sensitive marker
+string), no module-execution for a syntax error, idempotent repeated
+malformed input, regression coverage for well-formed quoting and
+EP-052's Windows-path handling, byte-for-byte regression coverage for
+both pre-existing `dispatch()` failure paths, a real `InteractiveShell`
+survival test (`builtins.input` patched), a real `TelegramService`
+polling-thread survival test (a duck-typed fake `TelegramClient`), and
+a real `ApiRouter.dispatch_command()` immunity test. Full regression:
+EP-002 21/0/0, EP-043 83/0/0, EP-051 105/0/0, EP-052 135/0/0, EP-059
+93/0/0, EP-060 65/0/0, EP-061 62/0/0, EP-062 39/0/0, EP-063 78/0/0,
+EP-064 93/0/0 -- all independently reproduced at STEP 2 and STEP 3;
+combined total across all eleven required suites 816/0/0. The complete
+repository suite (every registered EP) was also independently run at
+both STEP 2 and STEP 3: 6917/3/1 across 51 completed suites, with 2
+suites (EP046, EP048) unable to execute at all -- all four affected
+suites (EP046-EP049) were independently re-run against the completely
+untouched pre-EP-065 baseline archive and produced byte-identical
+failures/crashes there too, conclusively confirming these are
+pre-existing environment/dependency limitations (a missing `vosk`
+package and a missing `sounddevice`/PortAudio runtime), unrelated to
+EP-065. **STEP 3 findings (two LOW, one NOTE; owner directed all
+three left unchanged during STEP 4):** (F1, LOW) `tests/EP065/` does
+not itself include a test where `module.execute()` raises `ValueError`
+specifically -- independently exercised instead by STEP 3's own
+script; (F2, LOW) `tests/EP065/` does not itself re-assert blank-input
+behavior, still covered by the untouched `tests/EP002/`; (F3, NOTE)
+the Telegram survival test relies on real-thread, bounded-deadline
+polling rather than a fully deterministic synchronization primitive --
+inherent to real-thread integration testing, consistent with
+EP-061/EP-063/EP-064's own style.
+
+**Next Engineering Package: none yet defined.** EP-065 closed a more
+foundational defect than EP-061 through EP-064's own
+auto-started-background-thread family: a crash/permanent-thread-death
+reachable from the single dispatch path every command-driven interface
+shares, rather than a gap confined to one optional subsystem. It is
+not tied to any roadmap phase -- Phase 10 remains Jarvis's last
+currently-named phase, completed by EP-059/EP-060. No EP-066 or Phase
+11 exists anywhere in this repository as of this release.
+
 EP-064 MemoryPersistence Shutdown Coordination — **COMPLETE** (STEP 1
 Architecture Discovery & Design, STEP 2 Implementation & Testing, STEP
 3 Architecture Audit, STEP 4 Documentation Synchronization all
@@ -214,15 +340,6 @@ unchanged docstring now says "four" calls when there are five; (F5,
 NOTE) a module docstring header omits EP-063; (F6, NOTE) the STEP 2
 report's test count ("34") was corrected to the actual figure (33
 methods, 93 assertions).
-
-**Next Engineering Package: none yet defined.** EP-064 closed the same
-class of gap EP-061 closed for the Scheduler and EP-063 closed for the
-Workflow Scheduler, this time for Memory's automatic-save loop -- the
-most severe instance of the three, since it is active in every default
-installation and had no manual escape hatch at all. It is not tied to
-any roadmap phase -- Phase 10 remains Jarvis's last currently-named
-phase, completed by EP-059/EP-060. No EP-065 or Phase 11 exists
-anywhere in this repository as of this release.
 
 EP-063 WorkflowSchedulerService Shutdown Coordination — **COMPLETE**
 (STEP 1 Architecture Discovery & Design, STEP 2 Implementation &

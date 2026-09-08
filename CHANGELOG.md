@@ -6,6 +6,255 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.24-ep065
+
+Released: 2026-09-08
+
+Status: EP-065 COMPLETE / STEP 3 PASS WITH NON-BLOCKING FINDINGS, NO
+BLOCKING FINDINGS (STEP 1 Architecture Discovery & Design, STEP 2
+Implementation & Testing, STEP 3 Architecture Audit, STEP 4
+Documentation Synchronization all complete). STEP 3's verdict was
+**PASS WITH NON-BLOCKING FINDINGS** -- two LOW findings (F1, F2) and
+one NOTE (F3), zero MEDIUM, zero blocking. Per explicit instruction,
+STEP 4 did not remediate F1-F3: all three were reviewed and accepted
+as non-blocking test-coverage-completeness observations, none
+requiring a code, test, or design change, so STEP 4 performed
+documentation synchronization only. Final status after STEP 4: four
+release/project documentation files updated, zero production-code,
+test, or configuration change beyond what STEP 2 already implemented.
+
+Neither `docs/BACKLOG.md` nor `docs/architecture/JARVIS_ROADMAP.md`
+named an EP-065 scope -- both said "none yet defined," and, like
+EP-061 through EP-064 before it, no prior EP's design/audit document
+named a specific "next EP" candidate either. Unlike EP-061 through
+EP-064 (each of which closed an auto-started-background-thread/no-
+public-shutdown gap in one subsystem), STEP 1 found a different, more
+foundational class of defect: `CommandRouter.dispatch()`'s call to
+`_tokenize()` (`src/core/command_router.py`) raises an uncaught
+`ValueError` for any command text containing an unbalanced quote
+character, and this is not caught anywhere between `_tokenize()` and
+the interface that called `dispatch()`. Because `CommandRouter` is the
+single shared dispatch path used by the Interactive Shell, Telegram,
+and REST alike, this produced two independently-reproducible failure
+modes, both more severe than any single background-thread gap
+EP-061-EP-064 closed: an ordinary malformed line crashes the entire
+`InteractiveShell` process (and, since `src/main.py` calls
+`shell.run()` -> `bootstrap.shutdown()` -> the final memory save with
+no surrounding `try`/`except`, this also silently skips every
+shutdown-coordination step EP-059 through EP-064 built, plus the
+final memory save), and the identical text sent as a Telegram message
+permanently kills the `"telegram-poll"` daemon thread with no
+auto-restart. STEP 1 independently verified, by direct code reading
+and Python reproduction, that the REST path is structurally immune to
+this specific defect (`ApiRouter.dispatch_command()` re-escapes every
+token via `shlex.quote()` before rejoining). STEP 1 investigated and
+rejected Telegram Gateway shutdown coordination (the same candidate
+EP-063 and EP-064 each already investigated and rejected, for the same
+two independently-reconfirmed reasons: a manual `telegram stop` escape
+hatch already exists, and zero pre-existing test coverage), REST API
+authentication (real and repeatedly disclosed, but architecturally
+enormous compared to this EP's scope), every Architecture Debt item
+(categorically ineligible for a normal EP), and
+`MemoryPersistence._auto_save_loop()`'s own narrower exception guard
+(EP064-F1 -- real, but a single-thread blast radius, smaller than a
+whole-process crash; explicitly deferred, not absorbed into EP-065)
+before selecting `CommandRouter`'s malformed-input dispatch safety as
+this EP's scope.
+
+### Added
+
+- tests/EP065/test_command_router_malformed_input.py: new,
+  self-contained EP-065 test suite (`NAME = "EP065"`), 42 assertions
+  across 17 test methods covering: `_tokenize()` still raises
+  `ValueError` directly (unchanged, D2); `dispatch()`'s containment of
+  four distinct malformed-quoting shapes (trailing unmatched double
+  quote, trailing unmatched single quote, a bare quote character, and
+  multiple non-pairing quotes); the new message's distinct wording and
+  its absence from a live `loguru` capture sink when a sensitive
+  marker string is used as the malformed input (D4); that no
+  registered module's `execute()` is ever invoked for a syntax error;
+  that `should_exit` is `False`; that repeated malformed input is
+  idempotent and leaves the router's registered-module list unchanged;
+  regression coverage for well-formed quoted arguments and EP-052's
+  own Windows-path backslash handling; byte-for-byte regression
+  coverage for the two pre-existing `dispatch()` failure paths
+  ("Unknown module: ...", and "Internal error while executing ...",
+  the latter deliberately re-confirmed to still echo raw input,
+  contrasting with the new branch's no-echo policy); a real
+  `InteractiveShell.run()` survival test (`builtins.input` patched to
+  supply one malformed line followed by a valid exit command); a real
+  `TelegramService` polling-thread survival test (a duck-typed fake
+  `TelegramClient` supplying a malformed message followed by a
+  well-formed one across two poll cycles); and a real
+  `ApiRouter.dispatch_command()` immunity test confirming an
+  adversarial, unbalanced-quote argument value is dispatched without
+  raising and reaches the target module with its exact original text
+  intact
+- docs/architecture/designs/EP065_DESIGN.md: full design document,
+  including Owner Decisions D1-D10 and a documented record of the
+  candidates investigated and rejected during scope discovery
+  (Telegram Gateway shutdown coordination, REST API authentication,
+  every Architecture Debt item, EP064-F1), plus a documented STEP 1
+  design-correction pass (revising the raw-input-echo policy to a
+  no-echo policy, and the test-ownership decision to a dedicated
+  `tests/EP065/` package following the actual EP-061-EP-064
+  convention, rather than the initially-proposed extension of
+  `tests/EP002/test_shell.py`)
+- docs/architecture/audits/EP065_ARCHITECTURE_AUDIT.md: EP-065
+  Architecture Audit, Final Verdict PASS WITH NON-BLOCKING FINDINGS,
+  NO BLOCKING FINDINGS
+
+### Changed
+
+- src/core/command_router.py: `dispatch()`'s body gains one new
+  `try`/`except ValueError` block, wrapping only the pre-existing
+  `self._tokenize(raw_input.strip())` call, converting the parser's
+  `ValueError` into the existing `CommandResult(success=False, ...)`
+  convention with a new, distinct message
+  (`f"Invalid command syntax: {exc}"`) and a new
+  `logger.error(f"Failed to parse command input: {exc}")` call,
+  matching the severity of the pre-existing, unmodified
+  `module.execute()` exception handler three lines below it. Neither
+  the new message nor the new log line includes the raw command text
+  (Owner Decision D4) -- only the parser's own short, fixed-vocabulary
+  exception reason (`"No closing quotation"` for every malformed-
+  quoting variant this EP addresses). `_tokenize()` itself (lines
+  106-129) is completely unchanged, confirmed by direct diff against
+  the pre-EP-065 baseline; `register()`, `register_modules()`,
+  `CommandResult`, `CommandModule`, and the pre-existing
+  `module.execute()` exception handler are likewise byte-identical --
+  independently re-verified at runtime during STEP 3 with a module
+  whose `execute()` deliberately raises `ValueError`, confirming it
+  still takes the pre-existing "Internal error while executing ..."
+  path, not the new branch
+- src/modules/test_module.py: one added import line
+  (`import tests.EP065.test_command_router_malformed_input`)
+- No existing method's signature, return type, or behavior changed
+  for `InteractiveShell`, `TelegramService`, `TelegramRouter`,
+  `TelegramClient`, `TelegramModule`, `ApiRouter`, `RestApiServer`,
+  `MemoryPersistence`, `MemoryService`, `WorkflowSchedulerService`,
+  `RuntimeService`, `Bootstrap`, or `main.py` -- all independently
+  confirmed byte-identical to the pre-EP-065 baseline. No existing
+  `config/config.yaml` key was added, removed, or had its meaning
+  changed. No new dependency was added to `requirements.txt`.
+
+### Security
+
+- Malformed command input (an unbalanced quote character in a shell
+  command or a Telegram message) no longer discloses any part of the
+  original command text: neither the returned `CommandResult.message`
+  nor the new log line includes the raw input, only the parser's own
+  fixed-vocabulary reason. This was a deliberate design decision
+  (Owner Decision D4, itself the result of a dedicated STEP 1
+  design-correction pass) made because `CommandRouter` can receive
+  arbitrary command arguments, which may contain credentials, tokens,
+  or other sensitive values, and a command's failure to tokenize does
+  not make its content any less sensitive
+- No new control surface reachable via CLI, REST, or Telegram: no
+  module gained a new action, and the new exception guard is invoked
+  exclusively inside `CommandRouter.dispatch()`'s own, pre-existing
+  call path
+
+### Validation
+
+```
+EP065 : 42 passed / 0 failed / 0 skipped
+EP002 : 21 passed / 0 failed / 0 skipped
+EP043 : 83 passed / 0 failed / 0 skipped
+EP051 : 105 passed / 0 failed / 0 skipped
+EP052 : 135 passed / 0 failed / 0 skipped
+EP059 : 93 passed / 0 failed / 0 skipped
+EP060 : 65 passed / 0 failed / 0 skipped
+EP061 : 62 passed / 0 failed / 0 skipped
+EP062 : 39 passed / 0 failed / 0 skipped
+EP063 : 78 passed / 0 failed / 0 skipped
+EP064 : 93 passed / 0 failed / 0 skipped
+Combined (all eleven suites, single process) : 816 passed / 0 failed / 0 skipped
+
+Full repository suite (every registered EP, TestRunner-equivalent):
+6917 passed / 3 failed / 1 skipped across 51 completed suites; 2
+suites (EP046, EP048) could not execute at all. All four affected
+suites (EP046-EP049) were independently re-run at both STEP 2 and
+STEP 3 against the completely untouched pre-EP-065 baseline archive
+and produced byte-identical failures/crashes there too -- root cause
+is a missing `vosk` package (speech-to-text) and a missing
+`sounddevice`/PortAudio runtime (streaming audio capture), both
+pre-existing environment/dependency limitations of this sandbox,
+conclusively unrelated to EP-065.
+```
+
+All figures above were independently reproduced from a clean process
+at STEP 2 and STEP 3 -- no figure changed between STEP 3 and STEP 4,
+since STEP 4 made no code or test change. The first eleven suites are
+the ones `EP065_DESIGN.md`'s own Testing Strategy named as required
+(the dedicated suite plus the ten suites this EP's design and prior
+EPs' precedent identified as directly relevant); the full repository
+suite was also run, both at STEP 2 and independently again at STEP 3,
+as an additional, broader confirmation beyond what the design strictly
+required.
+
+### STEP 3 -- Architecture Audit
+
+Verdict: EP-065 STEP 3 -- **PASS WITH NON-BLOCKING FINDINGS**, zero
+blocking findings. All ten Owner Decisions (D1-D10) confirmed PASS
+against direct source inspection and, for the critical exception-
+boundary claim and the raw-input-leakage claim, against genuine,
+freshly-authored executed proof (a module whose `execute()`
+deliberately raises `ValueError`, confirmed to still take the
+pre-existing "Internal error" path; a fresh sensitive-marker string,
+confirmed absent from both the returned message and a live `loguru`
+capture sink) -- not merely against the STEP 2 report. Every
+explicitly-protected file (`tests/EP002/test_shell.py`,
+`src/core/shell.py`, `src/services/telegram_service.py`,
+`src/core/telegram/telegram_router.py`,
+`src/core/telegram/telegram_client.py`, `src/modules/telegram_module.py`,
+`src/core/api/api_router.py`, `src/core/api/rest_api_server.py`,
+`src/core/api/dto.py`, `src/core/memory/memory_persistence.py`,
+`src/services/memory_service.py`,
+`src/services/workflow_scheduler_service.py`,
+`src/services/runtime_service.py`, `src/bootstrap.py`, `src/main.py`,
+`config/config.yaml`, `ARCHITECTURE_DEBT.md`, every EP-059 through
+EP-064 design/audit document, and the ten named regression test files)
+was independently confirmed byte-identical to the pre-EP-065 baseline
+via `diff` against the original untouched archive (this repository has
+no `.git` metadata). Three findings were identified, zero blocking:
+
+1. **(F1, LOW)** `tests/EP065/` does not itself include a test where
+   `module.execute()` raises `ValueError` specifically (only a generic
+   `Exception`, via `_RaisingModule`) -- the single scenario most
+   likely to reveal an accidental overlap between the two `try`/
+   `except` blocks if a future refactor merged them. Independently
+   exercised by STEP 3's own script instead, which passed.
+2. **(F2, LOW)** `tests/EP065/` does not itself re-assert blank-input
+   (`""`, `"   "`) behavior; this remains covered only by the
+   untouched `tests/EP002/test_shell.py`, independently re-run at
+   STEP 3 with 21/21 passing.
+3. **(F3, NOTE)** The Telegram survival test (both STEP 2's and
+   STEP 3's own independent version) relies on real-thread polling
+   with a bounded wall-clock deadline rather than a fully deterministic
+   synchronization primitive -- inherent to real-thread integration
+   testing, consistent with EP-061/EP-063/EP-064's own established
+   style, not a defect.
+
+The owner reviewed all three and directed STEP 4 to leave each
+unchanged, since none violated `EP065_DESIGN.md` or any approved Owner
+Decision (D1-D10) and none required a design, scope, or behavior
+change. Final status after STEP 4: zero code/test/config change. See
+`docs/architecture/audits/EP065_ARCHITECTURE_AUDIT.md` for the full
+audit.
+
+### STEP 4 -- Documentation Synchronization
+
+No STEP 3 finding was remediated (owner directed all three left
+unchanged, per above). Release/project documentation (`CHANGELOG.md`,
+`docs/BACKLOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/architecture/JARVIS_ROADMAP.md`) synchronized to mark EP-065
+COMPLETE / STEP 3 PASS WITH NON-BLOCKING FINDINGS, NO BLOCKING
+FINDINGS. No further Engineering Package is yet named anywhere in this
+repository.
+
+---
+
 ## v0.1.23-ep064
 
 Released: 2026-09-07

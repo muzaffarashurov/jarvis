@@ -140,9 +140,20 @@ class CommandRouter:
 
         Returns:
             A CommandResult describing the outcome of execution. Returns
-            an empty, unsuccessful result for blank input.
+            an empty, unsuccessful result for blank input. Malformed
+            quoting (e.g. an unbalanced quote character) is likewise
+            returned as an unsuccessful CommandResult rather than
+            raising -- see the `except ValueError` block below.
         """
-        tokens = self._tokenize(raw_input.strip())
+        try:
+            tokens = self._tokenize(raw_input.strip())
+        except ValueError as exc:  # noqa: BLE001 - malformed input must never crash a caller
+            logger.error(f"Failed to parse command input: {exc}")
+            return CommandResult(
+                success=False,
+                message=f"Invalid command syntax: {exc}",
+            )
+
         if not tokens:
             return CommandResult(success=False, message="")
 

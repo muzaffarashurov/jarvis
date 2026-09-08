@@ -2845,4 +2845,70 @@ EP065 : 42 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-066 — MemoryPersistence Auto-Save Loop Exception Containment
+
+Status: Released (STEP 3 PASS WITH NON-BLOCKING FINDINGS, NO BLOCKING
+FINDINGS -- three minor findings plus one informational note
+identified during the architecture audit and, on the owner's review,
+left unchanged before release, since none required a change; see
+"Known limitations" below)
+
+A note on scope: like EP-061 through EP-065, this release wasn't named
+by the roadmap or backlog at all -- both said "no next package defined
+yet." Instead, it closes a gap that was already known about and
+deliberately set aside during last release's work: the background task
+that periodically saves your memory data to disk had no protection
+against an unexpected failure while saving. If a save ever hit a
+problem that wasn't an ordinary disk error (for example, trying to
+save a value that can't be written as normal text), the background
+saving would silently stop for good, with nothing in the logs to
+explain why -- and it would never resume on its own.
+
+Highlights:
+
+- Memory auto-save is now resilient to an unexpected failure during a
+  single save: if one save attempt runs into a problem, Jarvis logs
+  it and simply tries again at the next scheduled interval, instead of
+  quietly and permanently giving up
+- This matches how Jarvis's other background tasks (the Scheduler and
+  the Workflow Scheduler) already behave -- a single bad tick doesn't
+  stop the whole thing
+- Ordinary disk-related save problems (for example, a full disk or a
+  permissions issue) are handled exactly as before -- this release
+  only adds a safety net for the kind of failure that wasn't already
+  covered
+- Manually stopping auto-save, and Jarvis's normal shutdown process,
+  both continue to work exactly as before, even after the loop has
+  already recovered from a failure
+- Purely an internal reliability fix -- nothing new is reachable
+  through the command shell, the web API, or Telegram, and no new
+  settings were added
+
+Compatibility:
+
+Fully backward compatible with every prior EP, including EP-059
+through EP-065. No existing service, manager, or CLI command was
+renamed, removed, or had its available actions changed. The console,
+Telegram, the web API, Memory's own read/write behavior, the
+Scheduler, the Workflow Scheduler, and the background task pool are
+all unmodified.
+
+No breaking changes.
+
+Known limitations:
+
+- None outstanding. The architecture audit found three smaller notes
+  (about test coverage that could be a little more thorough) and one
+  purely informational observation, none of which affected how Jarvis
+  behaves or how it was tested. The owner reviewed all four and chose
+  to leave them as-is, since none needed a change. See
+  `docs/architecture/audits/EP066_ARCHITECTURE_AUDIT.md` for the
+  details.
+
+Validation:
+
+EP066 : 23 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

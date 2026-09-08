@@ -252,10 +252,22 @@ class MemoryPersistence:
         logger.info("Memory auto-save started.")
 
     def _auto_save_loop(self) -> None:
-        """Repeatedly call `save()` every 'memory.auto_save_interval' seconds."""
+        """Repeatedly call `save()` every 'memory.auto_save_interval' seconds.
+
+        Mirrors SchedulerService._tick_loop() / WorkflowSchedulerService
+        ._tick_loop() (EP-061/EP-063): any exception raised by save()
+        itself -- as opposed to save()'s own internal (False, message)
+        OSError contract, handled below exactly as before -- is caught,
+        logged, and the loop continues rather than the thread dying
+        silently (EP-066).
+        """
         interval = self.auto_save_interval()
         while not self._stop_event.wait(interval):
-            success, message = self.save()
+            try:
+                success, message = self.save()
+            except Exception as exc:  # noqa: BLE001 - the auto-save loop must never die silently
+                logger.error(f"Memory auto-save loop encountered an unexpected error: {exc}")
+                continue
             if not success:
                 logger.error(f"Memory auto-save failed: {message}")
         logger.info("Memory auto-save stopped.")

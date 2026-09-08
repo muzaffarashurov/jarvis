@@ -122,6 +122,124 @@ Completed sub-packages:
 
 ## Current
 
+EP-066 MemoryPersistence Auto-Save Loop Exception Containment —
+**COMPLETE** (STEP 1 Architecture Discovery & Design, STEP 2
+Implementation & Testing, STEP 3 Architecture Audit, STEP 4
+Documentation Synchronization all complete -- see
+docs/architecture/designs/EP066_DESIGN.md (including its Owner
+Decisions D1-D10) and
+docs/architecture/audits/EP066_ARCHITECTURE_AUDIT.md. **Final Verdict:
+STEP 3 — PASS WITH NON-BLOCKING FINDINGS, NO
+BLOCKING FINDINGS** (three LOW findings L1-L3, one NOTE N1, zero
+MEDIUM, zero blocking; owner reviewed all four and directed STEP 4 to
+leave each unchanged -- see below). Not tied to any roadmap phase:
+neither this roadmap nor `docs/BACKLOG.md` named an EP-066 scope, both
+saying "none yet defined," and, like EP-061 through EP-065 before it,
+no prior EP's design/audit document named a specific "next EP"
+candidate either. Instead, STEP 1 promoted a finding both EP-064 and
+EP-065 had already identified and explicitly left alone (EP064-F1,
+re-confirmed untouched by EP-065 Owner Decision D9):
+`MemoryPersistence._auto_save_loop()`
+(`src/core/memory/memory_persistence.py`), the only background tick
+loop in this codebase without a broad exception guard around its
+per-iteration call, unlike `SchedulerService._tick_loop()` (EP-061)
+and `WorkflowSchedulerService._tick_loop()` (EP-063), both explicitly
+commented "the tick loop must never die silently." `save()`'s own
+`except OSError` did not cover every possible failure -- e.g. a
+`TypeError` from `json.dump()` when a stored `MemoryEntry` holds a
+non-JSON-serializable value, independently reproduced and confirmed
+reachable at STEP 2 and STEP 3 -- so any such exception propagated out
+of `_auto_save_loop()` uncaught, permanently and silently killing the
+`"memory-auto-save"` daemon thread with no log line even recording the
+death. STEP 1 investigated and rejected `GitService.show(ref)`'s
+missing `--` argument separator and the
+`workflow_scheduler.tick_interval` validation gap (both recorded, open
+Architecture Debt items, categorically ineligible for a normal EP
+regardless of merit), Telegram Gateway shutdown coordination (the same
+candidate EP-063, EP-064, and EP-065 each already investigated and
+rejected, for the same two independently-reconfirmed reasons: a manual
+`telegram stop` escape hatch already exists, and zero pre-existing
+test coverage), REST API authentication (real and repeatedly
+disclosed, but architecturally enormous compared to this EP's scope),
+the `PluginLoader` metadata-only-plugin status-bookkeeping TODO (real,
+but requires a multi-service constructor-injection change), and cron
+schedule support (a net-new feature, not a bounded architecture fix)
+as this EP's primary candidate. Owner Decision D1: the guard lives
+inside `_auto_save_loop()` itself, wrapping only the `self.save()`
+call. Owner Decision D2: `save()` itself is completely unchanged --
+confirmed by direct diff against the pre-EP-066 baseline. Owner
+Decision D3: `except Exception` (broad), matching both sibling loops
+verbatim, not a narrower type. Owner Decision D4: a new, distinct
+message (`"Memory auto-save loop encountered an unexpected error:
+..."`) containing only `str(exc)`, no `MemoryEntry` value. Owner
+Decision D5: the loop `continue`s to the next scheduled interval
+rather than restarting or backing off, matching both siblings exactly.
+Owner Decision D6: `shutdown()` is completely untouched and unaffected
+by the new guard. Owner Decision D7: no new public method, CLI/REST
+action, or `PersistenceDiagnostics`/`MemoryStatus` field was
+introduced. Owner Decision D8: exactly two production files were
+authorized to change -- `src/core/memory/memory_persistence.py` and
+`src/modules/test_module.py`. Owner Decision D9: tests live in a new,
+dedicated, self-contained `tests/EP066/` package, following the actual
+`tests/EP061/` through `tests/EP065/` convention. Owner Decision D10:
+every Architecture Debt item, Telegram Gateway shutdown, REST API
+authentication, the PluginLoader status-sync TODO, and cron support
+all remain explicitly deferred and untouched. Built by adding exactly
+one new `try`/`except Exception` block inside `_auto_save_loop()` --
+`save()`, `load()`, `shutdown()`, `_start_auto_save_loop()`,
+`is_running()`, `diagnostics()`, `MemoryService`, `MemoryModule`,
+`SchedulerService`, `WorkflowSchedulerService`, `TelegramService`,
+`TelegramRouter`, `TelegramClient`, `TelegramModule`, `ApiRouter`,
+`RestApiServer`, `CommandRouter`, `InteractiveShell`, `RuntimeService`,
+`RuntimeModule`, `Bootstrap`, and `main.py` are all confirmed
+byte-identical/unmodified by EP-066 (independently re-verified during
+STEP 3 via `diff` against the untouched original archive -- this
+repository has no `.git` metadata -- not merely re-cited from the STEP
+2 report; the critical exception-boundary claim and the full
+failure/recovery/shutdown chain were additionally re-verified with
+five fresh, independently-authored runtime probes, including a real
+inter-call timing measurement confirming no busy-loop after repeated
+failures). Tests: EP-066 23/0/0 (new suite,
+`tests/EP066/test_memory_persistence_auto_save_resilience.py`),
+covering normal auto-save, unexpected-exception containment,
+recovery-and-later-success, unchanged `OSError` handling (verified via
+a real `IsADirectoryError`), shutdown-after-survived-exception,
+`ERROR`-level logging (verified with a live `loguru` capture sink), a
+genuinely reachable non-serializable-value scenario with no leakage,
+and repeated-failure survival. Full regression: EP-061 62/0/0, EP-062
+39/0/0, EP-063 78/0/0, EP-064 93/0/0, EP-065 42/0/0 -- all
+independently reproduced at STEP 2 and STEP 3; combined total across
+all six required suites 337/0/0. The complete repository suite (every
+registered EP) was also independently run at both STEP 2 and STEP 3:
+6940/3/1 across 52 completed suites, with 2 suites (EP046, EP048)
+unable to execute at all -- all four affected suites (EP046-EP049)
+were independently re-run against the completely untouched
+pre-EP-066 baseline archive and produced 6917/3/1 with the identical
+failing/crashed suite set (the +23 difference is exactly the size of
+the new EP-066 suite), conclusively confirming these are pre-existing
+environment/dependency limitations (a missing `vosk` package and a
+missing `sounddevice`/PortAudio runtime), unrelated to EP-066. **STEP
+3 findings (three LOW, one NOTE; owner directed all four left
+unchanged during STEP 4):** (N1, NOTE) the "no memory value in logs"
+guarantee depends on `str(exc)` not embedding the value for exception
+types reachable today, not on structural redaction -- the same
+trade-off already accepted for both sibling loops; (L1, LOW) the
+checked-in repeated-failure test does not itself measure inter-call
+timing, independently closed for this review by STEP 3's own
+measurement; (L2, LOW) one test uses a fixed `time.sleep(0.1)` rather
+than an adaptive bounded wait, consistent with an existing
+`tests/EP064/` pattern; (L3, LOW) no test drives `shutdown()` from a
+genuinely concurrent second thread while `save()` is actively raising,
+though the underlying synchronization primitives are unchanged EP-064
+code already covered by `tests/EP064/`'s own tests.
+
+**Next Engineering Package: none yet defined.** EP-066 closed a
+previously-deferred finding (EP064-F1) rather than a defect discovered
+fresh during this EP's own STEP 1. It is not tied to any roadmap phase
+-- Phase 10 remains Jarvis's last currently-named phase, completed by
+EP-059/EP-060. No EP-067 or Phase 11 exists anywhere in this
+repository as of this release.
+
 EP-065 CommandRouter Malformed-Input Dispatch Safety — **COMPLETE**
 (STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
 Testing, STEP 3 Architecture Audit, STEP 4 Documentation

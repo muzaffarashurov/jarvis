@@ -6,6 +6,241 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.26-ep067
+
+Released: 2026-09-08
+
+Status: EP-067 COMPLETE / STEP 3 PASS WITH NON-BLOCKING FINDINGS, NO
+BLOCKING FINDINGS (STEP 1 Architecture Discovery & Design, STEP 2
+Implementation & Testing, STEP 3 Architecture Audit, STEP 4
+Documentation Synchronization all complete). STEP 3's verdict was
+**PASS WITH NON-BLOCKING FINDINGS** -- two LOW findings (L1-L2) and one
+NOTE (N1), zero MEDIUM, zero blocking. Per explicit instruction, STEP 4
+did not remediate N1/L1-L2: all three were reviewed and accepted as
+non-blocking test-quality/style and documentation-wording observations,
+none requiring a code, test, or design change, so STEP 4 performed
+documentation synchronization only. Final status after STEP 4: four
+release/project documentation files updated, zero production-code,
+test, or configuration change beyond what STEP 2 already implemented.
+
+Neither `docs/BACKLOG.md` nor `docs/architecture/JARVIS_ROADMAP.md`
+named an EP-067 scope -- both said "none yet defined," and, like
+EP-061 through EP-066 before it, no prior EP's design/audit document
+named a specific "next EP" candidate either. STEP 1 found
+`TelegramService._poll_loop()` (`src/services/telegram_service.py`) to
+be the last remaining background loop in this codebase without a broad
+exception guard around its per-iteration call, unlike
+`SchedulerService._tick_loop()` (EP-061),
+`WorkflowSchedulerService._tick_loop()` (EP-063), and
+`MemoryPersistence._auto_save_loop()` (EP-066), all three explicitly
+commented "the ... loop must never die silently." `_poll_once()`'s own
+`except TelegramClientError` guard did not cover every possible
+failure -- any other exception (for example, an unwrapped
+`asyncio`/event-loop error from `TelegramClient._run()`) propagated
+straight out of `_poll_loop()` uncaught, permanently and silently
+killing the `"telegram-poll"` daemon thread with no log evidence at
+all. This was directly anticipated by EP-065 Owner Decision D7, which
+explicitly declined to harden `TelegramService` beyond the one, narrow,
+already-demonstrated `ValueError` source it closed at `CommandRouter`,
+stating plainly that it made "no general exception-safety claim" about
+`TelegramService` itself. STEP 1 also investigated and rejected:
+`GitService.show(ref)`'s missing `--` argument separator and the
+`workflow_scheduler.tick_interval` validation gap (both recorded, open
+Architecture Debt items, categorically ineligible for a normal EP
+regardless of individual merit); Telegram Gateway shutdown
+coordination (the same candidate independently investigated and
+rejected by EP-063, EP-064, and EP-065 in turn, distinct from this
+EP's own exception-containment fix -- shutdown coordination concerns
+deliberate, process-level stop orchestration, not an accidental death
+from an uncaught exception mid-loop); REST API authentication (real
+and repeatedly disclosed, but architecturally enormous compared to
+this EP's scope); the `PluginLoader` metadata-only-plugin
+status-bookkeeping TODO (real, but requires a multi-service
+constructor-injection change, larger than a single bounded EP); and
+cron schedule support (a net-new feature -- writing or vendoring a
+cron expression parser -- not a bounded architecture fix).
+
+### Added
+
+- tests/EP067/test_telegram_poll_loop_resilience.py: new,
+  self-contained EP-067 test suite (`NAME = "EP067"`), 10 test methods
+  covering: normal polling still occurring; an unexpected exception
+  from `fetch_updates()` not escaping the `"telegram-poll"` daemon
+  thread; an unexpected exception from the routing path (via a
+  duck-typed router) likewise not escaping the thread, proving
+  containment is not limited to the client boundary; the loop
+  recovering and performing a later, genuinely successful poll cycle
+  (fetch, route, dispatch, and send) after one failure; several
+  consecutive unexpected failures not terminating the thread; the new
+  failure being logged at `ERROR` severity via a real `loguru` capture
+  sink with the exact approved message; a distinctive marker present
+  in a routed message's text never leaking into the new log line; the
+  pre-existing `TelegramClientError` handling inside `_poll_once()`
+  remaining unchanged and not double-firing against the new handler;
+  `stop()` still terminating cleanly and promptly after a survived
+  exception; and inter-attempt poll timing remaining consistent with
+  the configured interval after a failure (no busy loop)
+- docs/architecture/designs/EP067_DESIGN.md: full design document,
+  including Owner Decisions D1-D10 and a documented record of the
+  candidates investigated and rejected during scope discovery (two
+  Architecture Debt items, Telegram Gateway shutdown coordination, REST
+  API authentication, the PluginLoader status-sync TODO, cron schedule
+  support)
+- docs/architecture/audits/EP067_ARCHITECTURE_AUDIT.md: EP-067
+  Architecture Audit, Final Verdict PASS WITH NON-BLOCKING FINDINGS, NO
+  BLOCKING FINDINGS
+
+### Changed
+
+- src/services/telegram_service.py: `_poll_loop()`'s body gains one
+  new `try`/`except Exception` block, wrapping only the pre-existing
+  `self._poll_once()` call, logging a new, distinct message
+  (`f"Telegram poll loop encountered an unexpected error: {exc}"`) at
+  `ERROR` severity and continuing to the next scheduled interval,
+  rather than letting the exception propagate and kill the thread. The
+  structure, exception type (`except Exception`), and `noqa: BLE001`
+  comment convention mirror `SchedulerService._tick_loop()` (EP-061),
+  `WorkflowSchedulerService._tick_loop()` (EP-063), and
+  `MemoryPersistence._auto_save_loop()` (EP-066) verbatim; no explicit
+  `continue` is needed, unlike `MemoryPersistence`, since the guarded
+  call is the loop body's only statement. `_poll_once()` itself is
+  completely unchanged, confirmed by direct diff against the
+  pre-EP-067 baseline; `start()`, `stop()`, `status()`, `doctor()`, and
+  `send_message()` are likewise byte-identical
+- src/modules/test_module.py: one added import line
+  (`import tests.EP067.test_telegram_poll_loop_resilience`)
+- No existing method's signature, return type, or behavior changed for
+  `TelegramClient`, `TelegramRouter`, `TelegramModule`,
+  `CommandRouter`, `SchedulerService`, `WorkflowSchedulerService`,
+  `MemoryPersistence`, `MemoryService`, `MemoryModule`, `ApiRouter`,
+  `RestApiServer`, `InteractiveShell`, `RuntimeService`,
+  `RuntimeModule`, `Bootstrap`, or `main.py` -- all independently
+  confirmed byte-identical to the pre-EP-067 baseline. No existing
+  `config/config.yaml` key was added, removed, or had its meaning
+  changed; no new key was added either. No new dependency was added to
+  `requirements.txt`.
+
+### Security
+
+- No new control surface reachable via CLI, REST, or Telegram:
+  `TelegramModule`'s actions are unchanged, and the new exception guard
+  is invoked exclusively inside `TelegramService._poll_loop()`'s own,
+  pre-existing internal call path
+- The new log message includes only `str(exc)`, matching all three
+  sibling loops' own `logger.error(f"...: {exc}")` convention; no raw
+  Telegram update/message content, chat id, username, or token is
+  deliberately embedded in the message. Independently confirmed at
+  STEP 3 with a dedicated marker-based probe: a distinctive marker
+  string present in a routed message's text, raised from within a
+  duck-typed router rather than `str(exc)`, was absent from every
+  captured log line. STEP 3 Finding N1 (in the audit brief's own
+  cross-reference; see below) records only a documentation
+  path-wording discrepancy, unrelated to this guarantee
+
+### Validation
+
+```
+EP067 : 33 passed / 0 failed / 0 skipped
+EP061 : 62 passed / 0 failed / 0 skipped
+EP062 : 39 passed / 0 failed / 0 skipped
+EP063 : 78 passed / 0 failed / 0 skipped
+EP064 : 93 passed / 0 failed / 0 skipped
+EP065 : 42 passed / 0 failed / 0 skipped
+EP066 : 23 passed / 0 failed / 0 skipped
+Combined (all seven required suites, single process) : 370 passed / 0 failed / 0 skipped
+
+Full repository suite (every registered EP, TestRunner-equivalent):
+6973 passed / 3 failed / 1 skipped across 53 completed suites; 2
+suites (EP046, EP048) could not execute at all. All four affected
+suites (EP046-EP049) were independently re-run at both STEP 2 and
+STEP 3 against the completely untouched pre-EP-067 baseline archive
+and produced byte-identical failures/crashes there too (6940/3/1,
+identical failing/crashed suite set; the +33 difference is exactly the
+size of the new EP-067 suite) -- root cause is a missing
+`sounddevice`/PortAudio runtime (streaming/blocking audio capture) and
+a missing `openwakeword` distribution for this Python/platform, both
+pre-existing environment/dependency limitations of this sandbox,
+conclusively unrelated to EP-067.
+```
+
+All figures above were independently reproduced from a clean process
+at STEP 2 and STEP 3 -- no figure changed between STEP 3 and STEP 4,
+since STEP 4 made no code or test change. The dedicated suite plus the
+six directly-relevant regression suites this EP's design named as
+required were run at both STEP 2 and STEP 3; the full repository suite
+was also run at both steps as an additional, broader confirmation
+beyond what the design strictly required.
+
+### STEP 3 -- Architecture Audit
+
+Verdict: EP-067 STEP 3 -- **PASS WITH NON-BLOCKING FINDINGS**, zero
+blocking findings. All ten Owner Decisions (D1-D10) confirmed PASS
+against direct source inspection and, for the critical
+exception-boundary claim and the failure/recovery/shutdown chain,
+against five genuine, freshly-authored executed probes (a
+`KeyError`-based single-failure check confirming thread survival,
+`ERROR`-level logging, and a subsequent iteration; a `RuntimeError`
+recovery check confirming a later poll actually fetched, routed, and
+sent a reply; a `ValueError`-based repeated-failure check measuring
+real inter-call timing to rule out a busy loop; an `OSError`-based
+shutdown-after-survived-exception check confirming a prompt, clean
+`stop()`; and a `TelegramClientError` check confirming the pre-existing
+narrower guard still fires and the new, broader guard correctly does
+not double-fire for the same event) -- not merely against the STEP 2
+report. Every explicitly-protected file (`tests/EP061/` through
+`tests/EP066/`, `src/services/scheduler_service.py`,
+`src/services/workflow_scheduler_service.py`,
+`src/core/memory/memory_persistence.py`,
+`src/core/telegram/telegram_client.py`,
+`src/core/telegram/telegram_router.py`, `src/modules/telegram_module.py`,
+`src/core/api/api_router.py`, `src/core/api/rest_api_server.py`,
+`src/core/api/dto.py`, `src/core/command_router.py`, `src/core/shell.py`,
+`src/services/memory_service.py`, `src/modules/memory_module.py`,
+`src/services/runtime_service.py`, `src/modules/runtime_module.py`,
+`src/bootstrap.py`, `src/main.py`, `config/config.yaml`,
+`docs/architecture/ARCHITECTURE_DEBT.md`, and every prior EP
+design/audit document) was independently confirmed byte-identical to
+the pre-EP-067 baseline via `diff` against the original untouched
+archive (this repository has no `.git` metadata). Three findings were
+identified, zero blocking:
+
+1. **(N1, NOTE)** The STEP 3 audit brief itself named the Telegram
+   client/router protected paths as `src/services/telegram_client.py`
+   and `src/services/telegram_router.py`; the actual files live at
+   `src/core/telegram/telegram_client.py` and
+   `src/core/telegram/telegram_router.py` (matching the design
+   document's own, correct paths throughout). Both were located and
+   confirmed unchanged at their real paths -- a documentation/brief
+   wording discrepancy only, no code or process defect.
+2. **(L1, LOW)** `tests/EP067/test_telegram_poll_loop_resilience.py`
+   imports `threading` at module level but never references it -- a
+   dead import with no functional effect.
+3. **(L2, LOW)** Several tests call the private
+   `service._is_poll_loop_running()` directly rather than the
+   equivalent, already-public `service.status().running`, a minor
+   style deviation from `tests/EP066/`'s own equivalent suite, which
+   consistently used `MemoryPersistence`'s public `is_running()`. The
+   private and public accessors are provably equivalent today.
+
+The owner reviewed all three and directed STEP 4 to leave each
+unchanged, since none violated `EP067_DESIGN.md` or any approved Owner
+Decision (D1-D10) and none required a design, scope, or behavior
+change. Final status after STEP 4: zero code/test/config change. See
+`docs/architecture/audits/EP067_ARCHITECTURE_AUDIT.md` for the full
+audit.
+
+### STEP 4 -- Documentation Synchronization
+
+No STEP 3 finding was remediated (owner directed all three left
+unchanged, per above). Release/project documentation (`CHANGELOG.md`,
+`docs/BACKLOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/architecture/JARVIS_ROADMAP.md`) synchronized to mark EP-067
+COMPLETE / STEP 3 PASS WITH NON-BLOCKING FINDINGS, NO BLOCKING
+FINDINGS. No further Engineering Package is yet named anywhere in this
+repository.
+
+---
+
 ## v0.1.25-ep066
 
 Released: 2026-09-08

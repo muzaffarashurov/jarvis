@@ -65,6 +65,7 @@ import tests.EP063.test_workflow_scheduler_shutdown
 import tests.EP064.test_memory_persistence_shutdown
 import tests.EP065.test_command_router_malformed_input
 import tests.EP066.test_memory_persistence_auto_save_resilience
+import tests.EP067.test_telegram_poll_loop_resilience
 
 class TestModule(CommandModule):
 

@@ -221,10 +221,22 @@ class TelegramService:
         return CommandResult(success=False, message="Telegram disabled.")
 
     def _poll_loop(self) -> None:
-        """Repeatedly poll for and route messages every 'telegram.polling_interval' seconds."""
+        """Repeatedly poll for and route messages every 'telegram.polling_interval' seconds.
+
+        Mirrors SchedulerService._tick_loop() / WorkflowSchedulerService
+        ._tick_loop() / MemoryPersistence._auto_save_loop() (EP-061/
+        EP-063/EP-066): any exception raised while executing
+        _poll_once() -- beyond the narrower TelegramClientError cases
+        _poll_once() already converts into a logged, swallowed failure --
+        is caught, logged, and the loop continues rather than the
+        "telegram-poll" thread dying silently (EP-067).
+        """
         interval = float(self._config.get("telegram.polling_interval", 2))
         while not self._stop_event.wait(interval):
-            self._poll_once()
+            try:
+                self._poll_once()
+            except Exception as exc:  # noqa: BLE001 - the poll loop must never die silently
+                logger.error(f"Telegram poll loop encountered an unexpected error: {exc}")
         logger.info("Telegram polling stopped.")
 
     def _poll_once(self) -> None:

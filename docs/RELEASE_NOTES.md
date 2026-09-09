@@ -2911,4 +2911,69 @@ EP066 : 23 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-067 — TelegramService Poll Loop Exception Containment
+
+Status: Released (STEP 3 PASS WITH NON-BLOCKING FINDINGS, NO BLOCKING
+FINDINGS -- two minor findings plus one informational note identified
+during the architecture audit and, on the owner's review, left
+unchanged before release, since none required a change; see "Known
+limitations" below)
+
+A note on scope: like EP-061 through EP-066, this release wasn't named
+by the roadmap or backlog at all -- both said "no next package defined
+yet." Instead, it closes the last remaining gap of its kind: the
+background task that listens for your Telegram messages had no
+protection against an unexpected failure while checking for new
+messages. If that check ever hit a problem that wasn't an ordinary,
+already-anticipated connection issue, listening would silently stop
+for good, with nothing in the logs to explain why -- and it would
+never resume on its own until Jarvis was restarted.
+
+Highlights:
+
+- Telegram message polling is now resilient to an unexpected failure
+  during a single check: if one polling attempt runs into a problem,
+  Jarvis logs it and simply tries again at the next scheduled
+  interval, instead of quietly and permanently giving up
+- This matches how Jarvis's other background tasks (the Scheduler, the
+  Workflow Scheduler, and Memory auto-save) already behave -- a single
+  bad attempt doesn't stop the whole thing
+- Already-anticipated Telegram connection problems (for example, a
+  temporary network hiccup or an invalid bot token) are handled
+  exactly as before -- this release only adds a safety net for the
+  kind of failure that wasn't already covered
+- Manually stopping Telegram, and Jarvis's normal shutdown process,
+  both continue to work exactly as before, even after polling has
+  already recovered from a failure
+- Purely an internal reliability fix -- nothing new is reachable
+  through the command shell, the web API, or Telegram, and no new
+  settings were added
+
+Compatibility:
+
+Fully backward compatible with every prior EP, including EP-059
+through EP-066. No existing service, manager, or CLI command was
+renamed, removed, or had its available actions changed. The console,
+the web API, Memory, the Scheduler, the Workflow Scheduler, and the
+background task pool are all unmodified.
+
+No breaking changes.
+
+Known limitations:
+
+- None outstanding. The architecture audit found two smaller notes
+  (about test coverage and style that could be a little more
+  thorough) and one purely informational observation about a wording
+  discrepancy in the audit instructions themselves, none of which
+  affected how Jarvis behaves or how it was tested. The owner reviewed
+  all three and chose to leave them as-is, since none needed a change.
+  See `docs/architecture/audits/EP067_ARCHITECTURE_AUDIT.md` for the
+  details.
+
+Validation:
+
+EP067 : 33 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

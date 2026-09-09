@@ -2627,4 +2627,325 @@ Priority may change.
 
 ---
 
+# Long-Term Roadmap — Future Engineering Packages (EP-069–EP-138)
+
+Status: PLANNING ONLY. Nothing in this section has been implemented,
+designed, or scheduled. No EP number below has an owner, a design
+document, or a STEP 1 report yet -- this section exists solely to
+record the long-term direction so future work has a stable set of
+planning identifiers to start from.
+
+**EP numbers in this section are planning identifiers, not a
+guaranteed implementation sequence.** Every EP listed here still
+requires its own, independent STEP 1 (Architecture Discovery &
+Design) before any implementation begins -- inspecting the repository
+as it exists at that time, re-confirming the item is still needed,
+determining its real scope, dependencies, and priority, and deciding
+whether it should be implemented as designed, merged with another
+item, split into smaller EPs, postponed, replaced, or rejected
+outright. This repository's existing convention (`docs/architecture/
+JARVIS_ROADMAP.md`, "Engineering Package Policy") of splitting large
+packages into `EP-XXX.Y` sub-packages applies here exactly as it does
+to any other EP. Nothing below should be treated as approved scope,
+and none of it changes EP-068 or any other already-completed EP,
+which remain exactly as documented in their own design/audit
+documents and in the sections above.
+
+## Vision
+
+The long-term objective is to evolve Jarvis from a local, single-
+machine assistant into a secure, autonomous personal and enterprise
+AI platform: a central "Jarvis Core" (memory, knowledge, planning,
+agents, a tool registry, an AI-provider registry, a policy engine,
+task orchestration, and security/audit) reachable from a mobile
+client, one or more secure Desktop Agents on work/home computers, and
+external services (APIs, the web, AI providers), all through
+controlled, policy-gated interfaces. The mobile client is a secure
+remote interface, not where Jarvis's intelligence lives; the Desktop
+Agent is a controlled local execution endpoint, not an unrestricted
+remote shell.
+
+## Foundation / Autonomy Safety (EP-069–EP-074)
+
+- **EP-069 — AI Provider & Tool Registry** (HIGH). Provider-
+  independent abstractions for AI providers, models, tools,
+  capabilities, fallback providers, provider selection, and cost
+  awareness, so Jarvis is never hard-coded to one AI provider.
+- **EP-070 — Policy, Permissions & Human Approval Engine** (HIGH).
+  Centralized policy control over sensitive/external actions, with
+  graduated levels such as OBSERVE, ANALYZE, PREPARE, EXECUTE, and
+  REQUIRE_APPROVAL.
+- **EP-071 — Credential & Secret Management** (HIGH). Secure handling
+  of API keys, OAuth credentials, passwords, tokens, and service
+  credentials, with an explicit requirement that secrets never leak
+  into logs, prompts, task results, notifications, or Desktop Agent
+  messages.
+- **EP-072 — Autonomous Task Execution & Safety Boundaries** (HIGH).
+  Controlled autonomous execution: planning, execution, retries,
+  timeout, cancellation, rollback where possible, safety limits, and
+  approval boundaries.
+- **EP-073 — Browser Automation & Human-in-the-Loop** (HIGH).
+  Controlled browser automation preferring official APIs first, never
+  bypassing CAPTCHA/MFA/security controls, and pausing for human
+  intervention when required.
+- **EP-074 — Autonomous Project Manager & EP Orchestrator** (HIGH).
+  Longer-term capability for Jarvis to plan projects, create EPs,
+  manage dependencies, track progress, validate results, coordinate
+  development, and request human approval.
+
+## Software Factory (EP-075–EP-079)
+
+- **EP-075 — GitHub Project Discovery & Open-Source Integration**
+  (MEDIUM). Discover and evaluate open-source projects (license,
+  dependencies, security, maintenance, supply-chain risk, quality)
+  without blindly executing downloaded code.
+- **EP-076 — Autonomous Software Project Creation** (MEDIUM). Given a
+  natural-language description: understand requirements, propose a
+  name, choose technology/architecture, create and initialize a
+  repository, and prepare documentation/roadmap.
+- **EP-077 — Autonomous EP Planning Engine** (MEDIUM). Generate EP
+  plans following this project's own methodology (objective, scope,
+  dependencies, risks, Owner Decisions, STEP 1-4) -- future STEP 1
+  work remains authoritative regardless of what this engine proposes.
+- **EP-078 — Autonomous Development Workflow** (MEDIUM). Controlled
+  capabilities to inspect code, implement approved changes, run
+  tests, analyze failures, and prepare commits/pull requests.
+- **EP-079 — Project Health & Development Monitoring** (MEDIUM).
+  Ongoing monitoring of tests, dependencies, architecture, security,
+  technical debt, and repository health.
+
+## AI Content Platform (EP-080–EP-085)
+
+- **EP-080 — Text Generation Provider Integration** (MEDIUM)
+- **EP-081 — Image Generation Provider Integration** (MEDIUM)
+- **EP-082 — Audio & Speech Generation Integration** (MEDIUM)
+- **EP-083 — Video Generation Provider Integration** (MEDIUM)
+- **EP-084 — Presentation Generation Integration** (MEDIUM)
+- **EP-085 — Content Production Pipeline** (MEDIUM). Combine the
+  above, through the EP-069 provider abstraction, into text/image/
+  audio/video/presentation/combined multimedia output.
+
+## Social Automation (EP-086–EP-089)
+
+- **EP-086 — Social Media Integration Framework** (MEDIUM), preferring
+  official APIs.
+- **EP-087 — Automated Content Publishing** (MEDIUM), with human
+  approval remaining configurable.
+- **EP-088 — Content Performance Analytics** (MEDIUM).
+- **EP-089 — Autonomous Content Strategy Agent** (MEDIUM), proposing
+  future strategy from analyzed results.
+
+## Personal Intelligence / Energy / Weather (EP-090–EP-096)
+
+- **EP-090 — Personal Data Collection Framework** (MEDIUM). Structured
+  ingestion of permitted personal operational data.
+- **EP-091 — Electricity & Gas Monitoring** (MEDIUM).
+- **EP-092 — Solar Generation Analytics** (MEDIUM).
+- **EP-093 — Energy Visualization & Reporting** (MEDIUM).
+- **EP-094 — Energy Forecast & Anomaly Detection** (MEDIUM).
+- **EP-095 — Weather Intelligence Agent** (MEDIUM).
+- **EP-096 — Personal Daily/Weekly Recommendation Engine** (MEDIUM),
+  combining the above into useful recommendations.
+
+## Enterprise & Work Automation (EP-097–EP-105)
+
+- **EP-097 — Work Data & Document Intake** (MEDIUM). XLSX/PDF/image/
+  claims/reports/invoices/delivery-document/presentation intake.
+- **EP-098 — Claim Analysis Agent** (MEDIUM). Automotive glass claim
+  analysis: defect, probable cause, root cause, corrective/preventive
+  action.
+- **EP-099 — Quality Report Generation** (MEDIUM).
+- **EP-100 — Excel & Data Analysis Agent** (MEDIUM). Production/
+  quality statistics, Pareto, trends, graphs, summaries.
+- **EP-101 — Presentation Generation for Claims** (MEDIUM).
+- **EP-102 — Telegram Work Assistant** (MEDIUM), controlled.
+- **EP-103 — Web Workflow Automation** (MEDIUM), official APIs
+  preferred, CAPTCHA/MFA remains human-in-the-loop.
+- **EP-104 — Document & Invoice Submission Agent** (MEDIUM).
+- **EP-105 — Work Automation Orchestrator** (MEDIUM), coordinating the
+  above agents.
+
+## Legal Online Income Intelligence (EP-106–EP-110)
+
+- **EP-106 — Opportunity Discovery Agent** (MEDIUM).
+- **EP-107 — Opportunity Qualification & Risk Analysis** (MEDIUM):
+  legitimacy, profitability, effort, platform rules, legal/compliance
+  risk, fraud indicators.
+- **EP-108 — Task Execution Agent** (MEDIUM), explicitly excluding
+  fraud, impersonation, platform abuse, security bypass, or any
+  prohibited activity.
+- **EP-109 — Income Tracking & Analytics** (LOW).
+- **EP-110 — Autonomous Income Workflow** (LOW).
+
+## Advanced Intelligence (EP-111–EP-120, all LOW)
+
+EP-111 Personal Knowledge Graph; EP-112 Advanced Long-Term Memory;
+EP-113 Cross-Project Knowledge Sharing; EP-114 Autonomous Research
+Agent; EP-115 Personal Finance Analytics; EP-116 Personal Life
+Dashboard; EP-117 Multi-Agent Collaboration; EP-118 Agent Performance
+& Cost Optimization; EP-119 Self-Diagnostics & Self-Healing; EP-120
+Autonomous System Evolution. All of these remain lower priority than
+the safety, security, and control foundations in EP-069–EP-074.
+
+## Distributed Jarvis / Remote Interface (EP-121–EP-126)
+
+- **EP-121 — Jarvis Core / Remote Access Architecture** (HIGH). Server/
+  cloud deployment: secure API, auth, sessions, task persistence,
+  event delivery, reconnect, offline clients, versioning, security
+  boundaries. No unrestricted server-to-device control.
+- **EP-122 — Jarvis Mobile Client** (MEDIUM). A remote interface (text/
+  voice/commands/approvals in, text/voice/notifications/status/
+  reports/approval-requests out), not the Jarvis brain -- respecting
+  Android lifecycle/background-execution restrictions rather than
+  depending on an unrestricted hidden background process.
+- **EP-123 — Push Notification & Event Delivery** (MEDIUM). Delivering
+  events (task completed/failed, report ready, approval required,
+  security alert) with retries, ordering, acknowledgement, offline
+  handling, and persistence.
+- **EP-124 — Jarvis Desktop Agent** (HIGH). A secure local agent for
+  work/home computers (Excel, PowerPoint, documents, files, browser,
+  printing, launching applications, displaying results) exposing
+  controlled capabilities only -- explicitly not an unrestricted
+  remote shell.
+- **EP-125 — Distributed Device & Session Management** (MEDIUM).
+  Registration, identity, online/offline status, permissions,
+  revocation, and trusted-device/session management across phone,
+  work PC, home PC, laptop, and server, with lost/compromised devices
+  revocable.
+- **EP-126 — Secure Remote Command & Approval Protocol** (HIGH). The
+  security protocol between Jarvis Core and connected devices:
+  authentication, authorization, encryption, device identity, command
+  signing, replay protection, timestamps, nonces, idempotent command
+  IDs, expiration, approval tokens, audit logs, result verification,
+  revocation. The server must never send arbitrary shell commands to
+  the Desktop Agent -- only a controlled capability model (e.g.
+  `create_report`, `open_excel`, `save_file`, `create_presentation`,
+  `print_document`, `display_result`), with sensitive operations
+  requiring policy approval (EP-070).
+
+## Enterprise Knowledge & Document Intelligence (EP-127–EP-130)
+
+A major future capability: ingesting the organization's knowledge base
+(Control Plans, PFMEA, Excel files, reports, presentations, acts,
+claims, work instructions, standards, internal procedures, historical
+records, and other quality documentation) so Jarvis understands,
+indexes, retrieves, and cross-references it rather than merely storing
+it.
+
+- **EP-127 — Enterprise Knowledge Base** (HIGH). Document ingestion,
+  classification, indexing, semantic search, metadata, versioning,
+  document relationships, source traceability, permissions, and
+  provenance across heterogeneous formats (XLSX, DOCX, PDF, PPTX,
+  images, text). Every important factual conclusion should eventually
+  be traceable to its source document(s).
+- **EP-128 — Enterprise Document Consistency & Compliance Engine**
+  (HIGH). Before generating an enterprise document, compare proposed
+  content against the knowledge base: retrieve relevant documents,
+  identify applicable requirements, detect contradictions and missing
+  requirements, cite sources, and distinguish facts from
+  recommendations. Must never silently invent enterprise requirements,
+  and must explicitly report conflicting documents rather than
+  silently picking one.
+- **EP-129 — Corporate Document Style & Template Intelligence**
+  (MEDIUM). Learn the organization's terminology/structure/formatting/
+  templates so generated documents match house style -- with style
+  learning kept strictly separate from factual requirements (a
+  document's appearance must never be treated as proof of a technical
+  requirement).
+- **EP-130 — Global Document Research & Benchmarking Agent** (MEDIUM).
+  Search for relevant external examples and world practices (quality
+  systems, PFMEA/Control Plan practices, industry templates), compare
+  world practice -> enterprise requirements -> current practice ->
+  gap -> proposed improvement, evaluate source credibility, and cite
+  sources -- never blindly copying internet examples.
+
+## Children's Educational Intelligence (EP-131–EP-132)
+
+The goal is to help children learn, not to do their homework for them.
+
+- **EP-131 — Telegram Homework Intake** (MEDIUM). Receive homework
+  information via permitted Telegram sources; identify student,
+  subject, grade, assignment, topic, materials, and deadline.
+- **EP-132 — Educational Tutor / Socratic Learning Agent** (MEDIUM).
+  **Teach, don't solve**: understand the question, explain the
+  concept, give a small hint, have the child attempt the next step,
+  inspect the attempt, explain mistakes, hint again, and gradually
+  guide the student to their own final answer. Stronger assistance may
+  be available when appropriate, but independent learning is the
+  default.
+
+## Market, Innovation & Opportunity Intelligence (EP-133–EP-135)
+
+- **EP-133 — Market Intelligence Agent** (MEDIUM). Monitor relevant
+  markets, technologies, companies, products, demand, prices,
+  competitors, AI/automotive/business trends, and employment
+  opportunities, using current and credible information.
+- **EP-134 — Idea & Innovation Generator** (MEDIUM). Generate and
+  evaluate ideas (products, business, software, automation,
+  manufacturing, social benefit, education, family, enterprise,
+  income) through a structured idea -> problem -> target user ->
+  solution -> market -> value -> cost -> resources -> risks ->
+  potential income -> social benefit -> next step framework,
+  prioritizing useful and actionable ideas over quantity.
+- **EP-135 — Daily Opportunity & Recommendation Agent** (MEDIUM). A
+  regular personalized briefing across earning/business/enterprise/
+  technology/education/family/market topics, learning from feedback,
+  and explicitly labeling high-confidence vs. medium-confidence vs.
+  speculative items rather than presenting speculation as fact.
+
+## Personal & Family Intelligence (EP-136–EP-137)
+
+- **EP-136 — Personal & Family Assistant** (MEDIUM). Separate profiles
+  and permissions per family member (schedules, reminders, tasks,
+  learning, planning, recommendations, household organization) with
+  explicit privacy boundaries -- one family member must not
+  automatically gain access to another's private information.
+- **EP-137 — Personal Coach & Habit Assistant** (MEDIUM). Exercise,
+  habits, nutrition, sleep, learning, goals, productivity, and
+  progress tracking; for health-related topics, informational guidance
+  and appropriate caution rather than replacing qualified medical
+  professionals.
+
+## Unified Knowledge Architecture (EP-138)
+
+- **EP-138 — Unified Personal & Enterprise Knowledge Architecture**
+  (HIGH). A unified architecture distinguishing at minimum Enterprise
+  Knowledge (PFMEA, Control Plans, standards, work instructions,
+  reports, claims, enterprise records), Personal Knowledge (goals,
+  preferences, tasks, projects, learning, planning), Family Knowledge
+  (family tasks, children's education, schedules, shared plans), and
+  Public Knowledge (internet research, public documentation, market/
+  scientific/industry information) -- each with its own source and
+  permission boundary, so a work report draws on enterprise knowledge,
+  a homework tutor draws on educational knowledge, and a business
+  analysis may draw on public information plus permitted personal
+  context, without sensitive information leaking between domains.
+
+## Knowledge Trust Model
+
+Future work should treat information as having graduated authority,
+not equal weight: (1) authoritative enterprise source, (2) approved
+internal document, (3) historical record, (4) user-provided
+information, (5) trusted external source, (6) general web information,
+(7) AI-generated content, (8) unverified/low-confidence information.
+AI-generated content should never be treated as authoritative merely
+because it sounds convincing. When documents conflict, the system
+should identify the conflict and its sources, show dates/versions
+where available, explain which source appears authoritative, and
+request human confirmation when necessary.
+
+## Global Security Principles
+
+These principles should be preserved throughout all future planning
+above: least privilege; human approval for sensitive actions; no
+bypassing CAPTCHA/MFA/authentication/access controls; official APIs
+preferred over browser automation; no arbitrary remote shell (the
+Desktop Agent exposes controlled capabilities only); auditability of
+important actions; preferring reversible/cancellable/rollback-capable
+actions; AI-provider independence; and pausing for human intervention
+whenever a CAPTCHA or MFA challenge appears, an action is high-risk,
+ambiguous, irreversible, or confidence is insufficient.
+
+---
+
 End of document.

@@ -2122,6 +2122,82 @@ EP-060 Jarvis Operating System
 
 ---
 
+## Phase A — Core Safety & Autonomy (planning only)
+
+EP-069–EP-074. Provider/tool registry, policy & human-approval engine,
+credential management, autonomous-execution safety boundaries,
+browser automation with human-in-the-loop, and an autonomous project/
+EP orchestrator. See `docs/BACKLOG.md`, "Long-Term Roadmap — Future
+Engineering Packages," for full detail.
+
+## Phase B — Software Factory (planning only)
+
+EP-075–EP-079.
+
+## Phase C — AI Content Platform (planning only)
+
+EP-080–EP-085.
+
+## Phase D — Social Automation (planning only)
+
+EP-086–EP-089.
+
+## Phase E — Personal Intelligence / Energy / Weather (planning only)
+
+EP-090–EP-096.
+
+## Phase F — Enterprise & Work Automation (planning only)
+
+EP-097–EP-105.
+
+## Phase G — Legal Opportunity & Income Intelligence (planning only)
+
+EP-106–EP-110.
+
+## Phase H — Advanced Intelligence (planning only)
+
+EP-111–EP-120.
+
+## Phase I — Distributed Jarvis (planning only)
+
+EP-121–EP-126. Jarvis Core remote-access architecture, mobile client,
+push/event delivery, Desktop Agent, device/session management, and a
+secure remote command & approval protocol.
+
+## Phase J — Enterprise Knowledge & Document Intelligence (planning only)
+
+EP-127–EP-130.
+
+## Phase K — Educational Intelligence (planning only)
+
+EP-131–EP-132.
+
+## Phase L — Market & Innovation Intelligence (planning only)
+
+EP-133–EP-135.
+
+## Phase M — Personal & Family Intelligence (planning only)
+
+EP-136–EP-137.
+
+## Phase N — Unified Knowledge Architecture (planning only)
+
+EP-138.
+
+**Phases A–N and EP-069–EP-138 are strategic planning only — nothing
+in them has been designed or implemented.** Unlike Phases 1–10 above,
+none of these EPs has a design document, an audit, or an owner
+decision yet. The ordering into Phases A–N reflects the current
+strategic grouping only; it is not a guaranteed implementation
+sequence, and a future STEP 1 for any of these EPs may reorder,
+merge, split, postpone, or reject the item after independently
+re-inspecting the repository at that time. See `docs/BACKLOG.md` for
+the full description of each item, the long-term vision, the
+knowledge trust model, and the security principles that should govern
+this work.
+
+---
+
 # Architecture Evolution
 
 Core Platform
@@ -2257,5 +2333,7 @@ The numbering of Engineering Packages is stable.
 New functionality should normally be implemented as sub-packages (EP-XXX.Y) rather than renumbering the roadmap.
 
 Completed EPs should not be redesigned unless an explicit architectural decision requires it.
+
+EP-069 through EP-138 (Phases A–N above) are planning identifiers only, not a guaranteed implementation order. Each requires its own future STEP 1 before implementation begins.
 
 End of document.

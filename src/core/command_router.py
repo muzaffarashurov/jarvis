@@ -174,14 +174,14 @@ class CommandRouter:
         try:
             result = module.execute(action, arguments)
         except Exception as exc:  # noqa: BLE001 - a module must never crash the shell
-            logger.error(f"Error executing '{raw_input.strip()}': {exc}")
+            logger.error(f"Error executing '{module_name}': {type(exc).__name__}")
             return CommandResult(
                 success=False,
                 message=f"Internal error while executing '{raw_input.strip()}'.",
             )
 
         if result.success:
-            logger.info(f"Command executed: {raw_input.strip()}")
+            logger.info(f"Command executed: {module_name}")
 
         return result
 

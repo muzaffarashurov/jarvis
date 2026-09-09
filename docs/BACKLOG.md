@@ -10,19 +10,62 @@ Status: Active
 
 ## Next Engineering Package
 
-**None yet defined.** EP-067 (TelegramService Poll Loop Exception
-Containment) closed a real, code-verified gap directly anticipated by
-EP-065 Owner Decision D7: `TelegramService._poll_loop()`
-(`src/services/telegram_service.py`) had no broad exception guard
-around its call to `self._poll_once()`, unlike every other
-structurally equivalent background loop in this codebase
-(`SchedulerService._tick_loop()`, `WorkflowSchedulerService._tick_loop()`,
-`MemoryPersistence._auto_save_loop()`), so an unexpected exception not
-already converted by `_poll_once()`'s own narrower
-`TelegramClientError` guard silently and permanently killed the
-`"telegram-poll"` daemon thread with no log evidence at all. No
-EP-068 or Phase 11 exists anywhere in this repository as of this
-release.
+**None yet defined.** EP-068 (CommandRouter Dispatch-Level Sensitive
+Argument Log Redaction) closed the HIGH-severity `CommandRouter`
+raw-input-logging finding first identified by `EP050_AUDIT.md` and
+carried in this backlog since EP-050. No EP-069 or Phase 11 exists
+anywhere in this repository as of this release.
+
+### EP-068 — CommandRouter Dispatch-Level Sensitive Argument Log Redaction
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit -- Revision 1 FAIL, Revision 2
+PASS), and STEP 4 (Documentation Synchronization) all complete.
+EP-068 is marked **COMPLETE / STEP 3 REVISION 2 PASS, NO BLOCKING
+FINDINGS**. Full design: `docs/architecture/designs/EP068_DESIGN.md`.
+The historical Revision 1 FAIL audit is preserved unedited at
+`docs/architecture/audits/EP068_ARCHITECTURE_AUDIT.md`; the
+authoritative, final audit is
+`docs/architecture/audits/EP068_REV2_ARCHITECTURE_AUDIT.md`.
+
+Neither this backlog nor `docs/architecture/JARVIS_ROADMAP.md` named
+an EP-068 scope -- both said "none yet defined." Instead, this EP
+closed a long-standing, previously-deferred item this backlog itself
+carried since EP-050 (see the removed item below): `CommandRouter.
+dispatch()` unconditionally logged the entire raw command line --
+including any sensitive free-text argument -- on its success and
+module-exception execution-outcome log statements, defeating
+per-module privacy commitments (e.g. EP-050's "never logged" claim
+for typed text and clipboard content) at the shared dispatch layer.
+
+STEP 2's first implementation (Revision 1) replaced the raw-input echo
+with `module_name`/`action`, matching EP-065's own established
+"log a short, safe token, never raw content" convention. STEP 3's
+audit (Revision 1) independently found and reproduced a BLOCKER
+(EP068-B1): `action` is simply the second raw, unvalidated,
+user-supplied token, so a two-token command (e.g. via the
+already-registered `TestModule`) could still leak sensitive content
+through the very statements this EP was meant to secure. Revision 2
+excludes `action` from both log statements entirely rather than
+validating it, and replaces the exception path's `str(exc)` with
+`type(exc).__name__`, so a module's own exception message can no
+longer carry arbitrary content into the log either. STEP 3's re-audit
+independently re-derived the provenance of every value reaching either
+statement, re-ran the historical BLOCKER reproduction against the
+real, unmodified `TestModule` (confirming no leak), and re-ran the
+full required regression set: **PASS**, zero BLOCKER, zero MEDIUM.
+
+Two non-blocking, informational findings were recorded: EP068-M1
+(re-confirmed, pre-existing, unworsened -- the "Unknown module" branch
+and other modules' own "Unknown command" logging still log an
+unvalidated value, out of this EP's scope) and EP068-L2 (LOW -- the
+Revision 2 tests extend the existing `tests/EP068/` file rather than a
+separate one, as the STEP 2 remediation brief itself preferred).
+Neither required a design, scope, or behavior change.
+
+Tests: EP-068 52/0/0 (`tests/EP068/test_command_router_log_redaction.py`).
+Full regression: EP-061 62/0/0, EP-062 39/0/0, EP-063 78/0/0, EP-064
+93/0/0, EP-065 42/0/0, EP-066 23/0/0, EP-067 33/0/0.
 
 ### EP-067 — TelegramService Poll Loop Exception Containment
 
@@ -2567,8 +2610,8 @@ Priority may change.
 - REST API OpenAPI/Swagger schema generation -- deferred from EP-043 v1
 - Per-subsystem REST resources (e.g. dedicated /api/v1/email/... routes) -- deferred from EP-043 v1, which ships one generic /api/v1/commands endpoint instead
 - TestRegistry NAME-collision fix (Service/Module test pairs sharing a NAME are only partially reachable via `test EP0NN`) -- pre-existing since EP-038, tracked again during EP-042 and EP-043
-- `CommandRouter.dispatch()` raw-input logging exposes sensitive command arguments in full (e.g. `desktop type`/`desktop write-clipboard`'s text) -- HIGH finding from `EP050_AUDIT.md`, deferred from EP-050 v1; needs its own architectural decision on how a `CommandModule` can mark specific actions as sensitive before this is fixed at the `CommandRouter` level
 - `WindowsComputerUseBackend.active_window_title()` should distinguish "no active window" from a genuine backend failure instead of swallowing all exceptions into an empty string -- MEDIUM finding from `EP050_AUDIT.md`, deferred from EP-050 v1
+- The "Unknown module" log line in `CommandRouter.dispatch()`, and the nine other modules' own internal "Unknown command: {module} {action}" logging, still log an unvalidated value in the module-name/action position -- EP068-M1, re-confirmed pre-existing and out of scope by `EP068_REV2_ARCHITECTURE_AUDIT.md`; distinct from the sensitive-argument leak EP-068 closed, since these sites never reach dispatch()'s two execution-outcome log statements
 
 ---
 

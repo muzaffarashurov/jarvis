@@ -2976,4 +2976,66 @@ EP067 : 33 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-068 — CommandRouter Dispatch-Level Sensitive Argument Log Redaction
+
+Status: Released (STEP 3 Revision 2 PASS, no blocking findings -- the
+first audit pass, Revision 1, found and reproduced a real security gap
+in the originally-chosen fix, which was then redesigned, re-implemented,
+and re-audited before release; see "Known limitations" below)
+
+A note on scope: like EP-061 through EP-067, this release wasn't named
+by the roadmap or backlog. Instead, it closes a real, previously-known
+gap: the command router that handles every command you type -- whether
+from the console, Telegram, or the web API -- was writing the entire
+command line to the log file, including any sensitive text such as a
+typed password, clipboard content, or a commit message. This was
+originally flagged as a HIGH-severity finding during EP-050 and
+deferred until now, since fixing it required a dedicated architectural
+decision.
+
+Highlights:
+
+- Commands dispatched through the router no longer have their
+  arguments written to the log, for any command, from any interface
+- The log now records only which command ran (by name), not what it
+  was called with
+- An early attempt at this fix (logging the command's name and its
+  first argument) was found, during review, to still be capable of
+  leaking sensitive text in certain two-word commands, and was
+  replaced before release with a stricter approach that logs no
+  argument content at all
+- When a command's own code raises an unexpected error, the log now
+  records only the kind of error, never the error's own message text,
+  which could otherwise have echoed sensitive input back
+- Purely an internal logging fix -- nothing new is reachable through
+  the command shell, the web API, or Telegram, and no new settings
+  were added; what a command returns to the person who ran it is
+  unchanged
+
+Compatibility:
+
+Fully backward compatible with every prior EP, including EP-059
+through EP-067. No existing command, module, or CLI action was
+renamed, removed, or had its behavior changed. The only observable
+difference is that the application log shows less detail about which
+arguments a command was called with.
+
+No breaking changes.
+
+Known limitations:
+
+- A related, smaller gap remains open and out of scope for this
+  release: some modules' own "Unknown command" log messages, and the
+  router's own "Unknown module" message, still include unvalidated
+  text. This was already true before this release and is unrelated to
+  the sensitive-argument leak this release closes. See
+  `docs/architecture/audits/EP068_REV2_ARCHITECTURE_AUDIT.md` for
+  detail.
+
+Validation:
+
+EP068 : 52 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

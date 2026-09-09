@@ -122,6 +122,57 @@ Completed sub-packages:
 
 ## Current
 
+EP-068 CommandRouter Dispatch-Level Sensitive Argument Log Redaction —
+**COMPLETE** (STEP 1 Architecture Discovery & Design, STEP 2
+Implementation & Testing, STEP 3 Architecture Audit -- Revision 1
+FAIL followed by a Revision 2 remediation and re-audit -- and STEP 4
+Documentation Synchronization all complete -- see
+docs/architecture/designs/EP068_DESIGN.md,
+docs/architecture/audits/EP068_ARCHITECTURE_AUDIT.md (the immutable
+Revision 1 FAIL record), and
+docs/architecture/audits/EP068_REV2_ARCHITECTURE_AUDIT.md (the
+authoritative final audit). **Final Verdict: STEP 3 Revision 2 —
+PASS, ZERO BLOCKER, ZERO MEDIUM** (two non-blocking, informational
+findings -- EP068-M1, re-confirmed pre-existing and out of scope, and
+EP068-L2, LOW, a test-file-organization observation). Not tied to any
+roadmap phase: neither this roadmap nor `docs/BACKLOG.md` named an
+EP-068 scope, both saying "none yet defined." Instead, this EP closed
+the HIGH-severity finding `EP050_ARCHITECTURE_AUDIT.md` first
+identified: `CommandRouter.dispatch()` (`src/core/command_router.py`)
+unconditionally wrote the full raw command line -- including any
+sensitive free-text argument such as a typed password, clipboard
+content, or a commit message -- into the application log on both of
+its execution-outcome log statements, reachable from every interface
+that shares `CommandRouter` (`InteractiveShell`, `TelegramRouter`,
+`ApiRouter`). STEP 2's first implementation (Revision 1) replaced the
+raw-input echo with `module_name`/`action`, mirroring EP-065's own
+"log a short, safe token, never raw content" convention -- but STEP 3
+independently reproduced a BLOCKER (EP068-B1): `action` is simply the
+second raw, unvalidated, user-supplied token, and a two-token command
+(reachable through the already-registered `TestModule`) could still
+carry sensitive content into the same two log statements. Revision 2
+excludes `action` from both statements entirely rather than validating
+it, and replaces the exception path's `str(exc)` with
+`type(exc).__name__`, so a module's own exception message can no
+longer carry arbitrary content into the log either -- independently
+re-derived and re-confirmed by the Revision 2 re-audit, including a
+literal re-reproduction of the historical BLOCKER against the real,
+unmodified `TestModule` showing it no longer leaks. `_tokenize()`,
+EP-065's malformed-quoting branch, the "Unknown module" branch, and
+the returned `CommandResult.message` are all confirmed unchanged.
+EP068-M1 (the "Unknown module" branch and other modules' own "Unknown
+command" logging still logging an unvalidated value) remains
+explicitly deferred and unworsened. Tests: EP-068 52/0/0 (new suite,
+`tests/EP068/test_command_router_log_redaction.py`), covering
+success- and exception-path redaction of a sensitive marker argument,
+exclusion of `action` from both log statements, use of
+`type(exc).__name__` rather than `str(exc)` on the exception path, the
+returned message remaining unchanged, and regression coverage for the
+module-only-command, "Unknown module," and malformed-quoting paths.
+Full regression: EP-061 62/0/0, EP-062 39/0/0, EP-063 78/0/0, EP-064
+93/0/0, EP-065 42/0/0, EP-066 23/0/0, EP-067 33/0/0 -- all reproduced
+exactly, confirming zero regressions.
+
 EP-067 TelegramService Poll Loop Exception Containment — **COMPLETE**
 (STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
 Testing, STEP 3 Architecture Audit, STEP 4 Documentation

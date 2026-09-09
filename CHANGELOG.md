@@ -6,6 +6,129 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.27-ep068
+
+Released: 2026-09-09
+
+Status: EP-068 COMPLETE / STEP 3 REVISION 2 PASS, NO BLOCKING FINDINGS
+(STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
+Testing, STEP 3 Architecture Audit -- Revision 1 FAIL followed by a
+Revision 2 remediation and re-audit -- and STEP 4 Documentation
+Synchronization all complete).
+
+This closes the `CommandRouter.dispatch()` sensitive-argument log
+exposure that `EP050_ARCHITECTURE_AUDIT.md` first flagged as a HIGH
+finding: every command dispatched through `CommandRouter` -- from
+`InteractiveShell`, `TelegramRouter`, or `ApiRouter` alike -- had its
+full raw input, including any sensitive free-text argument (a typed
+password, clipboard content, an email body, a commit message), written
+unconditionally into the application log on both of `dispatch()`'s
+execution-outcome log statements.
+
+STEP 3's first pass (Revision 1) returned a **FAIL**: it independently
+reproduced a BLOCKER (EP068-B1) showing that Revision 1's chosen fix --
+logging `module_name` and `action` instead of the full raw input --
+was itself unsafe, since `action` is simply the second raw,
+unvalidated, user-supplied token (`rest[0].lower()`) and could itself
+carry sensitive content in commands with exactly one token after the
+module name (e.g. via the already-registered `TestModule`). That
+finding is preserved unedited in
+`docs/architecture/audits/EP068_ARCHITECTURE_AUDIT.md`, the immutable
+Revision 1 record.
+
+The Revision 2 remediation excludes `action` from both log statements
+entirely, rather than validating it, and replaces the exception path's
+`str(exc)` with `type(exc).__name__`, so a module's own exception
+message can no longer carry arbitrary content into the log either.
+Both statements now log only `module_name` (already gated by the
+registered-module lookup) and, on the exception path, the exception's
+class name (drawn from a closed, statically-defined set). STEP 3's
+re-audit independently re-derived the provenance of every value
+reaching either statement, re-ran the historical BLOCKER reproduction
+against the real, unmodified `TestModule` (confirming it no longer
+leaks), and re-ran the full required regression set, returning
+**PASS** with zero BLOCKER and zero MEDIUM findings. See
+`docs/architecture/audits/EP068_REV2_ARCHITECTURE_AUDIT.md` for the
+full, authoritative Revision 2 audit.
+
+### Added
+
+- `tests/EP068/test_command_router_log_redaction.py`: new,
+  self-contained EP-068 test suite (`NAME = "EP068"`), covering
+  success-path and exception-path redaction of a sensitive marker
+  argument, exclusion of `action` from both log statements, the
+  exception-path log using only `type(exc).__name__` (never
+  `str(exc)`), the returned `CommandResult.message` remaining
+  unchanged, and regression coverage for the module-only-command,
+  "Unknown module," and malformed-quoting paths.
+- `docs/architecture/designs/EP068_DESIGN.md`: STEP 1 design document.
+- `docs/architecture/audits/EP068_ARCHITECTURE_AUDIT.md`: the
+  immutable Revision 1 audit, verdict FAIL (EP068-B1).
+- `docs/architecture/audits/EP068_REV2_ARCHITECTURE_AUDIT.md`: the
+  authoritative Revision 2 re-audit, verdict PASS.
+
+### Changed
+
+- `src/core/command_router.py`: `dispatch()`'s two execution-outcome
+  log statements no longer include `action`, `arguments`, or `str(exc)`
+  in any form. The success-path statement logs only `module_name`; the
+  exception-path statement logs `module_name` and
+  `type(exc).__name__`. No other statement, branch, or exit path in
+  `dispatch()` changed; `_tokenize()`, `register()`,
+  `register_modules()`, and `module_names` are unchanged. The returned
+  `CommandResult.message` on the exception path is unchanged.
+- `src/modules/test_module.py`: one added import line registering
+  `tests.EP068`.
+
+### Security
+
+- `CommandRouter.dispatch()`'s two execution-outcome log statements no
+  longer include any arbitrary command argument or action content, and
+  the exception path no longer logs a module's exception message text
+  -- only its exception class name. This closes the EP-050 HIGH
+  finding uniformly for every current and future `CommandModule`, with
+  no per-module opt-in/opt-out.
+- The "Unknown module" log line and every individual module's own
+  internal logging (including the nine other modules' "Unknown
+  command" messages) are unchanged and out of this EP's scope
+  (EP068-M1, re-confirmed still open and unworsened).
+
+### Validation
+
+```
+EP068 : 52 passed / 0 failed / 0 skipped
+EP061 : 62 passed / 0 failed / 0 skipped
+EP062 : 39 passed / 0 failed / 0 skipped
+EP063 : 78 passed / 0 failed / 0 skipped
+EP064 : 93 passed / 0 failed / 0 skipped
+EP065 : 42 passed / 0 failed / 0 skipped
+EP066 : 23 passed / 0 failed / 0 skipped
+EP067 : 33 passed / 0 failed / 0 skipped
+```
+
+### STEP 3 -- Architecture Audit (Revision 2)
+
+Verdict: **PASS**, zero BLOCKER, zero MEDIUM. Two non-blocking,
+informational findings were recorded: EP068-M1 (re-confirmed,
+pre-existing, out of scope -- the "Unknown module" branch and other
+modules' own "Unknown command" logging still log an unvalidated value)
+and EP068-L2 (LOW -- the Revision 2 tests were added to the existing
+`tests/EP068/test_command_router_log_redaction.py` file rather than a
+separate file, per the STEP 2 remediation brief's own preference).
+Neither required a design, scope, or behavior change. See
+`docs/architecture/audits/EP068_REV2_ARCHITECTURE_AUDIT.md` for full
+detail; the historical Revision 1 FAIL remains unedited at
+`docs/architecture/audits/EP068_ARCHITECTURE_AUDIT.md`.
+
+### STEP 4 -- Documentation Synchronization
+
+Release/project documentation (`CHANGELOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/BACKLOG.md`, `docs/architecture/JARVIS_ROADMAP.md`) synchronized
+to mark EP-068 COMPLETE / STEP 3 REVISION 2 PASS. No further
+Engineering Package is yet named anywhere in this repository.
+
+---
+
 ## v0.1.26-ep067
 
 Released: 2026-09-08

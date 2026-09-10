@@ -10,11 +10,91 @@ Status: Active
 
 ## Next Engineering Package
 
-**None yet defined.** EP-068 (CommandRouter Dispatch-Level Sensitive
-Argument Log Redaction) closed the HIGH-severity `CommandRouter`
-raw-input-logging finding first identified by `EP050_AUDIT.md` and
-carried in this backlog since EP-050. No EP-069 or Phase 11 exists
-anywhere in this repository as of this release.
+**None yet defined beyond EP-069's own remaining scope.** EP-069.1
+(Automatic AI Provider Fallback on Request Failure) completed the
+first, independently-scoped sub-package of the EP-069 ("AI Provider &
+Tool Registry") planning identifier -- see the Long-Term Roadmap
+section below, whose EP-069 bullet is unchanged in wording but whose
+first slice is now implemented. EP-069's remaining scope (configured
+fallback ordering, cost-aware provider selection, LLM function/tool
+calling, and expanded fallback eligibility) remains unscoped and
+planning-only; each requires its own future, independent STEP 1
+before implementation, per this repository's Engineering Package
+Policy. No EP-070 or Phase 11 exists anywhere in this repository as of
+this release.
+
+### EP-069.1 — Automatic AI Provider Fallback on Request Failure
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), STEP 3.1 (Findings Resolution
+Review), and STEP 4 (Documentation Synchronization) all complete.
+EP-069.1 is marked **COMPLETE / STEP 3 PASS WITH WARNINGS, STEP 3.1
+READY FOR STEP 4, NO BLOCKING FINDINGS**. Full design:
+`docs/architecture/designs/EP069_DESIGN.md`. Audit:
+`docs/architecture/audits/EP069_ARCHITECTURE_AUDIT.md`. Findings
+resolution: `docs/architecture/audits/EP069_FINDINGS_RESOLUTION.md`.
+
+Unlike EP-061 through EP-068, this release *was* named on the
+roadmap -- but only as a one-line, explicitly-marked
+"PLANNING ONLY" strategic identifier ("EP-069 -- AI Provider & Tool
+Registry"), not a scoped requirement. STEP 1 found that line bundled
+four architecturally distinct concerns at very different states of
+completeness: provider/model abstraction (already built by EP-014/
+EP-015), fallback/provider selection (not built -- `AIService.ask()`
+used exactly one provider and failed immediately on any error, even
+with a second, available provider registered and idle), LLM tool/
+function calling (conflated in the roadmap wording with the unrelated,
+already-existing EP-031 Tool Engine), and cost awareness (entirely
+unbuilt, no pricing model exists anywhere in this repository). Per
+this repository's own Engineering Package Policy for splitting large
+packages into `EP-XXX.Y` sub-packages, EP-069 was retained as a parent
+identifier producing no code, and STEP 1 scoped down only the one
+concern with a direct, unambiguous, already-inspectable gap and no
+unresolved terminology conflict: automatic provider fallback.
+
+EP-069.1 adds an opt-in (`ai.fallback_enabled`, default `false`)
+fallback: when the currently selected provider fails with one of four
+specific, transient/availability failure types
+(`ProviderUnavailableError`, `ProviderNetworkError`,
+`ProviderTimeoutError`, `ProviderRateLimitError`), `AIService.ask()`
+retries the identical already-built prompt against another available,
+registered provider, in the existing `ProviderRegistry`'s
+deterministic, name-sorted order, until one succeeds or every eligible
+candidate has been tried. `ProviderConfigurationError`,
+`ProviderAuthenticationError`, and any uncategorized `ProviderError`
+never trigger fallback -- a misconfigured or credential-rejected
+provider stays immediately visible rather than being silently masked.
+With `ai.fallback_enabled` at its default (`false`), behavior is
+byte-for-byte unchanged from before this release, confirmed by
+call-count and exact-error-string test assertions, not merely by
+outcome.
+
+STEP 3's independent audit returned **PASS WITH WARNINGS**: zero
+CRITICAL/HIGH findings; seven MEDIUM/LOW findings, none representing a
+deviation from any of the eleven approved Owner Decisions (D1-D11),
+all independently confirmed correctly implemented. STEP 3.1
+independently re-traced the two most significant findings (message
+provenance in a reused log line; an unhandled-`is_available()`-
+exception gap in `ProviderManager.list_fallback_candidates()`)
+against the actual `ClaudeProvider`/`GeminiProvider` source rather than
+accepting the audit's own framing, and found both real but currently
+non-exploitable by either provider that exists today -- resolved as
+documented residual risk for future providers, not a code change. The
+remaining findings were resolved as deferrable test-coverage
+improvements (three) or already-deliberate, already-documented Owner
+Decision trade-offs (two, including Owner Decision D9: `ai.retry_count`
+-- pre-existing, unused since before this release -- remains
+unmodified and unreferenced by any code, deliberately not repurposed).
+Final decision: **READY FOR STEP 4**, zero findings requiring a fix
+before release.
+
+Tests: EP-069 68/0/0
+(`tests/EP069/test_ai_provider_fallback.py`). Full regression: 7093
+passed / 3 failed / 1 skipped / 2 environment-blocked (the failures
+and environment blocks independently reproduced identically against
+the untouched pre-EP-069.1 archive, confirming pre-existing and
+unrelated -- see `docs/architecture/audits/EP069_ARCHITECTURE_AUDIT.md`
+Section 20 for detail).
 
 ### EP-068 — CommandRouter Dispatch-Level Sensitive Argument Log Redaction
 
@@ -2629,10 +2709,15 @@ Priority may change.
 
 # Long-Term Roadmap — Future Engineering Packages (EP-069–EP-138)
 
-Status: PLANNING ONLY. Nothing in this section has been implemented,
-designed, or scheduled. No EP number below has an owner, a design
-document, or a STEP 1 report yet -- this section exists solely to
-record the long-term direction so future work has a stable set of
+Status: PLANNING ONLY, with one exception. Nothing in this section has
+been implemented, designed, or scheduled, **except EP-069's first
+sub-package, EP-069.1 (Automatic AI Provider Fallback on Request
+Failure), which is COMPLETE** -- see the "Next Engineering Package"
+section above and `docs/architecture/designs/EP069_DESIGN.md`. No
+other EP number below has an owner, a design document, or a STEP 1
+report yet, and EP-069's own remaining scope (beyond EP-069.1) is
+likewise still planning-only -- this section otherwise exists solely
+to record the long-term direction so future work has a stable set of
 planning identifiers to start from.
 
 **EP numbers in this section are planning identifiers, not a
@@ -2671,6 +2756,13 @@ remote shell.
   independent abstractions for AI providers, models, tools,
   capabilities, fallback providers, provider selection, and cost
   awareness, so Jarvis is never hard-coded to one AI provider.
+  **EP-069.1 (Automatic AI Provider Fallback on Request Failure) is
+  COMPLETE** -- see the "Next Engineering Package" section above and
+  `docs/architecture/designs/EP069_DESIGN.md`. The remaining scope
+  described in this bullet (tools, capabilities, cost awareness, and
+  configured fallback ordering) remains unscoped and planning-only;
+  each requires its own future, independent STEP 1, per this
+  repository's Engineering Package Policy for `EP-XXX.Y` sub-packages.
 - **EP-070 — Policy, Permissions & Human Approval Engine** (HIGH).
   Centralized policy control over sensitive/external actions, with
   graduated levels such as OBSERVE, ANALYZE, PREPARE, EXECUTE, and

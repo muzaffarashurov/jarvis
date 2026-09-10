@@ -13,11 +13,21 @@ The rest of Jarvis is expected to depend only on ProviderManager (via
 AIService), never on ProviderRegistry or a concrete AIProvider
 directly, so the active provider can change without any other
 component needing to know which one is active.
+
+EP-069.1 (Automatic AI Provider Fallback on Request Failure)
+additively adds `list_fallback_candidates()`: a read-only query over
+the existing registry, used by AIService to find another available
+provider when the current one fails. It introduces no new state, no
+ordered preference list, and no change to `set_current()`/
+`get_current()` -- fallback never changes which provider is
+"current" for the next fresh request (`EP069_DESIGN.md` Section 14,
+Owner Decision D1).
 """
 
 from __future__ import annotations
 
 from threading import Lock
+from typing import Iterable
 
 from loguru import logger
 
@@ -117,6 +127,36 @@ class ProviderManager:
     def list_providers(self) -> list[AIProvider]:
         """Return every registered provider."""
         return self._registry.list()
+
+    def list_fallback_candidates(self, exclude: Iterable[str]) -> list[AIProvider]:
+        """Return registered providers eligible as an AI Provider Fallback (EP-069.1) target.
+
+        A candidate is eligible when it is registered, reports
+        `is_available() == True`, and its name is not in `exclude`
+        (typically every provider already attempted for the current
+        request, per `EP069_DESIGN.md` Section 14). Ordering matches
+        `ProviderRegistry.list()`'s existing deterministic,
+        name-sorted order (`EP069_DESIGN.md` Section 17) -- no
+        separate priority list or scoring is introduced.
+
+        This method performs no request-level orchestration and holds
+        no state of its own: eligibility is derived fresh from the
+        registry on every call, so it can never go stale relative to
+        `register_provider()`/`remove()`.
+
+        Args:
+            exclude: Provider names to exclude from the result (e.g.
+                every provider already attempted this request).
+
+        Returns:
+            Every eligible AIProvider, ordered by `name()`.
+        """
+        excluded = set(exclude)
+        return [
+            provider
+            for provider in self._registry.list()
+            if provider.name() not in excluded and provider.is_available()
+        ]
 
     # ---------- AI subsystem enable/disable ----------
 

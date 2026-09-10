@@ -596,6 +596,8 @@ class Bootstrap:
             conversation_manager=conversation_manager,
             prompt_manager=prompt_manager,
             context_manager=context_manager,
+            # EP-069.1 Automatic AI Provider Fallback on Request Failure.
+            fallback_enabled=bool(config.get("ai.fallback_enabled", False)),
         )
         router.register(AIModule(ai_service))
 

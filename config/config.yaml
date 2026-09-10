@@ -579,6 +579,11 @@ ai:
   timeout: 120
   retry_count: 2
   max_context_messages: 20
+  # EP-069.1 Automatic AI Provider Fallback on Request Failure.
+  # Disabled by default so ask()'s behavior is unchanged unless
+  # explicitly opted into; see src/services/ai_service.py and
+  # docs/architecture/designs/EP069_DESIGN.md.
+  fallback_enabled: false
 
 conversation:
   # EP-016 Conversation Engine. Provider-independent chat session

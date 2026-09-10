@@ -38,6 +38,15 @@ documents relevant to that request are loaded (see
 `ContextLoader._select_relevant_documents()`), instead of every
 detected document on every request.
 
+EP-069.1 additively adds Automatic AI Provider Fallback: when
+'ai.fallback_enabled' is True (default False) and the selected
+provider's `ask()` raises a fallback-eligible ProviderError, `ask()`
+retries the identical already-built prompt against another available,
+registered provider (see `ProviderManager.list_fallback_candidates()`)
+before failing the request. This never changes `ask()`'s signature,
+`AskResult`'s fields, or the AIProvider contract; see `ask()`'s
+docstring and `docs/architecture/designs/EP069_DESIGN.md`.
+
 AIProvider.ask() still accepts a single `prompt: str` (its EP-015
 contract is unchanged, per AI_GENERATION_STANDARD.md's Public API
 Policy). `ContextManager.create()` composes a Context from the current
@@ -64,7 +73,15 @@ from src.core.ai.conversation import Conversation
 from src.core.ai.conversation_manager import ConversationManager
 from src.core.ai.prompt_builder import PromptTemplateNotFoundError, PromptValidationError
 from src.core.ai.prompt_manager import PromptManager
-from src.core.ai.provider import ModelValidationResult, ProviderError
+from src.core.ai.provider import (
+    AIProvider,
+    ModelValidationResult,
+    ProviderError,
+    ProviderNetworkError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+    ProviderUnavailableError,
+)
 from src.core.ai.provider_manager import ProviderManager
 from src.core.ai.provider_registry import ProviderNotFoundError
 from src.core.command_router import CommandResult
@@ -82,6 +99,26 @@ __all__ = [
 ]
 
 _NO_PROVIDER_SELECTED: str = "No AI provider is currently selected. Use 'ai use <provider>'."
+
+# EP-069.1 Automatic AI Provider Fallback on Request Failure.
+#
+# Fallback-eligible ProviderError subtypes, per EP069_DESIGN.md
+# Section 15 (Owner Decision D4). Only transient/provider-availability
+# failures are eligible: ProviderUnavailableError, ProviderNetworkError,
+# ProviderTimeoutError, ProviderRateLimitError. ProviderConfigurationError,
+# ProviderAuthenticationError, and the uncategorized base ProviderError
+# are deliberately NOT included -- a bad credential or missing
+# configuration is an operator-visible defect, not a transient failure
+# to silently route around (Section 15's table). This set is the only
+# place fallback eligibility is decided; it is intentionally closed and
+# not derived from exception attributes, so eligibility stays reviewable
+# at a single glance.
+_FALLBACK_ELIGIBLE_ERRORS: tuple[type[ProviderError], ...] = (
+    ProviderUnavailableError,
+    ProviderNetworkError,
+    ProviderTimeoutError,
+    ProviderRateLimitError,
+)
 
 
 @dataclass(frozen=True)
@@ -254,6 +291,7 @@ class AIService:
         conversation_manager: ConversationManager,
         prompt_manager: PromptManager,
         context_manager: ContextManager,
+        fallback_enabled: bool = False,
     ) -> None:
         """Initialize the AIService.
 
@@ -272,12 +310,17 @@ class AIService:
                 to compose the project/working-directory/conversation
                 Context whose `.rendered` text is handed to the Prompt
                 Engine, replacing the legacy `_render_conversation_context()`.
+            fallback_enabled: Value of 'ai.fallback_enabled' (EP-069.1).
+                Defaults to False so `ask()`'s behavior is unchanged
+                unless explicitly opted into (`EP069_DESIGN.md`
+                Section 20/21).
         """
         self._config = config
         self._provider_manager = provider_manager
         self._conversation_manager = conversation_manager
         self._prompt_manager = prompt_manager
         self._context_manager = context_manager
+        self._fallback_enabled = fallback_enabled
 
     # ---------- Public API ----------
 
@@ -442,12 +485,39 @@ class AIService:
         string (`Prompt.rendered`), never a Message list, Context, or
         Prompt object.
 
+        EP-069.1 (Automatic AI Provider Fallback on Request Failure)
+        additively wraps only the final provider call: `built_prompt
+        .rendered` is built exactly once, regardless of how many
+        providers are tried (`EP069_DESIGN.md` Section 16, Owner
+        Decision D2). When 'ai.fallback_enabled' is True and the
+        currently selected provider raises a fallback-eligible
+        `ProviderError` (`ProviderUnavailableError`,
+        `ProviderNetworkError`, `ProviderTimeoutError`, or
+        `ProviderRateLimitError` -- Section 15), the identical
+        rendered prompt is retried against the next available,
+        not-yet-attempted registered provider
+        (`ProviderManager.list_fallback_candidates()`), in that
+        registry's deterministic, name-sorted order, until one
+        succeeds or every eligible candidate has been tried. A
+        non-eligible failure (`ProviderConfigurationError`,
+        `ProviderAuthenticationError`, or the base `ProviderError`)
+        never triggers fallback, and when 'ai.fallback_enabled' is
+        False (the default) this method's behavior is unchanged from
+        before EP-069.1. `ai use <provider>` / `ProviderManager
+        .get_current()` are never altered by a fallback within a
+        single request -- the "current" provider for the next fresh
+        `ask()` call remains whatever was last explicitly selected
+        (Owner Decision D1).
+
         Args:
             prompt: The user prompt to send.
 
         Returns:
-            An AskResult describing the reply, or a user-friendly
-            error if communication failed.
+            An AskResult describing the reply -- `provider` names the
+            provider that actually produced it, which may be a
+            fallback provider, not necessarily the currently selected
+            one -- or a user-friendly error if every attempted
+            provider failed.
         """
         current = self._provider_manager.get_current()
         if current is None:
@@ -471,14 +541,71 @@ class AIService:
             logger.error(f"Prompt Engine rejected request (provider='{name}'): {exc}")
             return AskResult(success=False, provider=name, model="", text="", error=str(exc))
 
-        try:
-            response = current.ask(built_prompt.rendered)
-        except ProviderError as exc:
-            logger.error(f"AI request failed (provider='{name}'): {exc}")
-            return AskResult(success=False, provider=name, model="", text="", error=str(exc))
+        candidate: AIProvider = current
+        attempted: list[str] = []
+        failure_summary: list[str] = []
+
+        while True:
+            candidate_name = candidate.name()
+            attempted.append(candidate_name)
+            try:
+                response = candidate.ask(built_prompt.rendered)
+            except ProviderError as exc:
+                # Unchanged from pre-EP-069.1: `exc` here is always a
+                # ProviderError instance whose message is a static,
+                # code-authored string (e.g. "Provider 'claude' is
+                # disabled."), never user-supplied prompt content --
+                # safe to log verbatim, per EP069_DESIGN.md Section 9/11.
+                logger.error(f"AI request failed (provider='{candidate_name}'): {exc}")
+                failure_summary.append(f"{candidate_name}: {type(exc).__name__}")
+
+                fallback_eligible = self._fallback_enabled and isinstance(
+                    exc, _FALLBACK_ELIGIBLE_ERRORS
+                )
+                if not fallback_eligible:
+                    # Fallback disabled, or a non-eligible failure type
+                    # (Section 15) -- preserve pre-EP-069.1 behavior
+                    # exactly: fail immediately, reporting the
+                    # originally selected provider.
+                    return AskResult(success=False, provider=name, model="", text="", error=str(exc))
+
+                remaining = self._provider_manager.list_fallback_candidates(exclude=attempted)
+                if not remaining:
+                    # Every eligible candidate has been tried (bounded
+                    # by construction -- Section 16, Owner Decision D5).
+                    # Only provider names and exception class names are
+                    # aggregated here, never `str(exc)`, per EP-068's
+                    # log-redaction precedent (Section 19).
+                    logger.error(
+                        "AI request failed on every eligible provider: "
+                        f"{', '.join(failure_summary)}."
+                    )
+                    return AskResult(
+                        success=False,
+                        provider=name,
+                        model="",
+                        text="",
+                        error=f"All providers failed. {'; '.join(failure_summary)}.",
+                    )
+
+                next_candidate = remaining[0]
+                logger.info(
+                    f"AI request falling back from provider='{candidate_name}' "
+                    f"to provider='{next_candidate.name()}'."
+                )
+                candidate = next_candidate
+                continue
+
+            break
 
         self._complete_turn(conversation, response.text)
-        return AskResult(success=True, provider=name, model=response.model, text=response.text, error="")
+        return AskResult(
+            success=True,
+            provider=candidate.name(),
+            model=response.model,
+            text=response.text,
+            error="",
+        )
 
     def test(self) -> AskResult:
         """Send a fixed "Hello" prompt to verify successful communication.

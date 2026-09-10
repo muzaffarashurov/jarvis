@@ -6,7 +6,200 @@ The format is inspired by Keep a Changelog.
 
 ---
 
-## v0.1.27-ep068
+## v0.1.28-ep069.1
+
+Released: 2026-09-10
+
+Status: EP-069.1 COMPLETE / STEP 3 PASS WITH WARNINGS, STEP 3.1
+FINDINGS RESOLUTION READY FOR STEP 4, NO BLOCKING FINDINGS (STEP 1
+Architecture Discovery & Design, STEP 2 Implementation & Testing,
+STEP 3 Architecture Audit, STEP 3.1 Findings Resolution Review, and
+STEP 4 Documentation Synchronization all complete).
+
+EP-069 ("AI Provider & Tool Registry") has existed since before this
+release only as a one-line planning identifier in `docs/BACKLOG.md`'s
+Long-Term Roadmap ("Foundation / Autonomy Safety (EP-069-EP-074)"),
+itself explicitly marked "PLANNING ONLY... requires its own,
+independent STEP 1." STEP 1 for this release performed that
+independent scoping and found the planning line bundled four
+architecturally distinct concerns (provider/model abstraction, already
+built by EP-014/EP-015; fallback/provider selection, not built;
+LLM tool/function calling, conflated with the unrelated EP-031 Tool
+Engine; and cost awareness, entirely unbuilt). Per this repository's
+own Engineering Package Policy (`docs/architecture/JARVIS_ROADMAP.md`)
+for splitting large packages, EP-069 is retained as a parent planning
+identifier producing no code of its own, and this release implements
+only its first, independently-scoped sub-package:
+
+**EP-069.1 -- Automatic AI Provider Fallback on Request Failure.**
+
+Before this release, `AIService.ask()` used exactly one AI provider
+per request (whichever `ai use <provider>` last selected) and failed
+the request immediately on any `ProviderError`, even when a second,
+fully configured and available provider (e.g. `gemini`) was registered
+and idle. This release adds an opt-in (`ai.fallback_enabled`, default
+`false`) fallback: when the selected provider fails with one of four
+specific, transient/availability-class failure types
+(`ProviderUnavailableError`, `ProviderNetworkError`,
+`ProviderTimeoutError`, `ProviderRateLimitError`), the identical
+already-built prompt is retried against the next available, registered
+provider, in deterministic name-sorted order, until one succeeds or
+every eligible candidate has been tried. Configuration/credential
+failures (`ProviderConfigurationError`, `ProviderAuthenticationError`)
+and any uncategorized `ProviderError` never trigger fallback, by
+design (Owner Decision D4, `docs/architecture/designs/EP069_DESIGN.md`).
+
+STEP 3's independent architecture audit
+(`docs/architecture/audits/EP069_ARCHITECTURE_AUDIT.md`) returned
+**PASS WITH WARNINGS**: zero CRITICAL/HIGH findings, and seven
+MEDIUM/LOW findings, none representing a deviation from the eleven
+approved Owner Decisions (D1-D11), all of which were independently
+confirmed correctly implemented. A dedicated STEP 3.1 review
+(`docs/architecture/audits/EP069_FINDINGS_RESOLUTION.md`)
+independently re-traced the two most significant findings against the
+actual `ClaudeProvider`/`GeminiProvider` source rather than accepting
+the audit's framing at face value, and found both to be real but
+currently non-exploitable architecture-contract gaps relevant only to
+hypothetical future provider implementations, not live defects in
+either provider that exists today -- resolved as documented residual
+risk, not requiring a code change. The remaining five findings were
+resolved as either non-blocking, deferrable test-coverage improvements
+or already-deliberate, already-documented Owner Decision trade-offs.
+Final STEP 3.1 decision: **READY FOR STEP 4**, zero findings requiring
+a fix before release.
+
+### Added
+
+- `docs/architecture/designs/EP069_DESIGN.md`: STEP 1 design document
+  for the EP-069 parent package and the EP-069.1 sub-package, including
+  Owner Decisions D1-D11 and deferred EP-069.x candidates.
+- `docs/architecture/audits/EP069_ARCHITECTURE_AUDIT.md`: STEP 3
+  independent architecture audit, verdict PASS WITH WARNINGS.
+- `docs/architecture/audits/EP069_FINDINGS_RESOLUTION.md`: STEP 3.1
+  findings resolution review, final decision READY FOR STEP 4.
+- `tests/EP069/test_ai_provider_fallback.py`: new, self-contained
+  EP-069 test suite (`NAME = "EP069"`), covering primary-success/no-
+  fallback, fallback-disabled backward compatibility, fallback-eligible
+  vs. non-eligible failure classification, fallback success, multi-
+  candidate deterministic ordering, all-candidates-exhausted bounded
+  execution with preserved diagnostics, identical-prompt-per-candidate,
+  `ProviderManager.list_fallback_candidates()` against a real
+  `ProviderRegistry` (ordering and availability/exclusion), EP-068-
+  style log-redaction verification via sentinel injection, and
+  `AIProvider` contract stability.
+- `src/core/ai/provider_manager.py`: new `list_fallback_candidates()`
+  method -- a read-only query returning registered, available
+  providers (excluding a given set of names) in the registry's
+  existing deterministic, name-sorted order. No other method changed.
+
+### Changed
+
+- `src/services/ai_service.py`: `ask()`'s single provider call and its
+  `except ProviderError` block are now a bounded loop that retries the
+  identical already-built prompt against another available, not-yet-
+  attempted registered provider when the failure is fallback-eligible
+  and `ai.fallback_enabled` is `True`; otherwise (fallback disabled, or
+  a non-eligible failure type) behavior is byte-for-byte identical to
+  before this release. `AIService.__init__()` gained one new
+  constructor parameter, `fallback_enabled: bool = False`.
+- `src/bootstrap.py`: the `AIService` composition-root call now passes
+  `fallback_enabled=bool(config.get("ai.fallback_enabled", False))`,
+  mirroring the existing `ai.enabled`/`ai.default_provider` read
+  pattern immediately above it.
+- `config/config.yaml`: added `ai.fallback_enabled: false` to the
+  existing `ai:` block. `ai.retry_count` (pre-existing, unused since
+  before this release) is unmodified and remains unreferenced by any
+  code, per Owner Decision D9 -- explicitly not repurposed.
+- `src/modules/test_module.py`: one added import line registering
+  `tests.EP069`.
+
+### Reliability
+
+- A single unavailable, rate-limited, timed-out, or unreachable AI
+  provider no longer fails a request outright when another registered,
+  configured provider is available and enabled to receive it, provided
+  the operator has opted in via `ai.fallback_enabled: true`. This is
+  disabled by default; no behavior changes for any deployment that
+  does not explicitly enable it.
+- Configuration and authentication failures are deliberately excluded
+  from fallback eligibility, so a misconfigured or rejected provider
+  remains immediately visible rather than being silently masked by a
+  successful fallback (Owner Decision D4).
+- Every new fallback-decision log statement logs only provider names
+  (a closed, code-authored set) and `ProviderError` subclass names
+  (a closed, seven-value set) -- never a prompt, a response, or a raw
+  exception message -- verified empirically via sentinel-injection
+  tests, consistent with the log-redaction discipline
+  `EP068_REV2_ARCHITECTURE_AUDIT.md` established for `CommandRouter`.
+  STEP 3's audit separately found that the one *reused*, pre-existing
+  per-attempt log line (unchanged in content from before this release)
+  rests on an assumption -- that a `ProviderError`'s message never
+  echoes API-response-body content -- that is independently confirmed
+  true for every exception type actually capable of firing that line
+  more than once per request in either `ClaudeProvider` or
+  `GeminiProvider` as they exist today, but is not yet a documented,
+  enforced guarantee of the `AIProvider` contract for future
+  providers. See `docs/architecture/audits/EP069_FINDINGS_RESOLUTION.md`
+  Section 5 for the full trace; tracked as a residual risk, not fixed
+  in this release.
+
+### Validation
+
+```
+EP069 : 68 passed / 0 failed / 0 skipped
+Full regression (57 registered suites, run individually):
+  7093 passed / 3 failed / 1 skipped / 2 environment-blocked
+```
+
+The 3 failures (`EP047`, 2 failures; `EP049`, 1 failure) and 2
+environment-blocked suites (`EP046`, `EP048` -- missing `vosk`/
+`sounddevice`+PortAudio in the sandbox) were independently reproduced,
+identically, against a fresh, completely untouched extraction of the
+pre-EP-069.1 archive, confirming they are pre-existing and unrelated
+to this release (neither Text-to-Speech nor Voice Assistant nor Speech-
+to-Text imports `AIService`/`ProviderManager`/`ProviderRegistry`).
+Every AI/provider-adjacent suite (EP018, EP054-EP058, EP061-EP068)
+passed with exactly the same counts as the pre-EP-069.1 baseline; the
+full-suite total's `+68` delta over that baseline exactly equals the
+new EP-069 suite's own passed-assertion count. Zero new failures.
+
+### STEP 3 -- Independent Architecture Audit
+
+Verdict: **PASS WITH WARNINGS**, zero CRITICAL, zero HIGH. Seven
+MEDIUM/LOW findings were recorded (EP069.1-AUDIT-001 through -007);
+all eleven Owner Decisions (D1-D11) were independently confirmed
+correctly implemented, with zero deviation between the approved design
+and the shipped code. See
+`docs/architecture/audits/EP069_ARCHITECTURE_AUDIT.md` for full detail.
+
+### STEP 3.1 -- Findings Resolution Review
+
+Every STEP 3 finding was independently re-verified against actual
+source rather than accepted from the audit's own prose. Two MEDIUM
+findings (log-line message provenance; an unhandled-`is_available()`-
+exception gap) were confirmed real but currently non-exploitable by
+any code in this repository, and resolved as documented residual risk.
+Three findings were resolved as deferrable test-coverage improvements;
+two were confirmed already-deliberate, already-documented Owner
+Decision trade-offs requiring no action. Final decision: **READY FOR
+STEP 4**, zero findings requiring a fix before release. See
+`docs/architecture/audits/EP069_FINDINGS_RESOLUTION.md`.
+
+### STEP 4 -- Documentation Synchronization
+
+Release/project documentation (`CHANGELOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/BACKLOG.md`, `docs/architecture/JARVIS_ROADMAP.md`) synchronized
+to mark EP-069.1 COMPLETE / STEP 3 PASS WITH WARNINGS / STEP 3.1 READY
+FOR STEP 4. `VERSION` and `PROJECT_MANIFEST.md` were checked against
+this repository's own established convention (neither has ever been
+updated per-EP -- see `CHANGELOG.md`'s EP-043 STEP 4 entry) and
+deliberately left unchanged. EP-069's remaining scope -- configured
+fallback ordering, cost-aware selection, LLM function/tool calling, and
+expanded fallback eligibility -- remains an unscoped, planning-only
+set of EP-069.x candidates, each requiring its own future,
+independent STEP 1; none is implemented by this release.
+
+---
 
 Released: 2026-09-09
 

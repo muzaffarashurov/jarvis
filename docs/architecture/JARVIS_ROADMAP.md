@@ -122,6 +122,83 @@ Completed sub-packages:
 
 ## Current
 
+EP-069.1 Automatic AI Provider Fallback on Request Failure —
+**COMPLETE** (STEP 1 Architecture Discovery & Design, STEP 2
+Implementation & Testing, STEP 3 Architecture Audit, STEP 3.1 Findings
+Resolution Review, and STEP 4 Documentation Synchronization all
+complete -- see docs/architecture/designs/EP069_DESIGN.md,
+docs/architecture/audits/EP069_ARCHITECTURE_AUDIT.md, and
+docs/architecture/audits/EP069_FINDINGS_RESOLUTION.md). **Final
+Verdict: STEP 3 — PASS WITH WARNINGS, ZERO CRITICAL, ZERO HIGH**
+(seven MEDIUM/LOW findings, EP069.1-AUDIT-001 through -007, none
+representing a deviation from any of the eleven approved Owner
+Decisions D1-D11); **STEP 3.1 — READY FOR STEP 4**, zero findings
+requiring a fix before release. Tied to the EP-069 "AI Provider & Tool
+Registry" planning identifier (`docs/BACKLOG.md` Long-Term Roadmap,
+"Foundation / Autonomy Safety"), which existed only as a one-line,
+explicitly "PLANNING ONLY" strategic note before this release, not a
+scoped requirement. STEP 1 found that line bundled four
+architecturally distinct concerns at very different states of
+completeness -- provider/model abstraction (already built by EP-014/
+EP-015), fallback/provider selection (not built), LLM tool/function
+calling (conflated with the unrelated, pre-existing EP-031 Tool
+Engine), and cost awareness (entirely unbuilt) -- and, per this
+roadmap's own Engineering Package Policy for splitting large packages
+into `EP-XXX.Y` sub-packages, retained EP-069 as a parent identifier
+producing no code, implementing only its first, independently-scoped
+sub-package: automatic fallback between AI providers.
+
+Before this release, `AIService.ask()` (`src/services/ai_service.py`)
+used exactly one provider per request -- whichever `ai use <provider>`
+last selected -- and failed the request immediately on any
+`ProviderError`, even when a second, fully configured and available
+provider was registered and idle in the same `ProviderRegistry`.
+EP-069.1 adds an opt-in (`ai.fallback_enabled`, default `false`)
+fallback: on one of four specific, transient/availability-class
+failure types (`ProviderUnavailableError`, `ProviderNetworkError`,
+`ProviderTimeoutError`, `ProviderRateLimitError`), `ask()` retries the
+identical already-built prompt against another available, registered
+provider, in `ProviderRegistry`'s existing deterministic, name-sorted
+order, until one succeeds or every eligible candidate has been tried.
+`ProviderConfigurationError`, `ProviderAuthenticationError`, and any
+uncategorized `ProviderError` are deliberately excluded from
+eligibility (Owner Decision D4) so a misconfigured or credential-
+rejected provider remains immediately visible rather than being
+silently masked. `ProviderManager` gained exactly one new, additive,
+read-only method, `list_fallback_candidates()`; `AIProvider`'s
+abstract contract, `ProviderRegistry`, `ProviderFactory`,
+`ClaudeProvider`, and `GeminiProvider` are all confirmed byte-for-byte
+unmodified. `ai.retry_count` (pre-existing, unused since before this
+release) remains unmodified and unreferenced by any code (Owner
+Decision D9) -- deliberately not repurposed. With `ai.fallback_enabled`
+at its default `false`, behavior is confirmed byte-for-byte identical
+to before this release via exact call-count and error-string test
+assertions, not merely outcome comparison.
+
+STEP 3's independent audit built a full design-to-code traceability
+table covering every Owner Decision and acceptance criterion,
+independently re-executed the full regression suite (rather than
+trusting STEP 2's self-report), and independently re-traced the two
+most significant findings against the actual `ClaudeProvider`/
+`GeminiProvider` source: a reused, pre-existing per-attempt log
+statement's message-provenance assumption, and an unhandled-exception
+gap in `list_fallback_candidates()` if a provider's `is_available()`
+were ever to raise. Both were confirmed real as forward-looking
+architecture-contract gaps but not exploitable by either provider that
+exists today, and resolved by STEP 3.1 as documented residual risk
+rather than a code change. The remaining five findings were resolved
+as deferrable test-coverage improvements (three) or already-deliberate
+Owner Decision trade-offs (two). Tests: EP-069 68/0/0 (new suite,
+`tests/EP069/test_ai_provider_fallback.py`), covering fallback
+enable/disable, eligibility classification, deterministic ordering,
+bounded exhaustion with preserved diagnostics, real-`ProviderRegistry`
+ordering/availability, and EP-068-style log-redaction verification via
+sentinel injection. Full regression: 7093 passed / 3 failed / 1
+skipped / 2 environment-blocked, with the failures and environment
+blocks independently reproduced identically against the untouched
+pre-EP-069.1 archive -- confirmed pre-existing and unrelated, zero new
+failures.
+
 EP-068 CommandRouter Dispatch-Level Sensitive Argument Log Redaction —
 **COMPLETE** (STEP 1 Architecture Discovery & Design, STEP 2
 Implementation & Testing, STEP 3 Architecture Audit -- Revision 1
@@ -2122,13 +2199,16 @@ EP-060 Jarvis Operating System
 
 ---
 
-## Phase A — Core Safety & Autonomy (planning only)
+## Phase A — Core Safety & Autonomy (planning only, except EP-069.1)
 
 EP-069–EP-074. Provider/tool registry, policy & human-approval engine,
 credential management, autonomous-execution safety boundaries,
 browser automation with human-in-the-loop, and an autonomous project/
 EP orchestrator. See `docs/BACKLOG.md`, "Long-Term Roadmap — Future
-Engineering Packages," for full detail.
+Engineering Packages," for full detail. **EP-069's first sub-package,
+EP-069.1 (Automatic AI Provider Fallback on Request Failure), is
+COMPLETE** — see "## Current" above. The remainder of EP-069 and all
+of EP-070–EP-074 remain planning-only.
 
 ## Phase B — Software Factory (planning only)
 
@@ -2184,10 +2264,13 @@ EP-136–EP-137.
 
 EP-138.
 
-**Phases A–N and EP-069–EP-138 are strategic planning only — nothing
-in them has been designed or implemented.** Unlike Phases 1–10 above,
-none of these EPs has a design document, an audit, or an owner
-decision yet. The ordering into Phases A–N reflects the current
+**Phases A–N and EP-069–EP-138 are strategic planning only, with one
+exception: EP-069.1 (Automatic AI Provider Fallback on Request
+Failure) is COMPLETE — see "## Current" above.** Unlike Phases 1–10
+above, none of the other EPs in Phases A–N has a design document, an
+audit, or an owner decision yet, and EP-069's own remaining scope
+(beyond EP-069.1) is likewise still planning-only. The ordering into
+Phases A–N reflects the current
 strategic grouping only; it is not a guaranteed implementation
 sequence, and a future STEP 1 for any of these EPs may reorder,
 merge, split, postpone, or reject the item after independently

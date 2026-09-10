@@ -3038,4 +3038,64 @@ EP068 : 52 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-069.1 — Automatic AI Provider Fallback on Request Failure
+
+Status: Released (STEP 3 independent audit PASS WITH WARNINGS; a
+follow-up review confirmed none of the warnings needed to be fixed
+before release -- see "Known limitations" below)
+
+A note on scope: EP-069 ("AI Provider & Tool Registry") has existed
+since before this release only as a one-line item on the long-term
+roadmap, not as a scoped, ready-to-build feature. This release starts
+work on it by building only the first, smallest piece of that idea --
+automatic fallback between AI providers -- and leaves the rest (tool
+calling, cost-aware provider selection) for later, separately-planned
+releases.
+
+Highlights:
+
+- If you have more than one AI provider configured (for example both
+  Claude and Gemini) and turn on the new fallback setting, Jarvis will
+  now automatically try your other configured provider if the one you
+  normally use is temporarily down, overloaded, or times out
+- This is off by default -- nothing changes for you unless you
+  explicitly turn it on
+- Fallback only happens for the kinds of failures that make sense to
+  retry elsewhere (the provider being unreachable, timing out, rate-
+  limiting you, or reporting itself unavailable) -- a wrong or missing
+  API key, or a disabled provider, still fails immediately and visibly,
+  rather than being silently papered over
+- When a fallback happens, the log records which provider it fell back
+  to, without ever recording your prompt, the reply, or any raw error
+  text
+- Nothing changes about how you talk to Jarvis, what commands exist, or
+  which provider is "yours" by default -- `ai use <provider>` still
+  works exactly as before
+
+Compatibility:
+
+Fully backward compatible with every prior release. No existing
+command, setting, or behavior changed for anyone who does not opt in
+to the new `ai.fallback_enabled` setting. No breaking changes.
+
+Known limitations:
+
+- The independent review that checked this release found no blocking
+  problems, but flagged two forward-looking notes for future providers
+  Jarvis might add later: first, that a future AI provider's error
+  messages should be double-checked to make sure they never accidentally
+  include part of what you typed; and second, that a future provider
+  should not be allowed to crash a request by misbehaving when Jarvis
+  asks "are you available?" Neither of these affects the two providers
+  Jarvis supports today (Claude and Gemini), which were both checked and
+  confirmed safe. A few smaller, optional test improvements were also
+  identified and deferred. See
+  `docs/architecture/audits/EP069_FINDINGS_RESOLUTION.md` for detail.
+
+Validation:
+
+EP069 : 68 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

@@ -22,6 +22,18 @@ ordered preference list, and no change to `set_current()`/
 `get_current()` -- fallback never changes which provider is
 "current" for the next fresh request (`EP069_DESIGN.md` Section 14,
 Owner Decision D1).
+
+EP-069.2 (Configured AI Provider Fallback Ordering) additively adds an
+optional, immutable-after-construction `fallback_order` preference,
+consulted only inside `list_fallback_candidates()`. It changes nothing
+about *which* providers are eligible (still `is_available()` and not
+excluded, exactly as EP-069.1 left it) -- only the *order* in which an
+already-computed eligible set is returned. Absent or empty
+`fallback_order` reproduces EP-069.1's original alphabetical order
+exactly, byte-for-byte (`EP069_2_DESIGN.md` Section 11/12, Owner
+Decision D7). `set_current()`/`get_current()` and
+`ProviderRegistry.list()`'s own general-purpose alphabetical
+guarantee are both untouched by this addition.
 """
 
 from __future__ import annotations
@@ -47,7 +59,11 @@ class ProviderManager:
     """
 
     def __init__(
-        self, registry: ProviderRegistry, enabled: bool, default_provider: str | None
+        self,
+        registry: ProviderRegistry,
+        enabled: bool,
+        default_provider: str | None,
+        fallback_order: list[str] | None = None,
     ) -> None:
         """Initialize the ProviderManager.
 
@@ -57,6 +73,13 @@ class ProviderManager:
             default_provider: Initial value of 'ai.default_provider'
                 from configuration. "none" (or None) means no provider
                 is selected at startup.
+            fallback_order: Initial value of 'ai.fallback_order' from
+                configuration (EP-069.2) -- an operator-preferred
+                provider-name order consulted only by
+                `list_fallback_candidates()`. `None` or an empty list
+                preserves EP-069.1's original alphabetical fallback
+                order exactly. Read once here and never mutated
+                afterward (`EP069_2_DESIGN.md` Section 17).
         """
         self._registry = registry
         self._enabled = enabled
@@ -65,6 +88,7 @@ class ProviderManager:
             if default_provider and default_provider.lower() != "none"
             else None
         )
+        self._fallback_order: list[str] = list(fallback_order) if fallback_order else []
         self._lock = Lock()
 
     # ---------- Required API ----------
@@ -134,14 +158,30 @@ class ProviderManager:
         A candidate is eligible when it is registered, reports
         `is_available() == True`, and its name is not in `exclude`
         (typically every provider already attempted for the current
-        request, per `EP069_DESIGN.md` Section 14). Ordering matches
-        `ProviderRegistry.list()`'s existing deterministic,
-        name-sorted order (`EP069_DESIGN.md` Section 17) -- no
-        separate priority list or scoring is introduced.
+        request, per `EP069_DESIGN.md` Section 14). This eligibility
+        rule is entirely unchanged by EP-069.2 -- `fallback_order`
+        (below) only ever reorders an already-computed eligible set,
+        never expands or shrinks it.
+
+        Ordering (EP-069.2, `EP069_2_DESIGN.md` Section 11/12): when
+        `fallback_order` was not provided (or was empty) at
+        construction, ordering matches `ProviderRegistry.list()`'s
+        existing deterministic, name-sorted order exactly -- byte-for-
+        byte identical to EP-069.1's original behavior. When
+        `fallback_order` is non-empty, eligible candidates whose name
+        appears in it are returned first, in `fallback_order`'s own
+        sequence; any remaining eligible candidate not named in
+        `fallback_order` is appended afterward, in the existing
+        name-sorted order among themselves. A name in `fallback_order`
+        that does not match any eligible candidate (unregistered,
+        unavailable, or already excluded) is simply never matched and
+        has no effect -- never an error, never a fabricated candidate.
 
         This method performs no request-level orchestration and holds
-        no state of its own: eligibility is derived fresh from the
-        registry on every call, so it can never go stale relative to
+        no state of its own beyond the immutable `fallback_order` read
+        once at construction: eligibility and the alphabetical base
+        order are both derived fresh from the registry on every call,
+        so they can never go stale relative to
         `register_provider()`/`remove()`.
 
         Args:
@@ -149,14 +189,31 @@ class ProviderManager:
                 every provider already attempted this request).
 
         Returns:
-            Every eligible AIProvider, ordered by `name()`.
+            Every eligible AIProvider, ordered per `fallback_order`
+            (if configured) followed by any unlisted eligible
+            candidates in `name()` order, with no duplicates.
         """
         excluded = set(exclude)
-        return [
+        eligible = [
             provider
             for provider in self._registry.list()
             if provider.name() not in excluded and provider.is_available()
         ]
+        if not self._fallback_order:
+            return eligible
+
+        eligible_by_name = {provider.name(): provider for provider in eligible}
+        seen: set[str] = set()
+        ordered: list[AIProvider] = []
+        for name in self._fallback_order:
+            # First occurrence wins; a repeated name in `fallback_order`
+            # must never add the same candidate twice (Owner Decision,
+            # `EP069_2_DESIGN.md` Section 12/14).
+            if name in eligible_by_name and name not in seen:
+                ordered.append(eligible_by_name[name])
+                seen.add(name)
+        unlisted = [provider for provider in eligible if provider.name() not in seen]
+        return ordered + unlisted
 
     # ---------- AI subsystem enable/disable ----------
 

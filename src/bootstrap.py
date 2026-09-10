@@ -582,10 +582,27 @@ class Bootstrap:
         # placeholder (see ProviderFactory) -- no network requests, no
         # AI API calls, no chat/streaming (EP-014's "IMPORTANT" section).
         ai_provider_registry = AIProviderRegistry()
+        # EP-069.2 Configured AI Provider Fallback Ordering. An
+        # operator-preferred provider-name order consulted only by
+        # ProviderManager.list_fallback_candidates() -- absent, empty,
+        # or invalid-typed configuration all preserve EP-069.1's
+        # original alphabetical fallback order exactly (see
+        # docs/architecture/designs/EP069_2_DESIGN.md Section 13/14).
+        # Mirrors 'telegram.allowed_chat_ids' below: an invalid type is
+        # never a startup error, only treated as absent.
+        ai_fallback_order = config.get("ai.fallback_order", [])
+        if not isinstance(ai_fallback_order, list):
+            logger.warning(
+                "Configuration 'ai.fallback_order' must be a list; "
+                f"got {type(ai_fallback_order).__name__}. Ignoring it -- "
+                "fallback order defaults to alphabetical."
+            )
+            ai_fallback_order = []
         ai_provider_manager = ProviderManager(
             registry=ai_provider_registry,
             enabled=bool(config.get("ai.enabled", False)),
             default_provider=str(config.get("ai.default_provider", "none")),
+            fallback_order=ai_fallback_order,
         )
         provider_factory = ProviderFactory(config=config)
         for provider in provider_factory.build_all():

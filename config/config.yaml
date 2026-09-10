@@ -584,6 +584,17 @@ ai:
   # explicitly opted into; see src/services/ai_service.py and
   # docs/architecture/designs/EP069_DESIGN.md.
   fallback_enabled: false
+  # EP-069.2 Configured AI Provider Fallback Ordering. Optional,
+  # operator-preferred provider-name order consulted only when a
+  # fallback is actually attempted (i.e. only when 'fallback_enabled'
+  # above is true). Empty (the default) preserves EP-069.1's original
+  # alphabetical fallback order exactly -- no behavior change for any
+  # existing configuration. A name here that is not currently
+  # registered/available is simply ignored, never an error. Provider
+  # names not listed here remain eligible and are appended afterward
+  # in alphabetical order. See
+  # docs/architecture/designs/EP069_2_DESIGN.md.
+  fallback_order: []
 
 conversation:
   # EP-016 Conversation Engine. Provider-independent chat session

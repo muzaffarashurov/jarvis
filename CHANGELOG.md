@@ -6,6 +6,193 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.29-ep069.2
+
+Released: 2026-09-10
+
+Status: EP-069.2 COMPLETE / STEP 3 PASS WITH WARNINGS, STEP 3.1
+FINDINGS RESOLUTION READY FOR STEP 4, NO BLOCKING FINDINGS (STEP 1
+Architecture Discovery & Design, STEP 2 Implementation & Testing,
+STEP 3 Architecture Audit, STEP 3.1 Findings Resolution Review, and
+STEP 4 Documentation Synchronization all complete).
+
+**EP-069.2 -- Configured AI Provider Fallback Ordering.** EP-069.1
+left `AIService.ask()`'s fallback candidate order fixed to
+`ProviderRegistry`'s alphabetical order, with no way for an operator
+to prefer one available provider over another once the primary fails
+(`EP069_DESIGN.md` Section 29, Owner Decision D6). STEP 1 for this
+release independently verified, against `EP069_DESIGN.md` Section 29
+and `docs/BACKLOG.md`, that this -- not cost-aware provider
+selection, the STEP 1 task's own initial hypothesis -- is the correct
+next EP-069.x slice: both documents name it first among EP-069's
+deferred candidates, and unlike cost-aware selection (which has no
+token/cost data anywhere in this repository to build on), fallback
+ordering is a pure reordering of an already-built mechanism with no
+architectural prerequisite gap.
+
+This release adds an optional, operator-configured `ai.fallback_order`
+(default `[]`) consulted only by
+`ProviderManager.list_fallback_candidates()`: eligible fallback
+candidates named in `ai.fallback_order` are attempted first, in the
+configured sequence; any remaining eligible candidate not named is
+appended afterward in the existing alphabetical order. Absent or
+empty `ai.fallback_order` reproduces EP-069.1's original alphabetical
+order exactly, byte-for-byte. Availability filtering and
+already-attempted-provider exclusion are both untouched and cannot be
+bypassed by configured ordering. `ai.fallback_enabled` remains the
+sole switch controlling whether fallback happens at all;
+`ai.fallback_order` has zero effect while it is `false`.
+
+STEP 3's independent architecture audit
+(`docs/architecture/audits/EP069_2_ARCHITECTURE_AUDIT.md`) returned
+**PASS WITH WARNINGS**: zero CRITICAL/HIGH findings, and six new
+EP-069.2-specific MEDIUM/LOW findings (EP069.2-AUDIT-001 through -006;
+a seventh entry, EP069.2-AUDIT-007, is a restatement of an
+already-resolved EP-069.1 finding, not a new one). Design-to-code
+conformance was otherwise exact, with zero deviation from any Owner
+Decision. A dedicated STEP 3.1 review
+(`docs/architecture/audits/EP069_2_FINDINGS_RESOLUTION.md`)
+independently re-traced the most significant finding
+(EP069.2-AUDIT-001) further than the STEP 3 audit itself had, reaching
+a more precise characterization: **a `list`-typed `ai.fallback_order`
+containing an unhashable element (a nested mapping or nested list --
+most plausibly from a YAML indentation mistake) currently crashes
+`list_fallback_candidates()` with an unhandled `TypeError` the next
+time fallback is attempted**, because `src/bootstrap.py`'s validation
+checks only the container's type, not its elements' types. This does
+not violate any approved Acceptance Criterion (which only covers a
+non-list *whole value*) and is not reachable via the documented,
+flat-list-of-strings configuration shape, but it is a real, currently
+reproducible defect, not merely a hypothetical future-provider risk
+like EP-069.1's own comparable findings. Final STEP 3.1 decision:
+**READY FOR STEP 4**, with EP069.2-AUDIT-001 explicitly retained,
+undeleted, and flagged as the highest-priority deferred item for a
+near-term fast-follow (see `docs/BACKLOG.md`).
+
+### Added
+
+- `docs/architecture/designs/EP069_2_DESIGN.md`: STEP 1 design
+  document, including the independent re-scoping evidence (Section 0)
+  and Owner Decisions D1-D12.
+- `docs/architecture/audits/EP069_2_ARCHITECTURE_AUDIT.md`: STEP 3
+  independent architecture audit, verdict PASS WITH WARNINGS.
+- `docs/architecture/audits/EP069_2_FINDINGS_RESOLUTION.md`: STEP 3.1
+  findings resolution review, final decision READY FOR STEP 4.
+- `tests/EP069_2/test_provider_fallback_ordering.py`: new,
+  self-contained EP-069.2 test suite (`NAME = "EP069_2"`, deliberately
+  distinct from `"EP069"` to avoid `TestRegistry`'s known NAME-keyed
+  registration collision -- see `docs/BACKLOG.md`), covering absent/
+  empty-order backward compatibility, full and partial configured
+  ordering, unknown-name inertness, availability/exclusion filtering,
+  duplicate-name deduplication, determinism, real end-to-end
+  `AIService.ask()` fallback-loop integration, fallback-disabled
+  independence, `AIProvider` contract stability, and real-`Bootstrap`
+  configuration wiring (configured, absent, and invalid-type
+  `ai.fallback_order`).
+
+### Changed
+
+- `src/core/ai/provider_manager.py`: `ProviderManager.__init__` gained
+  one new optional constructor parameter, `fallback_order: list[str] |
+  None = None`, stored as an immutable, defensively-copied
+  `self._fallback_order`. `list_fallback_candidates()` now reorders
+  its already-computed eligible-candidate set per `fallback_order`
+  (configured names first, in configured sequence; unlisted names
+  appended afterward in the existing alphabetical order) when
+  configured, and is otherwise byte-for-byte unchanged. No other
+  method changed.
+- `src/bootstrap.py`: the single `ProviderManager(...)` construction
+  site now reads `ai.fallback_order`, validates it is a `list` (a
+  non-list value logs one `WARNING` and is treated as `[]`, mirroring
+  the existing `telegram.allowed_chat_ids` precedent), and passes it
+  through.
+- `config/config.yaml`: added `ai.fallback_order: []` to the existing
+  `ai:` block, directly below `ai.fallback_enabled`.
+- `src/modules/test_module.py`: one added import line registering
+  `tests.EP069_2`.
+
+### Reliability
+
+- Operators running more than one available, configured AI provider
+  can now express a preferred fallback attempt order, instead of
+  fallback always trying providers in alphabetical order regardless of
+  preference (e.g. cost, latency, or policy reasons unrelated to
+  alphabetical accident).
+- Configured ordering cannot bypass EP-069.1's existing availability
+  filtering or already-attempted-provider exclusion -- both are
+  applied before any ordering is considered, structurally, not merely
+  by convention.
+- **Known residual risk (EP069.2-AUDIT-001, tracked, not fixed in this
+  release):** an `ai.fallback_order` list containing a nested mapping
+  or nested list -- not a flat list of provider-name strings, as every
+  documented example shows -- crashes fallback evaluation with an
+  unhandled `TypeError` rather than being treated as invalid
+  configuration. See
+  `docs/architecture/audits/EP069_2_FINDINGS_RESOLUTION.md` Section 5
+  for the full trace and `docs/BACKLOG.md` for the tracked follow-up
+  item.
+
+### Validation
+
+```
+EP069_2 : 26 passed / 0 failed / 0 skipped
+EP069   : 68 passed / 0 failed / 0 skipped
+Full regression (58 registered suites, run individually):
+  7119 passed / 3 failed / 1 skipped / 2 environment-blocked
+```
+
+The 3 failures (`EP047`, 2 failures; `EP049`, 1 failure) and 2
+environment-blocked suites (`EP046`, `EP048`) are identical in
+identity, cause, and count to the established pre-EP-069.2 (EP-069.1)
+baseline of 7093/3/1/2 -- the `+26` delta exactly equals this
+release's own new suite's passed-assertion count. Zero new failures.
+
+### STEP 3 -- Independent Architecture Audit
+
+Verdict: **PASS WITH WARNINGS**, zero CRITICAL, zero HIGH. Six new
+EP-069.2-specific MEDIUM/LOW findings were recorded
+(EP069.2-AUDIT-001 through -006), plus one restated, already-resolved
+EP-069.1 finding (EP069.2-AUDIT-007, not new). Design-to-code
+conformance was exact against every requirement in
+`EP069_2_DESIGN.md`. See
+`docs/architecture/audits/EP069_2_ARCHITECTURE_AUDIT.md` for full
+detail.
+
+### STEP 3.1 -- Findings Resolution Review
+
+Every STEP 3 finding was independently re-verified against actual
+source, and the most significant one (EP069.2-AUDIT-001) was traced
+further than the audit itself had, narrowing its precise trigger
+(unhashable list elements specifically, not any wrong element type)
+while also identifying a more realistic authoring mistake that
+triggers it (a YAML indentation slip producing a nested list) than the
+audit's own illustrative example. Classified as DESIGN UPDATE
+REQUIRED -- non-blocking for STEP 4 (it violates no approved
+Acceptance Criterion and fails loudly, not silently), but explicitly
+flagged as the highest-priority deferred item, unlike this repository's
+typical "document and defer" resolution, because it is a live defect
+in shipped code rather than a hypothetical future-provider risk. Final
+decision: **READY FOR STEP 4**. See
+`docs/architecture/audits/EP069_2_FINDINGS_RESOLUTION.md`.
+
+### STEP 4 -- Documentation Synchronization
+
+Release/project documentation (`CHANGELOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/BACKLOG.md`, `docs/architecture/JARVIS_ROADMAP.md`) synchronized
+to mark EP-069.2 COMPLETE / STEP 3 PASS WITH WARNINGS / STEP 3.1 READY
+FOR STEP 4, with EP069.2-AUDIT-001 recorded as a tracked, unfixed,
+highest-priority deferred item (not silently dropped). `VERSION` and
+`PROJECT_MANIFEST.md` were checked against this repository's own
+established convention (neither has ever been updated per-EP -- see
+this file's EP-043 and EP-069.1 STEP 4 entries) and deliberately left
+unchanged. EP-069's remaining scope -- cost-aware selection, LLM
+function/tool calling, and expanded fallback eligibility -- remains an
+unscoped, planning-only set of EP-069.x candidates, each requiring its
+own future, independent STEP 1; none is implemented by this release.
+EP-069.3 was not started.
+
+---
+
 ## v0.1.28-ep069.1
 
 Released: 2026-09-10

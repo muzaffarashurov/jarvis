@@ -3098,4 +3098,53 @@ EP069 : 68 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-069.2 — Configured AI Provider Fallback Ordering
+
+Status: Released (STEP 3 independent audit PASS WITH WARNINGS; a
+follow-up review confirmed nothing needed to be fixed before release,
+though one issue was flagged as a priority item to fix soon -- see
+"Known limitations" below)
+
+Highlights:
+
+- If you have more than one AI provider available and use the
+  fallback feature from the previous release, you can now tell Jarvis
+  which provider you'd like it to try first when your usual one is
+  down, instead of Jarvis always picking in alphabetical order
+- This is entirely optional -- if you don't set a preferred order,
+  nothing changes, and fallback keeps working exactly as it did before
+- Providers you don't mention in your preferred order are still tried
+  afterward, in the same predictable order as before
+- A typo or a provider name you haven't set up yet in your preferred
+  order is simply ignored -- it won't cause an error or break anything
+- This only affects the order fallback tries providers in -- it never
+  changes whether fallback happens at all; the on/off switch from the
+  previous release still controls that
+
+Compatibility:
+
+Fully backward compatible with every prior release. No existing
+command, setting, or behavior changed for anyone who does not set a
+preferred fallback order. No breaking changes.
+
+Known limitations:
+
+- The independent review that checked this release found one real
+  issue: if you list your preferred providers in a way that isn't a
+  simple, flat list (for example, by accidentally mis-indenting the
+  list in your configuration file so it nests one list inside
+  another), Jarvis will currently show an error the next time it tries
+  to fall back to another provider, instead of just ignoring the
+  mistake. This has been logged as a known issue to fix soon. It will
+  not affect you if you list your preferred providers the normal way,
+  as shown in the configuration file's own example. See
+  `docs/architecture/audits/EP069_2_FINDINGS_RESOLUTION.md` for
+  detail.
+
+Validation:
+
+EP069_2 : 26 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

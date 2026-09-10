@@ -11,17 +11,110 @@ Status: Active
 ## Next Engineering Package
 
 **None yet defined beyond EP-069's own remaining scope.** EP-069.1
-(Automatic AI Provider Fallback on Request Failure) completed the
-first, independently-scoped sub-package of the EP-069 ("AI Provider &
+(Automatic AI Provider Fallback on Request Failure) and EP-069.2
+(Configured AI Provider Fallback Ordering) completed the first two,
+independently-scoped sub-packages of the EP-069 ("AI Provider &
 Tool Registry") planning identifier -- see the Long-Term Roadmap
 section below, whose EP-069 bullet is unchanged in wording but whose
-first slice is now implemented. EP-069's remaining scope (configured
-fallback ordering, cost-aware provider selection, LLM function/tool
-calling, and expanded fallback eligibility) remains unscoped and
-planning-only; each requires its own future, independent STEP 1
+first two slices are now implemented. EP-069's remaining scope
+(cost-aware provider selection, LLM function/tool calling, and
+expanded fallback eligibility) remains unscoped and planning-only;
+each requires its own future, independent STEP 1
 before implementation, per this repository's Engineering Package
 Policy. No EP-070 or Phase 11 exists anywhere in this repository as of
-this release.
+this release. One tracked, non-blocking follow-up item exists from
+EP-069.2's own STEP 3.1 review (see the EP-069.2 entry below):
+`ai.fallback_order` does not yet validate individual list elements,
+only that the value itself is a list -- an `ai.fallback_order`
+containing a nested mapping or nested list currently crashes fallback
+evaluation with an unhandled `TypeError` instead of being treated as
+invalid configuration (EP069.2-AUDIT-001). This requires no new EP
+number; it is a small, targeted fix to EP-069.2's own
+`src/bootstrap.py` validation, tracked here as the highest-priority
+deferred item from this release.
+
+### EP-069.2 — Configured AI Provider Fallback Ordering
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), STEP 3.1 (Findings Resolution
+Review), and STEP 4 (Documentation Synchronization) all complete.
+EP-069.2 is marked **COMPLETE / STEP 3 PASS WITH WARNINGS, STEP 3.1
+READY FOR STEP 4, NO BLOCKING FINDINGS**. Full design:
+`docs/architecture/designs/EP069_2_DESIGN.md`. Audit:
+`docs/architecture/audits/EP069_2_ARCHITECTURE_AUDIT.md`. Findings
+resolution: `docs/architecture/audits/EP069_2_FINDINGS_RESOLUTION.md`.
+
+STEP 1's own task framed cost-aware provider selection as the assumed
+EP-069.2 candidate, but required independent verification rather than
+forcing that scope. STEP 1 found `EP069_DESIGN.md` Section 29 and this
+file's own wording (above, before this release) both independently
+named **configured fallback ordering** first among EP-069's deferred
+candidates, with cost-aware selection second -- and confirmed
+architecturally that ordering has no prerequisite gap (it is a pure
+reorder of `ProviderManager.list_fallback_candidates()`, an
+already-built EP-069.1 mechanism), while cost-aware selection would
+require token/cost data that exists nowhere in this repository.
+EP-069.2 was retitled accordingly and implements only fallback
+ordering.
+
+EP-069.2 adds an optional `ai.fallback_order` (default `[]`),
+consulted only by `list_fallback_candidates()`: eligible fallback
+candidates named in it are attempted first, in the configured
+sequence; unlisted eligible candidates are appended afterward in the
+existing alphabetical order. Absent or empty `ai.fallback_order`
+reproduces EP-069.1's original alphabetical order exactly.
+Availability filtering and already-attempted-provider exclusion are
+both structurally unbypassable by configured ordering -- the eligible
+candidate set is computed identically to before EP-069.2, and ordering
+only ever reorders that same set. `ai.fallback_enabled` remains the
+sole switch controlling whether fallback happens at all.
+
+STEP 3's independent audit returned **PASS WITH WARNINGS**: zero
+CRITICAL/HIGH findings; six new EP-069.2-specific MEDIUM/LOW findings
+(EP069.2-AUDIT-001 through -006), plus a restatement of an
+already-resolved EP-069.1 finding (not new). Design-to-code
+conformance was exact, with zero deviation from any of the twelve
+approved Owner Decisions (D1-D12). STEP 3.1 independently re-traced
+the most significant finding, EP069.2-AUDIT-001, further than the
+audit itself had: **`src/bootstrap.py` validates that
+`ai.fallback_order` is a `list`, but not that each element is a
+string** -- a list containing a nested mapping or nested list (for
+example, from a YAML indentation mistake) is a genuine `list` and
+passes validation, but crashes `list_fallback_candidates()` with an
+unhandled `TypeError` the next time fallback runs, because ordering
+looks up each configured name in a `dict`, which requires the name to
+be hashable. This does not violate any approved Acceptance Criterion
+(which covers only a non-list *whole value*) and cannot be triggered
+by the documented, flat-list-of-strings configuration example, but it
+is a real, currently reproducible defect in shipped code, not a
+hypothetical future-provider risk like EP-069.1's comparable findings
+were. Classified **DESIGN UPDATE REQUIRED**, non-blocking for STEP 4,
+but explicitly flagged as this release's highest-priority deferred
+item rather than an equal-weight residual risk. The remaining five
+findings were resolved as deferrable test-coverage improvements
+(three), a cosmetic design-document correction (one), and an
+already-non-live test-isolation assumption (one). Final decision:
+**READY FOR STEP 4**, zero findings requiring a fix before release.
+
+Tests: EP-069_2 26/0/0
+(`tests/EP069_2/test_provider_fallback_ordering.py`). Full regression:
+7119 passed / 3 failed / 1 skipped / 2 environment-blocked (identical
+in identity, cause, and count to the pre-EP-069.2 baseline; the `+26`
+delta exactly equals this release's own new suite's passed-assertion
+count) -- see
+`docs/architecture/audits/EP069_2_ARCHITECTURE_AUDIT.md` Section 16
+for detail.
+
+**Tracked follow-up (not implemented in this release):** extend
+`src/bootstrap.py`'s `ai.fallback_order` validation to reject or
+ignore individual non-string list elements (with the same `WARNING`-
+then-ignore discipline already used for a non-list whole value), add
+a regression test for EP069.2-AUDIT-001, and correct
+`EP069_2_DESIGN.md` Section 12's illustrative pseudocode to include
+the duplicate-name guard the shipped implementation already correctly
+has (EP069.2-AUDIT-005, cosmetic only). See
+`docs/architecture/audits/EP069_2_FINDINGS_RESOLUTION.md` Sections 5,
+7.4, and 11 for full detail.
 
 ### EP-069.1 — Automatic AI Provider Fallback on Request Failure
 
@@ -2710,13 +2803,15 @@ Priority may change.
 # Long-Term Roadmap — Future Engineering Packages (EP-069–EP-138)
 
 Status: PLANNING ONLY, with one exception. Nothing in this section has
-been implemented, designed, or scheduled, **except EP-069's first
-sub-package, EP-069.1 (Automatic AI Provider Fallback on Request
-Failure), which is COMPLETE** -- see the "Next Engineering Package"
-section above and `docs/architecture/designs/EP069_DESIGN.md`. No
+been implemented, designed, or scheduled, **except EP-069's first two
+sub-packages, EP-069.1 (Automatic AI Provider Fallback on Request
+Failure) and EP-069.2 (Configured AI Provider Fallback Ordering),
+which are COMPLETE** -- see the "Next Engineering Package"
+section above and `docs/architecture/designs/EP069_DESIGN.md`/
+`docs/architecture/designs/EP069_2_DESIGN.md`. No
 other EP number below has an owner, a design document, or a STEP 1
-report yet, and EP-069's own remaining scope (beyond EP-069.1) is
-likewise still planning-only -- this section otherwise exists solely
+report yet, and EP-069's own remaining scope (beyond EP-069.1/EP-069.2)
+is likewise still planning-only -- this section otherwise exists solely
 to record the long-term direction so future work has a stable set of
 planning identifiers to start from.
 
@@ -2756,11 +2851,13 @@ remote shell.
   independent abstractions for AI providers, models, tools,
   capabilities, fallback providers, provider selection, and cost
   awareness, so Jarvis is never hard-coded to one AI provider.
-  **EP-069.1 (Automatic AI Provider Fallback on Request Failure) is
-  COMPLETE** -- see the "Next Engineering Package" section above and
-  `docs/architecture/designs/EP069_DESIGN.md`. The remaining scope
-  described in this bullet (tools, capabilities, cost awareness, and
-  configured fallback ordering) remains unscoped and planning-only;
+  **EP-069.1 (Automatic AI Provider Fallback on Request Failure) and
+  EP-069.2 (Configured AI Provider Fallback Ordering) are
+  COMPLETE** -- see the "Next Engineering Package" section above,
+  `docs/architecture/designs/EP069_DESIGN.md`, and
+  `docs/architecture/designs/EP069_2_DESIGN.md`. The remaining scope
+  described in this bullet (tools, capabilities, and cost awareness)
+  remains unscoped and planning-only;
   each requires its own future, independent STEP 1, per this
   repository's Engineering Package Policy for `EP-XXX.Y` sub-packages.
 - **EP-070 — Policy, Permissions & Human Approval Engine** (HIGH).

@@ -122,6 +122,79 @@ Completed sub-packages:
 
 ## Current
 
+EP-069.2 Configured AI Provider Fallback Ordering — **COMPLETE**
+(STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
+Testing, STEP 3 Architecture Audit, STEP 3.1 Findings Resolution
+Review, and STEP 4 Documentation Synchronization all complete -- see
+docs/architecture/designs/EP069_2_DESIGN.md,
+docs/architecture/audits/EP069_2_ARCHITECTURE_AUDIT.md, and
+docs/architecture/audits/EP069_2_FINDINGS_RESOLUTION.md). **Final
+Verdict: STEP 3 — PASS WITH WARNINGS, ZERO CRITICAL, ZERO HIGH** (six
+new EP-069.2-specific MEDIUM/LOW findings, EP069.2-AUDIT-001 through
+-006, plus a restatement of an already-resolved EP-069.1 finding, none
+representing a deviation from any of the twelve approved Owner
+Decisions D1-D12); **STEP 3.1 — READY FOR STEP 4**, zero findings
+requiring a fix before release. STEP 1's own task framed cost-aware
+provider selection as the assumed next slice, but independent
+verification against `EP069_DESIGN.md` Section 29 and
+`docs/BACKLOG.md` -- both of which name configured fallback ordering
+first among EP-069's deferred candidates, with no architectural
+prerequisite gap, unlike cost-aware selection -- found that hypothesis
+incorrect and retitled the slice accordingly.
+
+EP-069.1 left `AIService.ask()`'s fallback candidate order fixed to
+`ProviderRegistry`'s alphabetical order (Owner Decision D6), with no
+operator control over which available provider is preferred once the
+primary fails. EP-069.2 adds an optional `ai.fallback_order` (default
+`[]`), consulted only by
+`ProviderManager.list_fallback_candidates()`: eligible candidates
+named in it are attempted first, in the configured sequence; unlisted
+eligible candidates are appended afterward in the existing
+alphabetical order. Absent or empty `ai.fallback_order` reproduces
+EP-069.1's original alphabetical order exactly, byte-for-byte.
+Availability filtering and already-attempted-provider exclusion are
+structurally unbypassable by configured ordering -- the eligible
+candidate set is computed identically to before EP-069.2 (unchanged
+`is_available()`/`exclude` checks), and ordering only ever reorders
+that same set, never expands it. `AIProvider`, `ProviderRegistry`,
+`ProviderFactory`, `ClaudeProvider`, `GeminiProvider`, and `AIService`
+are all confirmed byte-for-byte unmodified. `ai.fallback_enabled`
+remains the sole switch controlling whether fallback happens at all.
+
+STEP 3's independent audit built a design-to-code conformance table
+covering every Owner Decision and Acceptance Criterion, independently
+re-executed the full regression suite rather than trusting STEP 2's
+self-report, and independently reproduced its most significant
+finding rather than accepting a hypothetical description of it. STEP
+3.1 traced that finding (EP069.2-AUDIT-001) further still: validated
+that `src/bootstrap.py` checks only that `ai.fallback_order` is a
+`list`, not that its elements are strings, and reproduced a concrete,
+currently-live crash -- a nested mapping or nested list inside
+`ai.fallback_order` (most plausibly from a YAML indentation mistake)
+is itself a genuine `list` value, passes validation, but crashes
+`list_fallback_candidates()`'s configured-name lookup with an
+unhandled `TypeError` on hashing the unhashable element. This violates
+no approved Acceptance Criterion (scoped only to a non-list whole
+value) and is unreachable via the documented flat-list-of-strings
+example, but is a real defect in shipped code, not a hypothetical
+future-provider risk as EP-069.1's comparable findings were.
+Classified DESIGN UPDATE REQUIRED, non-blocking for STEP 4, and
+explicitly flagged as this release's highest-priority deferred item.
+The remaining five findings were resolved as deferrable test-coverage
+improvements (three), a cosmetic design-document correction (one), and
+an already-non-live test-isolation assumption (one). Tests: EP-069_2
+26/0/0 (new suite,
+`tests/EP069_2/test_provider_fallback_ordering.py`), covering
+absent/empty-order backward compatibility, full/partial configured
+ordering, unknown-name inertness, availability/exclusion filtering,
+duplicate-name deduplication, determinism, real end-to-end
+`AIService.ask()` fallback-loop integration, and real-`Bootstrap`
+configuration wiring. Full regression: 7119 passed / 3 failed / 1
+skipped / 2 environment-blocked, identical in identity, cause, and
+count to the pre-EP-069.2 baseline -- the `+26` delta exactly equals
+this release's own new suite's passed-assertion count, zero new
+failures.
+
 EP-069.1 Automatic AI Provider Fallback on Request Failure —
 **COMPLETE** (STEP 1 Architecture Discovery & Design, STEP 2
 Implementation & Testing, STEP 3 Architecture Audit, STEP 3.1 Findings
@@ -2199,14 +2272,15 @@ EP-060 Jarvis Operating System
 
 ---
 
-## Phase A — Core Safety & Autonomy (planning only, except EP-069.1)
+## Phase A — Core Safety & Autonomy (planning only, except EP-069.1/EP-069.2)
 
 EP-069–EP-074. Provider/tool registry, policy & human-approval engine,
 credential management, autonomous-execution safety boundaries,
 browser automation with human-in-the-loop, and an autonomous project/
 EP orchestrator. See `docs/BACKLOG.md`, "Long-Term Roadmap — Future
-Engineering Packages," for full detail. **EP-069's first sub-package,
-EP-069.1 (Automatic AI Provider Fallback on Request Failure), is
+Engineering Packages," for full detail. **EP-069's first two
+sub-packages, EP-069.1 (Automatic AI Provider Fallback on Request
+Failure) and EP-069.2 (Configured AI Provider Fallback Ordering), are
 COMPLETE** — see "## Current" above. The remainder of EP-069 and all
 of EP-070–EP-074 remain planning-only.
 
@@ -2266,10 +2340,11 @@ EP-138.
 
 **Phases A–N and EP-069–EP-138 are strategic planning only, with one
 exception: EP-069.1 (Automatic AI Provider Fallback on Request
-Failure) is COMPLETE — see "## Current" above.** Unlike Phases 1–10
+Failure) and EP-069.2 (Configured AI Provider Fallback Ordering) are
+COMPLETE — see "## Current" above.** Unlike Phases 1–10
 above, none of the other EPs in Phases A–N has a design document, an
 audit, or an owner decision yet, and EP-069's own remaining scope
-(beyond EP-069.1) is likewise still planning-only. The ordering into
+(beyond EP-069.1/EP-069.2) is likewise still planning-only. The ordering into
 Phases A–N reflects the current
 strategic grouping only; it is not a guaranteed implementation
 sequence, and a future STEP 1 for any of these EPs may reorder,

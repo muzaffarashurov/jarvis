@@ -2380,63 +2380,84 @@ sub-packages, EP-069.1 (Automatic AI Provider Fallback on Request
 Failure), EP-069.2 (Configured AI Provider Fallback Ordering), and
 EP-069.3 (Cost-Aware AI Provider Selection), are
 COMPLETE** — see "## Current" above. The remainder of EP-069 and all
-of EP-070–EP-074 remain planning-only.
+of EP-070–EP-074 remain planning-only. EP-069 now also carries four
+new planning-only sub-packages (EP-069.4–EP-069.7) covering the
+Unified Capability Abstraction, Capability Discovery, External
+Capability Security/Supply-Chain Trust, and Capability Lifecycle
+Management needed for Jarvis to eventually use local GitHub projects/
+CLI tools, external APIs, external web services, and browser-only
+services as capabilities — see `docs/BACKLOG.md` and
+`docs/architecture/designs/ROADMAP_070_138_REBUILD_PROPOSAL.md` for
+the full architecture. EP-074 gains one new sub-package, EP-074.1
+(Dynamic Workflow & Unknown-Task Composition Engine), for tasks with
+no predefined workflow.
+
+## Phase A2 — Universal Engines (planning only, new)
+
+EP-075–EP-076. Universal Research & Discovery Engine and Universal
+Document Intelligence Engine: domain-independent research and
+document-format intelligence, reused by every Level-3 capability
+phase below instead of each phase building its own. Inserted here
+(rather than re-lettering Phases B–N) to minimize churn to an already
+-published phase scheme; see the rebuild proposal for the full
+rationale. Absorbs the former EP-099, EP-129, and EP-132 (each now a
+retired/merged placeholder — see `docs/BACKLOG.md`).
 
 ## Phase B — Software Factory (planning only)
 
-EP-075–EP-079.
+EP-077–EP-081.
 
 ## Phase C — AI Content Platform (planning only)
 
-EP-080–EP-085.
+EP-082–EP-087.
 
 ## Phase D — Social Automation (planning only)
 
-EP-086–EP-089.
+EP-088–EP-091.
 
 ## Phase E — Personal Intelligence / Energy / Weather (planning only)
 
-EP-090–EP-096.
+EP-092–EP-098.
 
 ## Phase F — Enterprise & Work Automation (planning only)
 
-EP-097–EP-105.
+EP-099–EP-107.
 
 ## Phase G — Legal Opportunity & Income Intelligence (planning only)
 
-EP-106–EP-110.
+EP-108–EP-112.
 
 ## Phase H — Advanced Intelligence (planning only)
 
-EP-111–EP-120.
+EP-113–EP-122.
 
 ## Phase I — Distributed Jarvis (planning only)
 
-EP-121–EP-126. Jarvis Core remote-access architecture, mobile client,
+EP-123–EP-128. Jarvis Core remote-access architecture, mobile client,
 push/event delivery, Desktop Agent, device/session management, and a
 secure remote command & approval protocol.
 
 ## Phase J — Enterprise Knowledge & Document Intelligence (planning only)
 
-EP-127–EP-130.
+EP-129–EP-132.
 
 ## Phase K — Educational Intelligence (planning only)
 
-EP-131–EP-132.
+EP-133–EP-134.
 
 ## Phase L — Market & Innovation Intelligence (planning only)
 
-EP-133–EP-135.
+EP-135–EP-137.
 
 ## Phase M — Personal & Family Intelligence (planning only)
 
-EP-136–EP-137.
+EP-138–EP-139.
 
 ## Phase N — Unified Knowledge Architecture (planning only)
 
-EP-138.
+EP-140.
 
-**Phases A–N and EP-069–EP-138 are strategic planning only, with one
+**Phases A–N and EP-069–EP-140 are strategic planning only, with one
 exception: EP-069.1 (Automatic AI Provider Fallback on Request
 Failure), EP-069.2 (Configured AI Provider Fallback Ordering), and
 EP-069.3 (Cost-Aware AI Provider Selection) are
@@ -2591,6 +2612,6 @@ New functionality should normally be implemented as sub-packages (EP-XXX.Y) rath
 
 Completed EPs should not be redesigned unless an explicit architectural decision requires it.
 
-EP-069 through EP-138 (Phases A–N above) are planning identifiers only, not a guaranteed implementation order. Each requires its own future STEP 1 before implementation begins.
+EP-069 through EP-140 (Phases A–N above) are planning identifiers only, not a guaranteed implementation order. Each requires its own future STEP 1 before implementation begins.
 
 End of document.

@@ -595,6 +595,16 @@ ai:
   # in alphabetical order. See
   # docs/architecture/designs/EP069_2_DESIGN.md.
   fallback_order: []
+  # EP-069.3 Cost-Aware AI Provider Selection. Disabled by default so
+  # list_fallback_candidates()'s ordering is unchanged unless
+  # explicitly opted into. When true, whichever fallback candidates
+  # 'fallback_order' above leaves unresolved are ordered by each
+  # provider's own 'providers.<name>.relative_cost' (below) instead of
+  # alphabetically -- 'fallback_order' always takes priority for the
+  # names it lists. Has no effect unless 'fallback_enabled' is also
+  # true; see src/core/ai/provider_manager.py and
+  # docs/architecture/designs/EP069_3_DESIGN.md.
+  cost_aware_enabled: false
 
 conversation:
   # EP-016 Conversation Engine. Provider-independent chat session
@@ -787,6 +797,15 @@ providers:
     timeout: 120
     max_tokens: 4096
     temperature: 0.2
+    # EP-069.3 Cost-Aware AI Provider Selection (optional). A static,
+    # operator-declared RELATIVE weight -- not a measured or real
+    # provider cost -- consulted only when 'ai.cost_aware_enabled' is
+    # true (above). Lower means "preferred" for fallback ordering.
+    # Omit this key entirely to leave this provider's cost "unknown"
+    # (it remains eligible; it is simply ordered after every provider
+    # that does have a relative_cost). See
+    # docs/architecture/designs/EP069_3_DESIGN.md.
+    # relative_cost: 3.0
   openai:
     enabled: false
     api_key: ""
@@ -799,6 +818,10 @@ providers:
     timeout: 120
     temperature: 0.2
     max_tokens: 4096
+    # EP-069.3 Cost-Aware AI Provider Selection (optional) -- see the
+    # 'claude' provider above for what this value means and does not
+    # mean.
+    # relative_cost: 0.5
   ollama:
     enabled: false
     endpoint: "http://localhost:11434"

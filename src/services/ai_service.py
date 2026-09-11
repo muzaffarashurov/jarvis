@@ -495,9 +495,14 @@ class AIService:
         `ProviderNetworkError`, `ProviderTimeoutError`, or
         `ProviderRateLimitError` -- Section 15), the identical
         rendered prompt is retried against the next available,
-        not-yet-attempted registered provider
-        (`ProviderManager.list_fallback_candidates()`), in that
-        registry's deterministic, name-sorted order, until one
+        not-yet-attempted candidate, in whatever order
+        `ProviderManager.list_fallback_candidates()` currently returns
+        (deterministic, but not necessarily plain name-sorted --
+        registered operator preferences from later EPs, such as a
+        configured fallback order or a cost-aware preference, can
+        change that order; see `ProviderManager
+        .list_fallback_candidates()`'s own docstring for the exact,
+        current algorithm), until one
         succeeds or every eligible candidate has been tried. A
         non-eligible failure (`ProviderConfigurationError`,
         `ProviderAuthenticationError`, or the base `ProviderError`)

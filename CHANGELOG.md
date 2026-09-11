@@ -6,6 +6,240 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.30-ep069.3
+
+Released: 2026-09-11
+
+Status: EP-069.3 COMPLETE / STEP 3 PASS WITH WARNINGS, STEP 3.1
+FIXED 2 OF 6 FINDINGS / READY FOR STEP 4 (STEP 1 Architecture Discovery
+& Design, STEP 2 Implementation & Testing, STEP 3 Architecture Audit,
+STEP 3.1 Findings Resolution, and STEP 4 Documentation Synchronization
+all complete).
+
+**EP-069.3 -- Cost-Aware AI Provider Selection.** STEP 1 independently
+verified, by direct inspection of `AIProvider`, `ProviderResponse`,
+`AIService`, `ClaudeProvider`, and `GeminiProvider`, that no component
+anywhere in this repository exposes token usage, request cost, or
+pricing information (confirming `EP069_DESIGN.md` Section 29's own
+prior finding). More fundamentally, STEP 1 found that real per-request
+usage -- even if it existed -- cannot inform *that same request's* own
+provider choice, since usage is only known after a request has already
+been sent to a specific provider. This EP therefore does not add
+usage-based billing or real pricing of any kind. Instead, it adds a
+static, operator-declared `providers.<name>.relative_cost` -- a pure
+ordering preference, not a measured or calculated cost -- consulted
+only by `ProviderManager.list_fallback_candidates()` when a new
+`ai.cost_aware_enabled` flag (default `false`) is set.
+
+When enabled, eligible fallback candidates left unresolved by
+EP-069.2's `ai.fallback_order` (or every eligible candidate, when
+`ai.fallback_order` is absent) are ordered by ascending
+`relative_cost`; a provider with no configured cost is never excluded
+-- it is simply ordered after every provider that has one, tied
+alphabetically among unknown-cost providers and among equal-cost
+providers alike. `ai.fallback_order` always takes priority for the
+names it lists -- cost only orders whatever it leaves unresolved.
+Absent or default configuration reproduces EP-069.2's (and,
+transitively, EP-069.1's) exact behavior, byte-for-byte.
+`ai.fallback_enabled` remains the sole switch controlling whether
+fallback happens at all; neither new key has any effect while it is
+`false`. The primary/current provider (`ProviderManager.get_current()`/
+`set_current()`, `ai use <provider>`) is untouched by either EP-069.2's
+or EP-069.3's ordering rule -- both affect fallback candidate order
+only, never initial provider selection.
+
+STEP 3's independent architecture audit
+(`docs/architecture/audits/EP069_3_ARCHITECTURE_AUDIT.md`) returned
+**PASS WITH WARNINGS**: zero CRITICAL/HIGH findings, six findings
+overall. The audit did not accept the STEP 2 self-report's claims at
+face value -- it independently reproduced the highest-risk scenarios
+by hand, including directly constructing a `ProviderManager` with a
+`NaN` `relative_cost` (bypassing `bootstrap.py`'s own validation
+entirely) and confirming that, unfixed, the `NaN` value was treated as
+a legitimate known cost rather than "unknown" (EP069.3-AUDIT-001,
+MEDIUM) -- and separately found that `AIService.ask()`'s docstring had
+gone stale, still describing fallback order as simply "name-sorted"
+even after EP-069.2's own `ai.fallback_order` addition
+(EP069.3-AUDIT-002, LOW-MEDIUM, inherited from EP-069.2 but not
+previously caught by its own audit). Three further findings were pure
+test-coverage gaps whose underlying code the audit independently
+verified correct by hand (EP069.3-AUDIT-003/004/005), and one is a
+restatement, for completeness, of EP-069.2's own already-tracked
+EP069.2-AUDIT-001 (unrelated to and untouched by EP-069.3's own code).
+
+A dedicated STEP 3.1 review
+(`docs/architecture/audits/EP069_3_FINDINGS_RESOLUTION.md`) fixed
+exactly the two findings mandated for this release and deferred the
+rest: **EP069.3-AUDIT-001** is fixed by a new
+`_is_valid_relative_cost()` predicate inside `ProviderManager` itself
+(re-implementing, at the class boundary, the same numeric/non-bool/
+finite/non-negative rule `bootstrap.py` already enforced at the
+composition root), so a `ProviderManager` built directly -- bypassing
+`bootstrap.py` -- can no longer treat an invalid `relative_cost` as a
+known one; the fix was independently re-verified against the exact
+`NaN`, `Infinity`, and `bool` scenarios the audit used to surface it,
+plus six new regression tests. **EP069.3-AUDIT-002** is fixed by a
+docstring-only correction to `AIService.ask()`, replacing the stale
+"name-sorted" claim with an accurate, forward-pointing description
+that defers to `ProviderManager.list_fallback_candidates()`'s own
+docstring -- zero executable-code change, confirmed by diff.
+EP069.3-AUDIT-003/004/005 (test-coverage gaps) and EP069.3-AUDIT-006
+(inherited from EP-069.2) were explicitly left deferred, per this
+release's own findings-resolution scope, not silently fixed. Final
+STEP 3.1 decision: **READY FOR STEP 4**.
+
+### Added
+
+- `docs/architecture/designs/EP069_3_DESIGN.md`: STEP 1 design
+  document -- architectural investigation confirming no token/cost
+  data exists anywhere in this repository, the two considered options
+  (real usage-based cost vs. static operator-declared weight), and 8
+  Owner Decisions.
+- `docs/architecture/audits/EP069_3_ARCHITECTURE_AUDIT.md`: STEP 3
+  independent architecture audit, verdict PASS WITH WARNINGS, six
+  findings, updated in STEP 3.1 with a resolution-status addendum
+  (original findings and evidence preserved verbatim).
+- `docs/architecture/audits/EP069_3_FINDINGS_RESOLUTION.md`: STEP 3.1
+  findings resolution record -- 2 fixed, 3 deferred (test-only), 1
+  inherited/deferred from EP-069.2 -- final decision READY FOR STEP 4.
+- `tests/EP069_3/test_cost_aware_provider_selection.py`: new,
+  self-contained EP-069.3 test suite (`NAME = "EP069_3"`, deliberately
+  distinct from `"EP069"`/`"EP069_2"` to avoid `TestRegistry`'s known
+  NAME-keyed registration collision), covering cost-aware
+  enabled/disabled behavior, ascending-cost ordering, equal-cost and
+  unknown-cost tie-breaking, every invalid `relative_cost` case (bool,
+  string, `None`, negative, NaN, +/-Infinity, list, dict via direct
+  `ProviderManager` construction), availability/exclusion filtering,
+  primary-provider isolation, deterministic repeated ordering, real
+  end-to-end `AIService.ask()` fallback-loop integration, real-
+  `Bootstrap`-helper configuration validation, and five dedicated
+  tests exercising the real, combined `ai.fallback_order` +
+  `relative_cost` composition now that EP-069.2 is implemented.
+
+### Changed
+
+- `src/core/ai/provider_manager.py`: `ProviderManager.__init__` gained
+  two new optional constructor parameters, `cost_aware_enabled: bool =
+  False` and `relative_cost: dict[str, float] | None = None`. A new
+  module-level `_is_valid_relative_cost()` predicate independently
+  sanitizes every `relative_cost` entry at construction time (STEP 3.1
+  fix for EP069.3-AUDIT-001). `list_fallback_candidates()` now, after
+  EP-069.2's existing `fallback_order` partitioning, additionally
+  re-sorts whichever eligible candidates `fallback_order` left
+  unresolved by ascending `relative_cost` when `cost_aware_enabled` is
+  true; otherwise behavior is byte-for-byte unchanged from EP-069.2.
+- `src/bootstrap.py`: added `_parse_cost_aware_enabled()` and
+  `_parse_relative_cost()`/`_parse_provider_relative_costs()`,
+  validating `ai.cost_aware_enabled` and every
+  `providers.<name>.relative_cost` (iterating
+  `provider_factory.KNOWN_PROVIDER_NAMES`) before the single
+  `ProviderManager(...)` construction site, which now also passes
+  `cost_aware_enabled=`/`relative_cost=`.
+- `config/config.yaml`: added `ai.cost_aware_enabled: false` directly
+  below `ai.fallback_order`, and a commented-out
+  `relative_cost` example under both the `claude` and `gemini`
+  provider blocks.
+- `src/modules/test_module.py`: one added import line registering
+  `tests.EP069_3`.
+- `src/services/ai_service.py`: STEP 3.1 fix for EP069.3-AUDIT-002 --
+  `ask()`'s docstring no longer claims fallback candidates are
+  retried "in that registry's deterministic, name-sorted order";
+  it now states the order is deterministic but not necessarily
+  name-sorted, and points to `ProviderManager
+  .list_fallback_candidates()`'s own docstring as authoritative.
+  Zero executable-code change.
+
+### Reliability
+
+- Operators can now express a cost preference between available
+  providers for fallback purposes, without this repository ever
+  measuring, storing, or estimating a real dollar cost anywhere --
+  closing a real architectural gap (no token/usage/pricing data exists
+  in this codebase) with an honest, static ordering signal instead of
+  a fabricated one.
+- Cost-aware ordering is structurally unable to bypass EP-069.1's
+  availability filtering or already-attempted-provider exclusion, or
+  to override an explicit EP-069.2 `ai.fallback_order` entry -- the
+  eligible candidate set and `fallback_order`'s own partitioning are
+  both computed before cost is ever consulted.
+- **Fixed in this release (EP069.3-AUDIT-001):** a `ProviderManager`
+  constructed directly with an invalid `relative_cost` (`NaN`,
+  `Infinity`, negative, `bool`, or non-numeric) can no longer have that
+  value treated as a legitimate known cost -- it is now independently
+  sanitized to "unknown" at the class boundary itself, not only at
+  `bootstrap.py`'s composition root.
+- **Known residual risk (EP069.3-AUDIT-006, inherited from EP-069.2,
+  not fixed in this release):** an `ai.fallback_order` list containing
+  a nested mapping or nested list still crashes fallback evaluation
+  with an unhandled `TypeError`, per EP-069.2's own tracked
+  `EP069.2-AUDIT-001`. Unrelated to and unaffected by EP-069.3.
+
+### Validation
+
+```
+EP069_3 : 80 passed / 0 failed / 0 skipped
+EP069_2 : 26 passed / 0 failed / 0 skipped
+EP069   : 68 passed / 0 failed / 0 skipped
+Full regression (all registered suites):
+  7370 passed / 2 failed / 3 skipped
+```
+
+The 2 failures (`EP048`, Wake Word) are environment-only in this
+working tree (missing `openwakeword`/`tflite-runtime`), unrelated to
+any file this release touches, and identical in identity and count to
+the pre-EP-069.3 baseline measured earlier in this same working tree
+(7347 passed / 2 failed / 3 skipped) -- the `+23` delta exactly equals
+this release's own new/added assertion count (57 from STEP 2/3 plus 23
+added in STEP 3.1 for the EP069.3-AUDIT-001 fix -- see
+`docs/architecture/audits/EP069_3_FINDINGS_RESOLUTION.md` Section 10).
+Zero new failures.
+
+### STEP 3 -- Independent Architecture Audit
+
+Verdict: **PASS WITH WARNINGS**, zero CRITICAL, zero HIGH. Six
+findings recorded: one MEDIUM (EP069.3-AUDIT-001, a real,
+independently-reproduced defense-in-depth gap, not merely a
+theoretical one), one LOW-MEDIUM (EP069.3-AUDIT-002, inherited
+documentation staleness this audit was first to surface), three LOW
+test-coverage gaps whose underlying code was independently verified
+correct by hand (EP069.3-AUDIT-003/004/005), and one restatement of
+EP-069.2's own already-tracked finding (EP069.3-AUDIT-006). Zero
+deviation from `EP069_3_DESIGN.md`. See
+`docs/architecture/audits/EP069_3_ARCHITECTURE_AUDIT.md` for full
+detail.
+
+### STEP 3.1 -- Findings Resolution
+
+Exactly two findings were approved for a fix and both were
+implemented and independently re-verified: EP069.3-AUDIT-001 (see
+"Changed" above) and EP069.3-AUDIT-002 (see "Changed" above). The
+remaining four findings were explicitly left untouched --
+EP069.3-AUDIT-003/004/005 as deferred test-coverage improvements, and
+EP069.3-AUDIT-006 as inherited from, and remaining the sole
+responsibility of, EP-069.2's own tracked follow-up. No EP-069.2
+implementation, test, or documentation file was modified in this
+process. Final decision: **READY FOR STEP 4**. See
+`docs/architecture/audits/EP069_3_FINDINGS_RESOLUTION.md`.
+
+### STEP 4 -- Documentation Synchronization
+
+Release/project documentation (`CHANGELOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/BACKLOG.md`, `docs/architecture/JARVIS_ROADMAP.md`) synchronized
+to mark EP-069.3 COMPLETE / STEP 3 PASS WITH WARNINGS / STEP 3.1 FIXED
+2 OF 6 FINDINGS, READY FOR STEP 4, with EP069.3-AUDIT-003/004/005
+recorded as tracked, deferred test-coverage items and
+EP069.3-AUDIT-006 recorded as EP-069.2's own responsibility, not
+silently dropped. `VERSION` and `PROJECT_MANIFEST.md` were checked
+against this repository's own established convention (neither has
+ever been updated per-EP -- see this file's EP-043, EP-069.1, and
+EP-069.2 STEP 4 entries) and deliberately left unchanged. EP-069's
+remaining scope -- LLM function/tool calling and expanded fallback
+eligibility -- remains an unscoped, planning-only set of EP-069.x
+candidates, each requiring its own future, independent STEP 1; neither
+is implemented by this release.
+
+---
+
 ## v0.1.29-ep069.2
 
 Released: 2026-09-10

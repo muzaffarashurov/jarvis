@@ -11,27 +11,116 @@ Status: Active
 ## Next Engineering Package
 
 **None yet defined beyond EP-069's own remaining scope.** EP-069.1
-(Automatic AI Provider Fallback on Request Failure) and EP-069.2
-(Configured AI Provider Fallback Ordering) completed the first two,
-independently-scoped sub-packages of the EP-069 ("AI Provider &
-Tool Registry") planning identifier -- see the Long-Term Roadmap
-section below, whose EP-069 bullet is unchanged in wording but whose
-first two slices are now implemented. EP-069's remaining scope
-(cost-aware provider selection, LLM function/tool calling, and
+(Automatic AI Provider Fallback on Request Failure), EP-069.2
+(Configured AI Provider Fallback Ordering), and EP-069.3 (Cost-Aware
+AI Provider Selection) completed the first three, independently-scoped
+sub-packages of the EP-069 ("AI Provider & Tool Registry") planning
+identifier -- see the Long-Term Roadmap section below, whose EP-069
+bullet is unchanged in wording but whose first three slices are now
+implemented. EP-069's remaining scope (LLM function/tool calling and
 expanded fallback eligibility) remains unscoped and planning-only;
-each requires its own future, independent STEP 1
-before implementation, per this repository's Engineering Package
-Policy. No EP-070 or Phase 11 exists anywhere in this repository as of
-this release. One tracked, non-blocking follow-up item exists from
-EP-069.2's own STEP 3.1 review (see the EP-069.2 entry below):
-`ai.fallback_order` does not yet validate individual list elements,
-only that the value itself is a list -- an `ai.fallback_order`
-containing a nested mapping or nested list currently crashes fallback
-evaluation with an unhandled `TypeError` instead of being treated as
-invalid configuration (EP069.2-AUDIT-001). This requires no new EP
-number; it is a small, targeted fix to EP-069.2's own
-`src/bootstrap.py` validation, tracked here as the highest-priority
-deferred item from this release.
+each requires its own future, independent STEP 1 before
+implementation, per this repository's Engineering Package Policy. No
+EP-070 or Phase 11 exists anywhere in this repository as of this
+release. Two tracked, non-blocking follow-up items exist:
+
+- From EP-069.2's own STEP 3.1 review (see the EP-069.2 entry below,
+  unchanged by this release): `ai.fallback_order` does not yet
+  validate individual list elements, only that the value itself is a
+  list -- an `ai.fallback_order` containing a nested mapping or nested
+  list currently crashes fallback evaluation with an unhandled
+  `TypeError` instead of being treated as invalid configuration
+  (EP069.2-AUDIT-001/EP069.3-AUDIT-006). This requires no new EP
+  number; it is a small, targeted fix to EP-069.2's own
+  `src/bootstrap.py` validation, and remains EP-069.2's own
+  responsibility -- EP-069.3 did not touch it.
+- From EP-069.3's own STEP 3.1 review (see the EP-069.3 entry below):
+  three deferred test-coverage gaps (a `list`/`dict`-typed
+  `relative_cost` test, a `ProviderManager`-level `0.0`-cost ordering
+  test, and a combined excluded-name-in-`fallback_order` test) --
+  EP069.3-AUDIT-003/004/005. All three cover behavior the STEP 3 audit
+  independently verified correct by hand; only the regression-test
+  coverage itself is missing.
+
+### EP-069.3 — Cost-Aware AI Provider Selection
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), STEP 3.1 (Findings Resolution
+Review), and STEP 4 (Documentation Synchronization) all complete.
+EP-069.3 is marked **COMPLETE / STEP 3 PASS WITH WARNINGS, STEP 3.1
+FIXED 2 OF 6 FINDINGS, READY FOR STEP 4**. Full design:
+`docs/architecture/designs/EP069_3_DESIGN.md`. Audit:
+`docs/architecture/audits/EP069_3_ARCHITECTURE_AUDIT.md`. Findings
+resolution: `docs/architecture/audits/EP069_3_FINDINGS_RESOLUTION.md`.
+
+STEP 1 independently confirmed, by direct inspection of `AIProvider`,
+`ProviderResponse`, `AIService`, `ClaudeProvider`, and
+`GeminiProvider`, that no token usage, request cost, or pricing
+information exists anywhere in this repository -- and, more
+fundamentally, that real per-request usage could not inform that same
+request's own provider choice even if it existed, since usage is only
+known after a request has already been sent. EP-069.3 therefore adds
+no billing, accounting, or usage tracking of any kind. Instead, it
+adds a static, operator-declared `providers.<name>.relative_cost` --
+an ordering preference, not a measured cost -- consulted only by
+`ProviderManager.list_fallback_candidates()` when a new
+`ai.cost_aware_enabled` (default `false`) is set. When enabled,
+eligible fallback candidates left unresolved by EP-069.2's
+`ai.fallback_order` (or every eligible candidate, when
+`ai.fallback_order` is absent) are ordered by ascending
+`relative_cost`; an unpriced provider is never excluded, only ordered
+last. `ai.fallback_order` always takes priority for the names it
+lists. Absent/default configuration reproduces EP-069.2's (and,
+transitively, EP-069.1's) exact behavior, byte-for-byte. The
+primary/current provider is untouched by either ordering rule.
+
+STEP 3's independent audit returned **PASS WITH WARNINGS**: zero
+CRITICAL/HIGH findings; six findings, of which one (EP069.3-AUDIT-001,
+MEDIUM) was a real, independently-reproduced gap -- a `ProviderManager`
+constructed directly, bypassing `bootstrap.py`'s own validation,
+could treat an invalid `relative_cost` (`NaN`, `Infinity`, negative,
+`bool`) as a legitimate known cost rather than "unknown." A second
+(EP069.3-AUDIT-002, LOW-MEDIUM) found `AIService.ask()`'s docstring
+had gone stale after EP-069.2, still describing fallback order as
+simply "name-sorted." Three further findings were pure test-coverage
+gaps whose underlying code the audit independently verified correct by
+hand (EP069.3-AUDIT-003/004/005), and one (EP069.3-AUDIT-006) is a
+restatement, for completeness, of EP-069.2's own already-tracked
+`EP069.2-AUDIT-001` -- unrelated to and untouched by EP-069.3's own
+code. Design-to-code conformance was otherwise exact, with zero
+deviation from any of the eight approved Owner Decisions.
+
+STEP 3.1 fixed exactly the two findings mandated for this release:
+EP069.3-AUDIT-001 by adding a new `_is_valid_relative_cost()`
+predicate directly inside `ProviderManager` (re-implementing, at the
+class boundary itself, the same numeric/non-bool/finite/non-negative
+rule `bootstrap.py` already enforced at the composition root), so an
+invalid value can no longer be mistaken for a real cost even when
+`ProviderManager` is constructed directly; and EP069.3-AUDIT-002 by a
+docstring-only correction to `AIService.ask()`, replacing the stale
+claim with an accurate, forward-pointing description. Both fixes were
+independently re-verified against the exact scenarios the audit used
+to surface them, plus six new regression tests (23 assertions).
+EP069.3-AUDIT-003/004/005 (test-coverage gaps) and EP069.3-AUDIT-006
+(EP-069.2's own responsibility) were explicitly left deferred, not
+silently fixed. Final decision: **READY FOR STEP 4**.
+
+Tests: EP-069_3 80/0/0 (`tests/EP069_3/test_cost_aware_provider_selection.py`).
+Full regression: 7370 passed / 2 failed / 3 skipped, identical in
+identity and count to the pre-EP-069.3 baseline of 7347/2/3 measured
+in this same working tree -- the `+23` delta exactly equals this
+release's own new/added assertion count. See
+`docs/architecture/audits/EP069_3_ARCHITECTURE_AUDIT.md` and
+`docs/architecture/audits/EP069_3_FINDINGS_RESOLUTION.md` for detail.
+
+**Tracked follow-up (not implemented in this release):** add the three
+deferred EP069.3-AUDIT-003/004/005 regression tests (a
+`list`/`dict`-typed `relative_cost` case, a `ProviderManager`-level
+literal-`0.0` ordering case, and a combined excluded-name-in-
+`fallback_order` case); no implementation change is required for any
+of them. EP069.3-AUDIT-006 (unhashable `fallback_order` element)
+remains exclusively EP-069.2's own tracked item, unaffected by
+EP-069.3.
 
 ### EP-069.2 — Configured AI Provider Fallback Ordering
 
@@ -2803,17 +2892,19 @@ Priority may change.
 # Long-Term Roadmap — Future Engineering Packages (EP-069–EP-138)
 
 Status: PLANNING ONLY, with one exception. Nothing in this section has
-been implemented, designed, or scheduled, **except EP-069's first two
-sub-packages, EP-069.1 (Automatic AI Provider Fallback on Request
-Failure) and EP-069.2 (Configured AI Provider Fallback Ordering),
-which are COMPLETE** -- see the "Next Engineering Package"
-section above and `docs/architecture/designs/EP069_DESIGN.md`/
-`docs/architecture/designs/EP069_2_DESIGN.md`. No
+been implemented, designed, or scheduled, **except EP-069's first
+three sub-packages, EP-069.1 (Automatic AI Provider Fallback on
+Request Failure), EP-069.2 (Configured AI Provider Fallback Ordering),
+and EP-069.3 (Cost-Aware AI Provider Selection), which are COMPLETE**
+-- see the "Next Engineering Package" section above and
+`docs/architecture/designs/EP069_DESIGN.md`/
+`docs/architecture/designs/EP069_2_DESIGN.md`/
+`docs/architecture/designs/EP069_3_DESIGN.md`. No
 other EP number below has an owner, a design document, or a STEP 1
-report yet, and EP-069's own remaining scope (beyond EP-069.1/EP-069.2)
-is likewise still planning-only -- this section otherwise exists solely
-to record the long-term direction so future work has a stable set of
-planning identifiers to start from.
+report yet, and EP-069's own remaining scope (beyond
+EP-069.1/EP-069.2/EP-069.3) is likewise still planning-only -- this
+section otherwise exists solely to record the long-term direction so
+future work has a stable set of planning identifiers to start from.
 
 **EP numbers in this section are planning identifiers, not a
 guaranteed implementation sequence.** Every EP listed here still
@@ -2851,12 +2942,14 @@ remote shell.
   independent abstractions for AI providers, models, tools,
   capabilities, fallback providers, provider selection, and cost
   awareness, so Jarvis is never hard-coded to one AI provider.
-  **EP-069.1 (Automatic AI Provider Fallback on Request Failure) and
-  EP-069.2 (Configured AI Provider Fallback Ordering) are
+  **EP-069.1 (Automatic AI Provider Fallback on Request Failure),
+  EP-069.2 (Configured AI Provider Fallback Ordering), and EP-069.3
+  (Cost-Aware AI Provider Selection) are
   COMPLETE** -- see the "Next Engineering Package" section above,
-  `docs/architecture/designs/EP069_DESIGN.md`, and
-  `docs/architecture/designs/EP069_2_DESIGN.md`. The remaining scope
-  described in this bullet (tools, capabilities, and cost awareness)
+  `docs/architecture/designs/EP069_DESIGN.md`,
+  `docs/architecture/designs/EP069_2_DESIGN.md`, and
+  `docs/architecture/designs/EP069_3_DESIGN.md`. The remaining scope
+  described in this bullet (tools and capabilities)
   remains unscoped and planning-only;
   each requires its own future, independent STEP 1, per this
   repository's Engineering Package Policy for `EP-XXX.Y` sub-packages.

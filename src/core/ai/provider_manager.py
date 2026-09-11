@@ -34,10 +34,30 @@ exactly, byte-for-byte (`EP069_2_DESIGN.md` Section 11/12, Owner
 Decision D7). `set_current()`/`get_current()` and
 `ProviderRegistry.list()`'s own general-purpose alphabetical
 guarantee are both untouched by this addition.
+
+EP-069.3 (Cost-Aware AI Provider Selection) additively extends
+`list_fallback_candidates()` with an optional, operator-configured
+`relative_cost` ordering, composed with EP-069.2's `fallback_order`
+exactly as `EP069_3_DESIGN.md` Section 14.1 specifies: `fallback_order`
+(an explicit, named operator preference) always takes priority for the
+names it lists, in its own configured sequence, unchanged from
+EP-069.2 above; `relative_cost` -- when `cost_aware_enabled` is True
+-- governs the order only of whatever eligible candidates
+`fallback_order` leaves unresolved (every eligible candidate, when
+`fallback_order` is absent/empty, exactly as it did before EP-069.2
+existed). `relative_cost` is a static, operator-declared relative
+weight, never a measured or calculated cost (`EP069_3_DESIGN.md`
+Section 9). Neither EP-069.3 addition changes *which* providers are
+eligible, and neither ever touches `set_current()`/`get_current()`:
+cost-aware ordering, like `fallback_order`, affects only which
+provider is tried next *after* the current one has already failed,
+never the primary/current provider selection (`EP069_3_DESIGN.md`
+Section 14, Owner Decision D3).
 """
 
 from __future__ import annotations
 
+import math
 from threading import Lock
 from typing import Iterable
 
@@ -45,6 +65,57 @@ from loguru import logger
 
 from src.core.ai.provider import AIProvider
 from src.core.ai.provider_registry import ProviderRegistry
+
+# Sort key used when cost-aware ordering is enabled: providers with a
+# known `relative_cost` sort first (group 0), ascending by cost, tied
+# by name; providers with no known cost (None) sort after every known-
+# cost provider (group 1), tied by name. See EP069_3_DESIGN.md Section
+# 14 -- this is a pure re-sort of whichever candidates `fallback_order`
+# (EP-069.2) left unresolved, never a change to eligibility itself.
+_UNKNOWN_COST_SORT_GROUP: int = 1
+_KNOWN_COST_SORT_GROUP: int = 0
+
+
+def _is_valid_relative_cost(value: object) -> bool:
+    """Return whether `value` is a valid EP-069.3 `relative_cost`.
+
+    A valid value is numeric (`int`/`float`), explicitly NOT `bool`
+    (Python's `bool` is a subclass of `int`), finite (not NaN or
+    +/-Infinity), and >= 0 -- the exact same rule `bootstrap.py`'s
+    `_parse_relative_cost()` enforces at the composition root.
+
+    This predicate exists so `ProviderManager` itself can never treat
+    an invalid `relative_cost` as a known cost, even if constructed
+    directly with an unvalidated mapping that bypasses
+    `bootstrap.py` -- the sole production call site, which already
+    validates every value before construction
+    (`EP069_3_ARCHITECTURE_AUDIT.md` Finding EP069.3-AUDIT-001). It
+    intentionally re-implements only this pure predicate, not
+    `bootstrap.py`'s logging/warning responsibility: `ProviderManager`
+    has no configuration key name to attribute a warning to (it only
+    ever sees the already-keyed-by-provider-name mapping), and
+    `bootstrap.py` already warns on every value it rejects in the real
+    configuration path. Duplicating the predicate (not the warning,
+    not a second configuration system) is the smallest change that
+    closes the gap: an invalid value is silently treated as absent,
+    exactly like every other "unknown cost" case
+    (`EP069_3_DESIGN.md` Section 15).
+
+    Args:
+        value: The raw candidate `relative_cost` value.
+
+    Returns:
+        True if `value` may be used as a known cost; False if it must
+        be treated as unknown.
+    """
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, (int, float)):
+        return False
+    numeric_value = float(value)
+    if math.isnan(numeric_value) or math.isinf(numeric_value):
+        return False
+    return numeric_value >= 0
 
 
 class ProviderManager:
@@ -64,6 +135,8 @@ class ProviderManager:
         enabled: bool,
         default_provider: str | None,
         fallback_order: list[str] | None = None,
+        cost_aware_enabled: bool = False,
+        relative_cost: dict[str, float] | None = None,
     ) -> None:
         """Initialize the ProviderManager.
 
@@ -80,6 +153,32 @@ class ProviderManager:
                 preserves EP-069.1's original alphabetical fallback
                 order exactly. Read once here and never mutated
                 afterward (`EP069_2_DESIGN.md` Section 17).
+            cost_aware_enabled: Initial value of 'ai.cost_aware_enabled'
+                (EP-069.3), already validated by the composition root
+                (`bootstrap.py`) as a real `bool`. Defaults to False,
+                matching 'ai.cost_aware_enabled's own default -- when
+                False, `list_fallback_candidates()`'s ordering is
+                completely unaffected by `relative_cost`
+                (`EP069_3_DESIGN.md` Section 11).
+            relative_cost: Mapping of provider name to its configured
+                `providers.<name>.relative_cost` (EP-069.3). Every
+                entry is independently re-validated here
+                (`_is_valid_relative_cost()`) and any invalid entry
+                (non-numeric, `bool`, negative, NaN, or infinite) is
+                silently dropped -- treated exactly like an absent
+                entry, i.e. "unknown cost" (`EP069_3_DESIGN.md` Section
+                15) -- regardless of whether the caller already
+                validated it. This makes the finite/non-negative/
+                non-bool invariant a property of `ProviderManager`
+                itself, not merely of `bootstrap.py`'s composition-root
+                validation (`EP069_3_ARCHITECTURE_AUDIT.md` Finding
+                EP069.3-AUDIT-001). A provider name absent from the
+                sanitized mapping has "unknown cost" and is never
+                excluded from candidacy. Read and sanitized once at
+                construction and never mutated afterward -- like
+                `fallback_order` above, this is startup configuration
+                state, not a runtime-settable preference
+                (`EP069_3_DESIGN.md` Section 17, Owner Decision D6).
         """
         self._registry = registry
         self._enabled = enabled
@@ -89,6 +188,12 @@ class ProviderManager:
             else None
         )
         self._fallback_order: list[str] = list(fallback_order) if fallback_order else []
+        self._cost_aware_enabled = cost_aware_enabled
+        self._relative_cost: dict[str, float] = {
+            name: float(cost)
+            for name, cost in (relative_cost or {}).items()
+            if _is_valid_relative_cost(cost)
+        }
         self._lock = Lock()
 
     # ---------- Required API ----------
@@ -171,17 +276,34 @@ class ProviderManager:
         `fallback_order` is non-empty, eligible candidates whose name
         appears in it are returned first, in `fallback_order`'s own
         sequence; any remaining eligible candidate not named in
-        `fallback_order` is appended afterward, in the existing
-        name-sorted order among themselves. A name in `fallback_order`
-        that does not match any eligible candidate (unregistered,
-        unavailable, or already excluded) is simply never matched and
-        has no effect -- never an error, never a fabricated candidate.
+        `fallback_order` is appended afterward. A name in
+        `fallback_order` that does not match any eligible candidate
+        (unregistered, unavailable, or already excluded) is simply
+        never matched and has no effect -- never an error, never a
+        fabricated candidate.
+
+        Ordering (EP-069.3, `EP069_3_DESIGN.md` Section 14/14.1):
+        whichever eligible candidates `fallback_order` leaves
+        unresolved above (every eligible candidate, when
+        `fallback_order` is absent/empty) are, when `cost_aware_enabled`
+        is True, ordered by ascending configured `relative_cost`
+        instead of plain `name()` order -- a candidate with no
+        configured cost is ordered after every candidate that has one;
+        ties (equal cost, or multiple candidates with no configured
+        cost) are broken alphabetically by `name()`. `fallback_order`
+        always takes priority for the names it lists: cost never
+        reorders a candidate `fallback_order` has already placed.
+        When `cost_aware_enabled` is False -- the default -- this
+        step is skipped entirely and the unresolved candidates keep
+        their existing name-sorted order, reproducing EP-069.2's
+        (and, transitively, EP-069.1's) exact behavior.
 
         This method performs no request-level orchestration and holds
-        no state of its own beyond the immutable `fallback_order` read
-        once at construction: eligibility and the alphabetical base
-        order are both derived fresh from the registry on every call,
-        so they can never go stale relative to
+        no state of its own beyond the immutable `fallback_order`/
+        `cost_aware_enabled`/`relative_cost` configuration read once
+        at construction: eligibility and the alphabetical base order
+        are both derived fresh from the registry on every call, so
+        they can never go stale relative to
         `register_provider()`/`remove()`.
 
         Args:
@@ -191,7 +313,9 @@ class ProviderManager:
         Returns:
             Every eligible AIProvider, ordered per `fallback_order`
             (if configured) followed by any unlisted eligible
-            candidates in `name()` order, with no duplicates.
+            candidates -- themselves ordered by `relative_cost`
+            (EP-069.3, if `cost_aware_enabled`) or by `name()`
+            (default) -- with no duplicates.
         """
         excluded = set(exclude)
         eligible = [
@@ -199,21 +323,32 @@ class ProviderManager:
             for provider in self._registry.list()
             if provider.name() not in excluded and provider.is_available()
         ]
-        if not self._fallback_order:
-            return eligible
-
-        eligible_by_name = {provider.name(): provider for provider in eligible}
-        seen: set[str] = set()
         ordered: list[AIProvider] = []
-        for name in self._fallback_order:
-            # First occurrence wins; a repeated name in `fallback_order`
-            # must never add the same candidate twice (Owner Decision,
-            # `EP069_2_DESIGN.md` Section 12/14).
-            if name in eligible_by_name and name not in seen:
-                ordered.append(eligible_by_name[name])
-                seen.add(name)
-        unlisted = [provider for provider in eligible if provider.name() not in seen]
+        if not self._fallback_order:
+            unlisted = eligible
+        else:
+            eligible_by_name = {provider.name(): provider for provider in eligible}
+            seen: set[str] = set()
+            for name in self._fallback_order:
+                # First occurrence wins; a repeated name in `fallback_order`
+                # must never add the same candidate twice (Owner Decision,
+                # `EP069_2_DESIGN.md` Section 12/14).
+                if name in eligible_by_name and name not in seen:
+                    ordered.append(eligible_by_name[name])
+                    seen.add(name)
+            unlisted = [provider for provider in eligible if provider.name() not in seen]
+
+        if self._cost_aware_enabled:
+            unlisted = sorted(unlisted, key=self._cost_sort_key)
+
         return ordered + unlisted
+
+    def _cost_sort_key(self, provider: AIProvider) -> tuple[int, float, str]:
+        """EP-069.3 sort key: known-cost ascending, then unknown-cost, both tied by name()."""
+        cost = self._relative_cost.get(provider.name())
+        if cost is None:
+            return (_UNKNOWN_COST_SORT_GROUP, 0.0, provider.name())
+        return (_KNOWN_COST_SORT_GROUP, cost, provider.name())
 
     # ---------- AI subsystem enable/disable ----------
 

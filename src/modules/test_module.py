@@ -69,6 +69,7 @@ import tests.EP067.test_telegram_poll_loop_resilience
 import tests.EP068.test_command_router_log_redaction
 import tests.EP069.test_ai_provider_fallback
 import tests.EP069_2.test_provider_fallback_ordering
+import tests.EP069_3.test_cost_aware_provider_selection
 
 class TestModule(CommandModule):
 

@@ -3147,4 +3147,68 @@ EP069_2 : 26 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-069.3 — Cost-Aware AI Provider Selection
+
+Status: Released (STEP 3 independent audit PASS WITH WARNINGS; a
+follow-up review fixed the two issues judged worth fixing before
+release and tracked the rest as known, non-blocking items -- see
+"Known limitations" below)
+
+Highlights:
+
+- If you have more than one AI provider available, you can now tell
+  Jarvis which one you'd prefer it use when it has to fall back to
+  another provider, based on cost, instead of only being able to name
+  an exact preferred order (from the previous release) or leaving it
+  to alphabetical order (from before that)
+- This is a cost *preference* you set yourself -- Jarvis does not
+  track, measure, or calculate what you're actually being charged by
+  any provider; it simply tries your lower-cost preference first when
+  more than one provider is available to fall back to
+- This is entirely optional -- if you don't set a cost preference,
+  nothing changes, and fallback keeps working exactly as it did before
+- If you've also set a specific preferred order (from the previous
+  release), that always wins for any provider you named there -- cost
+  preference only decides the order among the providers you didn't
+  name
+- A provider you don't set a cost preference for is never left out --
+  it's just tried after every provider you did set a preference for
+- This only affects the order fallback tries providers in -- it never
+  changes whether fallback happens at all, and it never changes which
+  provider Jarvis normally uses first
+
+Compatibility:
+
+Fully backward compatible with every prior release. No existing
+command, setting, or behavior changed for anyone who does not set a
+cost preference. No breaking changes.
+
+Known limitations:
+
+- The independent review that checked this release found and fixed
+  one real issue: if Jarvis's provider-selection component were ever
+  set up in an unusual way outside of normal startup, an invalid cost
+  preference (like a negative number or a badly-formed value) could
+  have been mistakenly treated as a real cost instead of being
+  ignored. This has now been fixed and independently re-tested; it
+  never affected any normal use of Jarvis, since normal startup always
+  checked for this already.
+- The independent review also fixed a documentation comment inside
+  Jarvis's own source code that had gone slightly out of date after
+  the previous release -- this does not affect behavior in any way.
+- A few smaller, non-blocking items were found and logged as known,
+  low-priority follow-ups rather than fixed immediately -- see
+  `docs/architecture/audits/EP069_3_FINDINGS_RESOLUTION.md` for
+  detail. None of them affect normal use.
+- The known issue from the previous release (a badly-formatted
+  preferred-provider list can currently cause an error instead of
+  being ignored) is unrelated to this release and remains tracked
+  separately -- see the EP-069.2 entry above.
+
+Validation:
+
+EP069_3 : 80 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

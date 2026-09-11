@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from loguru import logger
 from src.core.ai.context_manager import ContextManager
 from src.core.ai.conversation_manager import ConversationManager
 from src.core.ai.prompt_manager import PromptManager
-from src.core.ai.provider_factory import ProviderFactory
+from src.core.ai.provider_factory import KNOWN_PROVIDER_NAMES, ProviderFactory
 from src.core.ai.provider_manager import ProviderManager
 from src.core.ai.provider_registry import ProviderRegistry as AIProviderRegistry
 from src.core.agent.agent_engine import AgentEngine
@@ -204,6 +205,128 @@ REQUIRED_DIRECTORIES: tuple[str, ...] = (
     "knowledge",
     "prompts",
 )
+
+# EP-069.3 Cost-Aware AI Provider Selection. Sentinel distinguishing
+# "'providers.<name>.relative_cost' is absent from configuration"
+# (Config.get()'s dotted-path lookup has no other way to signal this)
+# from an explicit `null`/`None` value, which is itself an invalid
+# `relative_cost` and must be warned about (EP069_3_DESIGN.md Section
+# 15, case 6) -- unlike absence, which is the ordinary "unknown cost"
+# case and must never warn (EP069_3_DESIGN.md Section 15, case 1).
+_RELATIVE_COST_ABSENT = object()
+
+
+def _parse_cost_aware_enabled(config: Config) -> bool:
+    """Validate 'ai.cost_aware_enabled' (EP-069.3).
+
+    Mirrors this project's existing tolerant-configuration precedent
+    set by EP-069.2's own 'ai.fallback_order' validation just below in
+    this file: an absent key returns the documented default (False)
+    with no log line, and any present-but-non-boolean value is
+    treated as False with a single WARNING naming only the key and
+    the observed type -- never the malformed value itself
+    (EP069_3_DESIGN.md Section 15/16, Section 19).
+
+    Args:
+        config: The loaded application Config.
+
+    Returns:
+        The validated boolean value of 'ai.cost_aware_enabled',
+        defaulting to False for both an absent key and an invalid type.
+    """
+    raw = config.get("ai.cost_aware_enabled", False)
+    if isinstance(raw, bool):
+        return raw
+    logger.warning(
+        "Ignoring 'ai.cost_aware_enabled': expected a boolean, "
+        f"got {type(raw).__name__}. Cost-aware provider selection is disabled."
+    )
+    return False
+
+
+def _parse_relative_cost(config: Config, provider_name: str) -> float | None:
+    """Validate 'providers.<provider_name>.relative_cost' (EP-069.3).
+
+    A valid value must be an `int` or `float`, NOT `bool` (Python's
+    `bool` is a subclass of `int`, so it is checked and rejected
+    explicitly -- EP069_3_DESIGN.md Section 15), finite (not NaN or
+    +/-Infinity), and >= 0. Every other case -- absent, wrong type,
+    `None`/`null`, negative, NaN, or infinite -- degrades to "unknown
+    cost" (`None`), never a startup failure and never an excluded
+    provider (EP069_3_DESIGN.md Section 15). Only the malformed
+    (present-but-invalid) cases emit a single WARNING; an absent key
+    is the ordinary case and is silent. No raw configuration value is
+    ever logged -- only the configuration key and the observed type or
+    a safe, closed-set reason (EP-068 redaction discipline,
+    EP069_3_DESIGN.md Section 19).
+
+    Args:
+        config: The loaded application Config.
+        provider_name: The provider name whose 'relative_cost' is
+            being read (e.g. "claude").
+
+    Returns:
+        A finite, non-negative `float`, or `None` if the value is
+        absent or invalid.
+    """
+    key = f"providers.{provider_name}.relative_cost"
+    raw = config.get(key, _RELATIVE_COST_ABSENT)
+    if raw is _RELATIVE_COST_ABSENT:
+        return None
+    if isinstance(raw, bool):
+        logger.warning(
+            f"Ignoring '{key}': a boolean is not a valid relative_cost. "
+            f"Provider '{provider_name}' will be treated as unknown-cost."
+        )
+        return None
+    if not isinstance(raw, (int, float)):
+        logger.warning(
+            f"Ignoring '{key}': expected a number, got {type(raw).__name__}. "
+            f"Provider '{provider_name}' will be treated as unknown-cost."
+        )
+        return None
+    value = float(raw)
+    if math.isnan(value) or math.isinf(value):
+        logger.warning(
+            f"Ignoring '{key}': value must be finite. "
+            f"Provider '{provider_name}' will be treated as unknown-cost."
+        )
+        return None
+    if value < 0:
+        logger.warning(
+            f"Ignoring '{key}': value must be >= 0. "
+            f"Provider '{provider_name}' will be treated as unknown-cost."
+        )
+        return None
+    return value
+
+
+def _parse_provider_relative_costs(config: Config) -> dict[str, float]:
+    """Validate every known provider's 'relative_cost' (EP-069.3).
+
+    Iterates `KNOWN_PROVIDER_NAMES` (the same exhaustive provider-name
+    set `ProviderFactory` itself builds from) so every provider that
+    could ever be registered is considered, regardless of whether it
+    is currently enabled/available -- `ProviderManager
+    .list_fallback_candidates()` already filters by availability
+    separately (EP069_3_DESIGN.md Section 14); this function only
+    resolves configured cost, never eligibility.
+
+    Args:
+        config: The loaded application Config.
+
+    Returns:
+        A mapping of provider name to its validated `relative_cost`,
+        containing only providers with a present and valid value --
+        a name absent from this mapping has "unknown cost"
+        (EP069_3_DESIGN.md Section 15).
+    """
+    return {
+        name: cost
+        for name in KNOWN_PROVIDER_NAMES
+        for cost in (_parse_relative_cost(config, name),)
+        if cost is not None
+    }
 
 
 class Bootstrap:
@@ -598,11 +721,20 @@ class Bootstrap:
                 "fallback order defaults to alphabetical."
             )
             ai_fallback_order = []
+        # EP-069.3 Cost-Aware AI Provider Selection. Validation happens
+        # here, at the composition root, exactly like 'ai.fallback_order'
+        # immediately above -- ProviderManager itself receives only
+        # already-validated values (EP069_3_DESIGN.md Section 15,
+        # Section 24). Neither helper ever raises: invalid or absent
+        # configuration degrades to "cost-aware selection off" /
+        # "unknown cost" respectively, never a startup failure.
         ai_provider_manager = ProviderManager(
             registry=ai_provider_registry,
             enabled=bool(config.get("ai.enabled", False)),
             default_provider=str(config.get("ai.default_provider", "none")),
             fallback_order=ai_fallback_order,
+            cost_aware_enabled=_parse_cost_aware_enabled(config),
+            relative_cost=_parse_provider_relative_costs(config),
         )
         provider_factory = ProviderFactory(config=config)
         for provider in provider_factory.build_all():

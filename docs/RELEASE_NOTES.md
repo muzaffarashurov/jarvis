@@ -3211,4 +3211,50 @@ EP069_3 : 80 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-069.4 — Unified Capability Abstraction
+
+Status: Released (STEP 3 independent audit PASS WITH WARNINGS; a
+follow-up review fixed the one issue judged worth fixing before
+release -- see "Known limitations" below)
+
+Highlights:
+
+- This release is mostly invisible to you as a user -- it doesn't add
+  a new command, setting, or behavior you'll notice day-to-day. It
+  lays internal groundwork so a future release can let Jarvis
+  recognize and use things like your own scripts, web-based tools, or
+  external services as capabilities, the same way it already
+  recognizes its own built-in tools
+- Nothing about how Jarvis's existing built-in tools or installed
+  plugins work has changed -- this release only adds a new, currently
+  unused internal building block alongside them
+- There is no new way to add an external tool, script, or web service
+  to Jarvis yet -- that capability is planned for future releases and
+  is not part of this one
+
+Compatibility:
+
+Fully backward compatible with every prior release. No existing
+command, setting, or behavior changed. No breaking changes.
+
+Known limitations:
+
+- The independent review that checked this release found one real
+  issue: the new internal building block didn't yet let you catch
+  "any capability-related problem" with a single, general check --
+  you would have needed to check for four separate, specific problems
+  individually. This has now been fixed and independently re-tested;
+  since this release adds no new user-facing feature yet, this never
+  affected any normal use of Jarvis.
+- A few smaller, purely informational observations were logged during
+  review and required no changes at all -- see
+  `docs/architecture/audits/EP069_4_FINDINGS_RESOLUTION.md` for
+  detail.
+
+Validation:
+
+EP069_4 : 41 passed / 0 failed / 0 skipped
+
+---
+
 End of document.

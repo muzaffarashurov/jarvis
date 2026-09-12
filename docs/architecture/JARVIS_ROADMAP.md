@@ -122,6 +122,87 @@ Completed sub-packages:
 
 ## Current
 
+EP-069.4 Unified Capability Abstraction — **COMPLETE**
+(STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
+Testing, STEP 3 Architecture Audit, STEP 3.1 Findings Resolution
+Review, and STEP 4 Documentation Synchronization all complete -- see
+docs/architecture/designs/EP069_4_DESIGN.md,
+docs/architecture/audits/EP069_4_ARCHITECTURE_AUDIT.md, and
+docs/architecture/audits/EP069_4_FINDINGS_RESOLUTION.md). **Final
+Verdict: STEP 3 — PASS WITH WARNINGS, ZERO CRITICAL, ZERO HIGH** (four
+findings: one MEDIUM real gap against the approved STEP 1 scope text
+itself, EP069.4-AUDIT-001; three INFORMATIONAL observations requiring
+no action, EP069.4-AUDIT-002/003/004); **STEP 3.1 — ALL REQUIRED
+FINDINGS FIXED, READY FOR STEP 4**. STEP 1 found that this
+repository's tool/plugin catalog was represented by at least three
+unrelated, structurally different types (`Tool`, `Plugin`, and
+EP-056's `CapabilityRegistryModule`, which despite its name defines no
+domain model of its own), none of which could represent a local
+GitHub project's CLI, a REST API, an external web service, or a
+browser-executed service, or be operated over uniformly by a future
+Capability Discovery Engine (EP-069.5).
+
+EP-069.4 therefore introduces a new `src/core/capability/` package: a
+single `Capability` frozen-dataclass domain model (id, name,
+description, source kind, input/output schema, required permissions,
+trust level, source/provenance, version, enabled), a
+`CapabilityTrustLevel` three-level enum, a `CapabilitySourceKind` four-
+kind classification enum (`INTERNAL`, `LOCAL_CLI`, `REST_API`,
+`BROWSER_SERVICE`), a hand-rolled `CapabilitySchema`/
+`CapabilitySchemaField` shape descriptor introducing no new
+schema-validation dependency, a thread-safe `CapabilityRegistry`
+catalog mirroring `ToolRegistry`/`PluginRegistry` exactly, and a
+`CapabilityBackend` `ABC` structural contract with **zero concrete
+backend implementations shipped** -- discovery/ranking (EP-069.5),
+security/trust enforcement (EP-069.6), and lifecycle/versioning
+(EP-069.7) are all explicitly out of scope. `Tool`, `Plugin`, and
+EP-056's `CapabilityRegistryModule` are all confirmed byte-for-byte
+unmodified. No bootstrap, configuration, or CLI-namespace wiring was
+added, other than the standard, repository-wide test-registration line
+in `src/modules/test_module.py` every prior EP also adds.
+
+STEP 3's independent audit did not accept STEP 2's self-report at face
+value: it independently re-read the exact approved STEP 1 text,
+re-inspected the shipped exception classes directly, and confirmed
+that Section 12.1's explicit "In Scope" bullet naming a
+`CapabilityError` (root) exception class had not actually been
+implemented -- `CapabilityValidationError`, `CapabilityRegistryError`,
+`CapabilityNotFoundError`, and `CapabilityBackendError` each directly
+subclassed `Exception` with no shared root (EP069.4-AUDIT-001,
+MEDIUM). Three further observations were purely informational: the
+required, convention-mandated `test_module.py` registration line
+falling outside STEP 1's own file forecast (EP069.4-AUDIT-002); the
+already-documented, intentional permissiveness of `Capability`'s raw
+dataclass constructor (EP069.4-AUDIT-003); and one test exercising an
+intentionally inert contract element pending a future concrete backend
+(EP069.4-AUDIT-004). The audit independently re-ran the full EP-069.4
+suite plus the required regression set, and proved the naming overlap
+with EP-056's `CapabilityRegistryModule` is word-level only, not an
+architectural duplication, by direct inspection of both modules'
+domain models.
+
+STEP 3.1 fixed the one actionable finding: EP069.4-AUDIT-001, by
+adding a new `CapabilityError(Exception)` root class in
+`capability.py` -- mirroring `ToolError`'s identical, already-
+established role in `src/core/tool/tool_provider.py` -- and making
+`CapabilityValidationError`, `CapabilityRegistryError`,
+`CapabilityNotFoundError`, and `CapabilityBackendError` all inherit
+from it, exported from the package's public API. The fix was
+independently re-verified with 8 new regression assertions confirming
+each specific exception type is catchable as `CapabilityError` while
+remaining mutually distinguishable from the others.
+EP069.4-AUDIT-002/003/004 required no code change and were confirmed,
+not silently dropped. Tests: EP-069_4 41/0/0 (new suite,
+`tests/EP069_4/test_unified_capability_abstraction.py`). Full
+regression: 7240 passed / 3 failed / 1 skipped, identical in identity
+and count to the pre-EP-069.4 baseline of 7232/3/1 measured in this
+same working tree -- the `+8` delta exactly equals this release's own
+new/added assertion count, zero new failures. The 3 pre-existing
+failures (`EP047` x2, `EP049` x1) and 2 environment-blocked suites
+(`EP046`, `EP048`, missing PortAudio) were independently proven
+pre-existing and unrelated via a `git stash`/re-run/`stash pop` A/B
+comparison.
+
 EP-069.3 Cost-Aware AI Provider Selection — **COMPLETE**
 (STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
 Testing, STEP 3 Architecture Audit, STEP 3.1 Findings Resolution
@@ -2369,24 +2450,25 @@ EP-060 Jarvis Operating System
 
 ---
 
-## Phase A — Core Safety & Autonomy (planning only, except EP-069.1/EP-069.2/EP-069.3)
+## Phase A — Core Safety & Autonomy (planning only, except EP-069.1/EP-069.2/EP-069.3/EP-069.4)
 
 EP-069–EP-074. Provider/tool registry, policy & human-approval engine,
 credential management, autonomous-execution safety boundaries,
 browser automation with human-in-the-loop, and an autonomous project/
 EP orchestrator. See `docs/BACKLOG.md`, "Long-Term Roadmap — Future
-Engineering Packages," for full detail. **EP-069's first three
+Engineering Packages," for full detail. **EP-069's first four
 sub-packages, EP-069.1 (Automatic AI Provider Fallback on Request
-Failure), EP-069.2 (Configured AI Provider Fallback Ordering), and
-EP-069.3 (Cost-Aware AI Provider Selection), are
+Failure), EP-069.2 (Configured AI Provider Fallback Ordering),
+EP-069.3 (Cost-Aware AI Provider Selection), and EP-069.4 (Unified
+Capability Abstraction), are
 COMPLETE** — see "## Current" above. The remainder of EP-069 and all
-of EP-070–EP-074 remain planning-only. EP-069 now also carries four
-new planning-only sub-packages (EP-069.4–EP-069.7) covering the
-Unified Capability Abstraction, Capability Discovery, External
-Capability Security/Supply-Chain Trust, and Capability Lifecycle
-Management needed for Jarvis to eventually use local GitHub projects/
-CLI tools, external APIs, external web services, and browser-only
-services as capabilities — see `docs/BACKLOG.md` and
+of EP-070–EP-074 remain planning-only. EP-069 now also carries three
+remaining planning-only sub-packages (EP-069.5–EP-069.7) covering
+Capability Discovery, External Capability Security/Supply-Chain
+Trust, and Capability Lifecycle Management, building on EP-069.4's
+`Capability` model, needed for Jarvis to eventually use local GitHub
+projects/CLI tools, external APIs, external web services, and
+browser-only services as capabilities — see `docs/BACKLOG.md` and
 `docs/architecture/designs/ROADMAP_070_138_REBUILD_PROPOSAL.md` for
 the full architecture. EP-074 gains one new sub-package, EP-074.1
 (Dynamic Workflow & Unknown-Task Composition Engine), for tasks with
@@ -2459,12 +2541,13 @@ EP-140.
 
 **Phases A–N and EP-069–EP-140 are strategic planning only, with one
 exception: EP-069.1 (Automatic AI Provider Fallback on Request
-Failure), EP-069.2 (Configured AI Provider Fallback Ordering), and
-EP-069.3 (Cost-Aware AI Provider Selection) are
+Failure), EP-069.2 (Configured AI Provider Fallback Ordering),
+EP-069.3 (Cost-Aware AI Provider Selection), and EP-069.4 (Unified
+Capability Abstraction) are
 COMPLETE — see "## Current" above.** Unlike Phases 1–10
 above, none of the other EPs in Phases A–N has a design document, an
 audit, or an owner decision yet, and EP-069's own remaining scope
-(beyond EP-069.1/EP-069.2/EP-069.3) is likewise still planning-only. The ordering into
+(beyond EP-069.1/EP-069.2/EP-069.3/EP-069.4) is likewise still planning-only. The ordering into
 Phases A–N reflects the current
 strategic grouping only; it is not a guaranteed implementation
 sequence, and a future STEP 1 for any of these EPs may reorder,

@@ -6,6 +6,233 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.31-ep069.4
+
+Released: 2026-09-12
+
+Status: EP-069.4 COMPLETE / STEP 3 PASS WITH WARNINGS, STEP 3.1 ALL
+REQUIRED FINDINGS FIXED / READY FOR STEP 4 (STEP 1 Architecture
+Discovery & Design, STEP 2 Implementation & Testing, STEP 3
+Architecture Audit, STEP 3.1 Findings Resolution, and STEP 4
+Documentation Synchronization all complete).
+
+**EP-069.4 -- Unified Capability Abstraction.** STEP 1 found that this
+repository represented "something Jarvis can do" with at least three
+unrelated, structurally different types: `Tool` (internal-only,
+zero-argument handlers, closure-bound at `bootstrap.py` composition-
+root time), `Plugin` (a loadable Python-object lifecycle whose
+`capabilities` field is free-form advertising tags, not an invocable
+interface), and EP-056's `CapabilityRegistryModule` (which, despite
+its name, defines no domain model at all -- it is a read-only,
+prompt-context text composer summarizing `Plugin.capabilities` tags
+and `CommandRouter` namespace names for AI-prompt injection). None of
+the three could represent a local GitHub project's CLI, a REST API, an
+external web service, or a browser-executed service, or be operated
+over uniformly by a future Capability Discovery Engine (EP-069.5).
+
+EP-069.4 therefore adds a new `src/core/capability/` package: a single
+`Capability` frozen dataclass (id, name, description, source kind,
+input/output schema, required permissions, trust level, source/
+provenance, version, enabled), a three-level `CapabilityTrustLevel`
+enum (`TRUSTED_INTERNAL`/`TRUSTED_CONFIGURED`/`UNVERIFIED`, not a
+numeric score), a `CapabilitySourceKind` enum naming the four backend
+kinds (`INTERNAL`, `LOCAL_CLI`, `REST_API`, `BROWSER_SERVICE`) for
+classification only, a minimal, hand-rolled `CapabilitySchema`/
+`CapabilitySchemaField` shape descriptor introducing no new
+schema-validation dependency, a thread-safe `CapabilityRegistry`
+catalog mirroring `ToolRegistry`/`PluginRegistry` exactly
+(register/unregister/get/find/list/is_registered), and a
+`CapabilityBackend` `ABC` structural contract modeled directly on
+`ToolProvider`'s own shape, with **zero concrete backend
+implementations shipped**. Capability discovery/ranking (EP-069.5),
+external-capability security/supply-chain trust enforcement
+(EP-069.6), and registration/versioning/revocation lifecycle
+management (EP-069.7) are all explicitly out of scope for this
+release. `Tool`, `Plugin`, and EP-056's `CapabilityRegistryModule` are
+all confirmed byte-for-byte unmodified. No bootstrap, configuration,
+or CLI-namespace wiring was added, other than the standard,
+repository-wide test-registration import line in
+`src/modules/test_module.py` every prior EP also adds.
+
+STEP 3's independent architecture audit
+(`docs/architecture/audits/EP069_4_ARCHITECTURE_AUDIT.md`) returned
+**PASS WITH WARNINGS**: zero CRITICAL/HIGH findings, four findings
+overall. The audit did not accept the STEP 2 self-report's claims at
+face value -- it independently re-read the exact approved STEP 1 text
+and re-inspected the shipped exception classes directly, finding that
+Section 12.1's explicit "In Scope" bullet naming a `CapabilityError`
+(root) exception class had not actually been implemented
+(EP069.4-AUDIT-001, MEDIUM) -- `CapabilityValidationError`,
+`CapabilityRegistryError`, `CapabilityNotFoundError`, and
+`CapabilityBackendError` each directly subclassed `Exception` with no
+shared root. Three further findings were purely informational,
+requiring no action: the required, convention-mandated
+`test_module.py` registration line falling outside STEP 1's own file
+forecast (EP069.4-AUDIT-002); `Capability`'s raw dataclass
+constructor's already-documented, intentional permissiveness
+(EP069.4-AUDIT-003); and one test exercising an intentionally inert
+contract element pending a future concrete backend (EP069.4-AUDIT-004).
+The audit also independently confirmed, by direct inspection of both
+modules' domain models, that the EP-056 naming overlap is word-level
+only and not an architectural duplication.
+
+A dedicated STEP 3.1 review
+(`docs/architecture/audits/EP069_4_FINDINGS_RESOLUTION.md`) fixed the
+one finding that required a code change and confirmed the rest needed
+none: **EP069.4-AUDIT-001** is fixed by a new
+`CapabilityError(Exception)` root class in `capability.py` --
+mirroring `ToolError`'s identical, already-established role in
+`src/core/tool/tool_provider.py` -- with `CapabilityValidationError`,
+`CapabilityRegistryError`, `CapabilityNotFoundError`, and
+`CapabilityBackendError` all now inheriting from it and exported from
+the package's public API; the fix was independently re-verified with
+8 new regression assertions confirming each specific exception type is
+catchable as `CapabilityError` while remaining mutually
+distinguishable from the others. EP069.4-AUDIT-002/003/004 were
+explicitly confirmed to require no action, not silently dropped. Final
+STEP 3.1 decision: **READY FOR STEP 4**.
+
+### Added
+
+- `docs/architecture/designs/EP069_4_DESIGN.md`: STEP 1 design
+  document -- architectural investigation confirming no `Capability`
+  domain model exists anywhere in this repository, the full overlap
+  analysis against EP-056's `CapabilityRegistryModule`, and 7 Owner
+  Decisions.
+- `docs/architecture/audits/EP069_4_ARCHITECTURE_AUDIT.md`: STEP 3
+  independent architecture audit, verdict PASS WITH WARNINGS, four
+  findings.
+- `docs/architecture/audits/EP069_4_FINDINGS_RESOLUTION.md`: STEP 3.1
+  findings resolution record -- 1 fixed, 3 confirmed no-action -- final
+  decision READY FOR STEP 4.
+- `src/core/capability/__init__.py`: public API surface for the new
+  package.
+- `src/core/capability/capability.py`: `Capability`,
+  `CapabilityTrustLevel`, `CapabilitySourceKind`, `CapabilityFieldKind`,
+  `CapabilitySchemaField`, `CapabilitySchema`, `CapabilityError` (STEP
+  3.1 addition), `CapabilityValidationError`.
+- `src/core/capability/capability_registry.py`: `CapabilityRegistry`,
+  `CapabilityRegistryError`, `CapabilityNotFoundError`.
+- `src/core/capability/capability_backend.py`: `CapabilityBackend`
+  (ABC, zero concrete implementations), `CapabilityResult`,
+  `CapabilityStatus`, `CapabilityBackendError`.
+- `tests/EP069_4/test_unified_capability_abstraction.py`: new,
+  self-contained EP-069.4 test suite (`NAME = "EP069_4"`), covering
+  `Capability` construction and validation (success, blank fields,
+  duplicate permission tags, duplicate schema field names),
+  `CapabilityRegistry` register/unregister/get/find/list/
+  is_registered round-trips and duplicate/unknown-id error paths,
+  `CapabilityBackend` ABC-enforcement and default-`is_available()`
+  behavior via a test-only fake backend, boundary cases (empty
+  schema, empty permissions), and, added in STEP 3.1, the
+  `CapabilityError` root-inheritance and cross-type-distinguishability
+  behavior.
+
+### Changed
+
+- `src/modules/test_module.py`: one added import line registering
+  `tests.EP069_4`.
+
+### Reliability
+
+- Jarvis now has a single, shared `Capability` model that a future
+  Capability Discovery Engine (EP-069.5) can operate over uniformly,
+  instead of needing to special-case `Tool`, `Plugin`, and any future
+  backend-specific type individually.
+- No existing subsystem's behavior changed: `Tool`, `ToolRegistry`,
+  `ToolProvider`, `ToolEngine`, `Plugin`, `PluginRegistry`, and
+  EP-056's `CapabilityRegistryModule` are all confirmed byte-for-byte
+  unmodified by this release.
+- **Fixed in this release (EP069.4-AUDIT-001):** every
+  capability-specific exception (`CapabilityValidationError`,
+  `CapabilityRegistryError`, `CapabilityNotFoundError`,
+  `CapabilityBackendError`) can now be caught as a single shared
+  `CapabilityError`, matching the approved STEP 1 design's own
+  explicit scope and this repository's established `ToolError`
+  precedent, while remaining individually distinguishable from one
+  another.
+- **No concrete capability backend exists yet (by design, not a
+  defect):** `CapabilityBackend` is a structural contract only: no
+  internal, local CLI, REST API, or browser-service backend is
+  implemented in this release. Discovery (EP-069.5), security/trust
+  enforcement (EP-069.6), and lifecycle management (EP-069.7) remain
+  unscoped, planning-only future work.
+
+### Validation
+
+```
+EP069_4 : 41 passed / 0 failed / 0 skipped
+EP069_3 : 80 passed / 0 failed / 0 skipped
+EP069_2 : 26 passed / 0 failed / 0 skipped
+EP069   : 68 passed / 0 failed / 0 skipped
+EP056   : 62 passed / 0 failed / 0 skipped
+Full regression (all registered suites):
+  7240 passed / 3 failed / 1 skipped
+```
+
+The 3 failures (`EP047` x2, `EP049` x1, voice TTS/STT) and 2
+environment-blocked suites (`EP046`, `EP048`, missing `sounddevice`/
+PortAudio runtime library) are identical in identity and count to the
+pre-EP-069.4 baseline measured earlier in this same working tree
+(7232 passed / 3 failed / 1 skipped) -- the `+8` delta exactly equals
+this release's own new/added assertion count (33 from STEP 2/3 plus 8
+added in STEP 3.1 for the EP069.4-AUDIT-001 fix -- see
+`docs/architecture/audits/EP069_4_FINDINGS_RESOLUTION.md` Section 8).
+Zero new failures. Pre-existing status independently re-confirmed via
+a `git stash`/re-run/`stash pop` A/B comparison during STEP 3.
+
+### STEP 3 -- Independent Architecture Audit
+
+Verdict: **PASS WITH WARNINGS**, zero CRITICAL, zero HIGH. Four
+findings recorded: one MEDIUM (EP069.4-AUDIT-001, a real gap against
+the approved STEP 1 design's own explicit "In Scope" text, not merely
+a theoretical one), and three INFORMATIONAL observations requiring no
+action (EP069.4-AUDIT-002/003/004). Zero deviation from
+`EP069_4_DESIGN.md`'s Owner Decisions. The EP-056 naming-collision
+boundary was independently verified intact. See
+`docs/architecture/audits/EP069_4_ARCHITECTURE_AUDIT.md` for full
+detail.
+
+### STEP 3.1 -- Findings Resolution
+
+Exactly one finding was approved for a fix and it was implemented and
+independently re-verified: EP069.4-AUDIT-001 (see "Changed"/
+"Reliability" above). The remaining three findings required no code
+change and were explicitly confirmed as such, not silently ignored:
+EP069.4-AUDIT-002 (required test-registration convention),
+EP069.4-AUDIT-003 (documented, intentional validation trade-off), and
+EP069.4-AUDIT-004 (strongest possible test for an intentionally
+unimplemented contract element). No previous EP (`EP-069`, `EP-069.1`,
+`EP-069.2`, `EP-069.3`, `EP-056`) was modified in this process. Final
+decision: **READY FOR STEP 4**. See
+`docs/architecture/audits/EP069_4_FINDINGS_RESOLUTION.md`.
+
+### STEP 4 -- Documentation Synchronization
+
+Release/project documentation (`CHANGELOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/BACKLOG.md`, `docs/architecture/JARVIS_ROADMAP.md`) synchronized
+to mark EP-069.4 COMPLETE / STEP 3 PASS WITH WARNINGS / STEP 3.1 ALL
+REQUIRED FINDINGS FIXED, READY FOR STEP 4. `VERSION` and
+`PROJECT_MANIFEST.md` were checked against this repository's own
+established convention (neither has ever been updated per-EP -- see
+this file's EP-043, EP-069.1, EP-069.2, and EP-069.3 STEP 4 entries)
+and deliberately left unchanged. `docs/architecture/audits/
+EP069_4_ARCHITECTURE_AUDIT.md` was left completely unmodified, per
+this repository's own established convention that audit documents are
+never amended after creation (verified: `EP069_ARCHITECTURE_AUDIT.md`,
+`EP069_2_ARCHITECTURE_AUDIT.md`, and `EP069_3_ARCHITECTURE_AUDIT.md`
+were each committed exactly once and never amended); the separate
+`docs/architecture/audits/EP069_4_FINDINGS_RESOLUTION.md` remains the
+sole, authoritative record of the STEP 3.1 resolution. EP-069's
+remaining scope -- LLM function/tool calling, Capability Discovery
+(EP-069.5), External Capability Security/Supply-Chain Trust
+(EP-069.6), Capability Lifecycle Management (EP-069.7), and expanded
+fallback eligibility -- remains an unscoped, planning-only set of
+EP-069.x candidates, each requiring its own future, independent
+STEP 1; none is implemented by this release.
+
+---
+
 ## v0.1.30-ep069.3
 
 Released: 2026-09-11

@@ -122,6 +122,66 @@ Completed sub-packages:
 
 ## Current
 
+EP-082 Text Generation Provider Integration — **COMPLETE**
+(STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
+Testing, STEP 3 Architecture Audit, and STEP 4 Documentation
+Synchronization all complete -- see
+docs/architecture/designs/EP082_DESIGN.md). **Final Verdict: STEP 3 —
+PASS WITH WARNINGS, ZERO CRITICAL, ZERO HIGH** (one LOW finding,
+fixed directly during STEP 3 rather than requiring a separate STEP
+3.1 review: a bare `assert` guarding an unreachable
+success-path invariant in `AIService.ask()` and
+`TextGenerationService.generate()` was replaced with an explicit
+`None` check, so the guard survives Python's `-O` mode; no
+architecture or behavior change resulted). EP-082 is the first slice
+of Phase C (AI Content Platform, planning only except this EP -- see
+below): it integrates standalone text generation into the existing
+EP-014/015 AI provider abstraction and EP-069.1/EP-069.2/EP-069.3's
+fallback and cost-aware selection, without redesigning or replacing
+any of that infrastructure.
+
+The core addition is a new, shared `ProviderRequestExecutor`
+(`src/core/ai/provider_request_executor.py`), extracted verbatim
+from `AIService.ask()`'s own pre-EP-082 fallback/retry loop, so both
+`AIService` and the new, standalone `TextGenerationService`
+(`src/services/text_generation_service.py`) execute provider requests
+through exactly one fallback/retry implementation instead of two.
+`ProviderManager` gained no new responsibilities from this change --
+it remains solely responsible for provider registry access,
+current-provider selection, fallback-candidate discovery, and
+EP-069.2/EP-069.3's ordering; the executor only calls its existing,
+unmodified `list_fallback_candidates()`. `AIService.ask()`'s public
+method signature, `AskResult` contract, and all conversation/context/
+prompt/fallback behavior are unchanged for every existing caller --
+the new `request_executor` constructor parameter is optional and
+purely additive. `TextGenerationService` is deliberately
+non-conversational: it has no `ConversationManager`, `ContextManager`,
+or persistence dependency of any kind.
+
+`AIProvider.ask()` gained two additive, optional parameters --
+`temperature` and `system_prompt` -- honored consistently by both
+`ClaudeProvider` and `GeminiProvider` through one shared
+`validate_temperature()` rule (0.0-1.0 inclusive, raising
+`ProviderConfigurationError` outside that range); omitting either
+parameter preserves each provider's pre-EP-082 behavior exactly. A
+new, additive `content_generation:` configuration namespace
+(`enabled`, `default_temperature`, `fallback_enabled`) was added to
+`config/config.yaml` without altering `ai:`/`providers:` semantics.
+No CLI/CommandRouter namespace was added -- CLI exposure is
+explicitly deferred to EP-087 or a later EP, by Owner Decision.
+
+Tests: EP-082 69/0/0 (new suite,
+`tests/EP082/test_text_generation_provider_integration.py`).
+Regression: `tests/EP069` 68/0/0 and `tests/EP069_3` 80/0/0 both
+fully executed and unaffected; `tests/EP069_2` confirmed unaffected
+across 12 of its 15 sub-tests (23/0/0 assertions) -- the remaining 3
+sub-tests call the real `bootstrap.initialize()` and could not
+execute in the STEP 2/3 sandbox for lack of `PySide6` (Qt), an
+unrelated, pre-existing desktop-UI test dependency (`tests/EP044`),
+not an EP-082 regression; `provider_manager.py`, `provider_registry
+.py`, and `provider_factory.py` are all confirmed byte-for-byte
+unmodified.
+
 EP-069.4 Unified Capability Abstraction — **COMPLETE**
 (STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
 Testing, STEP 3 Architecture Audit, STEP 3.1 Findings Resolution
@@ -2489,9 +2549,15 @@ retired/merged placeholder — see `docs/BACKLOG.md`).
 
 EP-077–EP-081.
 
-## Phase C — AI Content Platform (planning only)
+## Phase C — AI Content Platform (planning only, except EP-082)
 
-EP-082–EP-087.
+EP-082–EP-087. **EP-082 (Text Generation Provider Integration) is
+COMPLETE** -- see "## Current" above and
+`docs/architecture/designs/EP082_DESIGN.md`. EP-083-EP-087 (Image,
+Audio & Speech, Video, and Presentation Generation Integration, and
+the combined Content Production Pipeline) remain planning-only; each
+requires its own future, independent STEP 1 before implementation,
+per this repository's Engineering Package Policy.
 
 ## Phase D — Social Automation (planning only)
 

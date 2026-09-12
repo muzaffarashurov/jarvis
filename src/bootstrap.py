@@ -15,8 +15,10 @@ from src.core.ai.context_manager import ContextManager
 from src.core.ai.conversation_manager import ConversationManager
 from src.core.ai.prompt_manager import PromptManager
 from src.core.ai.provider_factory import KNOWN_PROVIDER_NAMES, ProviderFactory
+from src.core.ai.provider import ProviderConfigurationError, validate_temperature
 from src.core.ai.provider_manager import ProviderManager
 from src.core.ai.provider_registry import ProviderRegistry as AIProviderRegistry
+from src.core.ai.provider_request_executor import ProviderRequestExecutor
 from src.core.agent.agent_engine import AgentEngine
 from src.core.agent.agent_manager import AgentManager
 from src.core.agent.agent_provider import AgentFrameworkError
@@ -119,6 +121,7 @@ from src.modules.telegram_module import TelegramModule
 from src.modules.runtime_module import RuntimeModule
 from src.services.agent_service import AgentService
 from src.services.ai_service import AIService
+from src.services.text_generation_service import TextGenerationService
 from src.services.collaboration_service import CollaborationService
 from src.services.context_compression_service import CompressionService
 from src.services.embedding_service import EmbeddingService
@@ -327,6 +330,37 @@ def _parse_provider_relative_costs(config: Config) -> dict[str, float]:
         for cost in (_parse_relative_cost(config, name),)
         if cost is not None
     }
+
+
+def _parse_content_generation_default_temperature(config: Config) -> float | None:
+    """Validate 'content_generation.default_temperature' (EP-082).
+
+    Mirrors `_parse_relative_cost()`'s composition-root pattern
+    immediately above: invalid or absent configuration degrades to
+    "no default override" rather than a startup failure --
+    `TextGenerationService` then falls back to each provider's own
+    configured 'providers.<name>.temperature' exactly as if this
+    setting were never set (`EP082_DESIGN.md` Section 13).
+
+    Args:
+        config: The loaded application Config.
+
+    Returns:
+        The validated default temperature, or None if absent or
+        invalid.
+    """
+    raw = config.get("content_generation.default_temperature", None)
+    if raw is None:
+        return None
+    try:
+        validate_temperature(raw)
+    except ProviderConfigurationError as exc:
+        logger.warning(
+            "Ignoring 'content_generation.default_temperature': "
+            f"{exc} No per-request default temperature override will be applied."
+        )
+        return None
+    return float(raw)
 
 
 class Bootstrap:
@@ -739,6 +773,17 @@ class Bootstrap:
         provider_factory = ProviderFactory(config=config)
         for provider in provider_factory.build_all():
             ai_provider_manager.register_provider(provider)
+
+        # EP-082 Text Generation Provider Integration: single shared
+        # ProviderRequestExecutor, used by both `ai_service` (below)
+        # and `text_generation_service` (below), so EP-069.1/.2/.3's
+        # fallback/cost-aware retry logic has exactly one
+        # implementation in the repository (EP082_DESIGN.md Section
+        # 6, 11.2). `ProviderManager` itself is unchanged -- this
+        # executor only calls its existing, already-shipped
+        # `list_fallback_candidates()`.
+        ai_request_executor = ProviderRequestExecutor(provider_manager=ai_provider_manager)
+
         ai_service = AIService(
             config=config,
             provider_manager=ai_provider_manager,
@@ -747,8 +792,34 @@ class Bootstrap:
             context_manager=context_manager,
             # EP-069.1 Automatic AI Provider Fallback on Request Failure.
             fallback_enabled=bool(config.get("ai.fallback_enabled", False)),
+            # EP-082 Text Generation Provider Integration: `ai_service`
+            # and `text_generation_service` (below) share the same
+            # ProviderRequestExecutor instance, so there is exactly
+            # one fallback/retry implementation, not two
+            # (EP082_DESIGN.md Section 6, 19).
+            request_executor=ai_request_executor,
         )
         router.register(AIModule(ai_service))
+
+        # EP-082 Text Generation Provider Integration. Standalone,
+        # non-conversational content-generation entry point over the
+        # same provider abstraction `ai_service` uses -- no
+        # ConversationManager, ContextManager, or PromptManager
+        # dependency, per its non-conversational scope
+        # (EP082_DESIGN.md Section 9). No CommandRouter registration:
+        # CLI/user-facing exposure is explicitly deferred to EP-087 or
+        # another future EP (EP082_DESIGN.md Section 20, Decision 2)
+        # -- `text_generation_service` is stored for a future
+        # in-process consumer (e.g. EP-087's pipeline) exactly like
+        # `self._memory_service`/`self._embedding_service` above are
+        # stored ahead of their own later consumers.
+        self._text_generation_service = TextGenerationService(
+            provider_manager=ai_provider_manager,
+            request_executor=ai_request_executor,
+            enabled=bool(config.get("content_generation.enabled", False)),
+            default_temperature=_parse_content_generation_default_temperature(config),
+            fallback_enabled=bool(config.get("content_generation.fallback_enabled", False)),
+        )
 
         # EP-054 Self Reflection. On-demand session/conversation
         # self-critique (Owner Decision D1, "Candidate A") via the

@@ -16,6 +16,22 @@ ClaudeProvider) can be used interchangeably through ProviderManager.
 Their base implementations below are non-network no-ops so EP-014's
 placeholder providers (ConfigDrivenProvider: openai, ollama, lmstudio)
 remain valid AIProvider implementations without any changes.
+
+EP-082 (Text Generation Provider Integration) additively extends
+`ask()` with two optional keyword parameters, `temperature` and
+`system_prompt`, so standalone content-generation callers (see
+`src/services/text_generation_service.py`) can override a provider's
+per-request creativity/style without changing its configured default.
+Both default to `None`, meaning "no override -- use this provider's
+existing configured/default behavior unchanged"; every existing
+caller that omits them (`AIService`, `ReflectionModule`,
+`PromptOptimizerModule`, and every existing test) is therefore
+source- and behavior-compatible with zero changes
+(`EP082_DESIGN.md` Section 12). `validate_temperature()` below is the
+single, shared validation rule every concrete provider applies to a
+non-`None` `temperature` override, so no provider is free to
+interpret an invalid value differently (`EP082_DESIGN.md` Section
+12.1).
 """
 
 from __future__ import annotations
@@ -152,6 +168,43 @@ class ProviderUnavailableError(ProviderError):
     """Raised when a provider is unreachable or refuses to serve a request."""
 
 
+_MIN_TEMPERATURE: float = 0.0
+_MAX_TEMPERATURE: float = 1.0
+
+
+def validate_temperature(temperature: float | None) -> None:
+    """Validate an optional per-request `temperature` override (EP-082).
+
+    Single, shared validation rule applied identically by every
+    concrete provider's `ask()` before translating a non-`None`
+    `temperature` into that provider's own API call -- so no provider
+    is free to interpret an invalid value differently
+    (`EP082_DESIGN.md` Section 12.1). `AIProvider` is an ABC with no
+    shared method body to validate inside `ask()` itself, so each
+    concrete provider calls this function explicitly.
+
+    Args:
+        temperature: The caller-supplied override, or None (meaning
+            "no override; preserve this provider's existing
+            configured/default temperature behavior unchanged").
+
+    Raises:
+        ProviderConfigurationError: If `temperature` is not None and
+            is not a real number in the inclusive 0.0-1.0 range.
+    """
+    if temperature is None:
+        return
+    if isinstance(temperature, bool) or not isinstance(temperature, (int, float)):
+        raise ProviderConfigurationError(
+            f"Invalid 'temperature' override: {temperature!r} is not a number."
+        )
+    if not (_MIN_TEMPERATURE <= float(temperature) <= _MAX_TEMPERATURE):
+        raise ProviderConfigurationError(
+            f"Invalid 'temperature' override: {temperature!r} is outside the valid "
+            f"{_MIN_TEMPERATURE}-{_MAX_TEMPERATURE} range."
+        )
+
+
 class AIProvider(ABC):
     """Structural contract every AI provider must implement.
 
@@ -202,7 +255,13 @@ class AIProvider(ABC):
 
     # ---------- EP-015: real communication extension points ----------
 
-    def ask(self, prompt: str, max_tokens: int | None = None) -> ProviderResponse:
+    def ask(
+        self,
+        prompt: str,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        system_prompt: str | None = None,
+    ) -> ProviderResponse:
         """Send `prompt` to this provider and return its reply (EP-015).
 
         Base implementation always raises: this provider does not
@@ -214,6 +273,19 @@ class AIProvider(ABC):
             max_tokens: Optional override for the reply's maximum
                 token count. None uses the provider's configured
                 default.
+            temperature: Optional per-request override for this
+                provider's creativity/randomness setting (EP-082).
+                None means "no override; use this provider's existing
+                configured/default temperature behavior unchanged" --
+                it never means "force zero" or any other implicit
+                value. When provided, must be a real number in the
+                inclusive 0.0-1.0 range (`validate_temperature()`);
+                an out-of-range value raises
+                `ProviderConfigurationError`.
+            system_prompt: Optional per-request system-prompt/style
+                instruction override (EP-082). None means no
+                per-request override is supplied; this provider's
+                existing prompt-handling behavior is unchanged.
 
         Returns:
             The provider's reply.

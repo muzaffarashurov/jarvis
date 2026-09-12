@@ -6,6 +6,82 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.32-ep082
+
+Released: 2026-09-12
+
+Status: EP-082 COMPLETE / STEP 3 PASS WITH WARNINGS (STEP 1
+Architecture Discovery & Design, STEP 2 Implementation & Testing,
+STEP 3 Architecture Audit, and STEP 4 Documentation Synchronization
+all complete).
+
+**EP-082 -- Text Generation Provider Integration.** STEP 1 found that
+"asking a provider for text" existed in exactly two forms in this
+repository, neither a fit for standalone content generation:
+`AIService.ask()`'s conversational pipeline, which unconditionally
+records conversation/context history, and the direct
+`ProviderManager.get_current()` + `AIProvider.ask()` pattern
+`ReflectionModule`/`PromptOptimizerModule` already use to avoid that
+side effect -- but which also bypasses EP-069.1/EP-069.2/EP-069.3's
+fallback and cost-aware provider selection entirely, since that logic
+lived only inside `AIService.ask()`'s own inline retry loop.
+
+EP-082 extracts that retry loop, unchanged in observable behavior,
+into a new shared `ProviderRequestExecutor`
+(`src/core/ai/provider_request_executor.py`), so both `AIService` and
+a new, standalone, non-conversational `TextGenerationService`
+(`src/services/text_generation_service.py`) execute provider requests
+through exactly one fallback/retry implementation instead of two.
+`ProviderManager` gained no new responsibilities from this change --
+it remains solely responsible for provider registry access,
+current-provider selection, fallback-candidate discovery, and
+EP-069.2/EP-069.3's ordering. `AIService.ask()`'s public method
+signature, `AskResult` contract, and all conversation/context/prompt/
+fallback behavior are unchanged for every existing caller -- the new
+`request_executor` constructor parameter is optional and purely
+additive.
+
+`AIProvider.ask()` gained two additive, optional parameters --
+`temperature` and `system_prompt` -- honored consistently by both
+`ClaudeProvider` and `GeminiProvider` through one shared
+`validate_temperature()` rule (0.0-1.0 inclusive, raising
+`ProviderConfigurationError` outside that range); omitting either
+parameter preserves each provider's pre-EP-082 behavior exactly. A
+new, additive `content_generation:` configuration namespace
+(`enabled`, `default_temperature`, `fallback_enabled`) was added
+without altering `ai:`/`providers:` semantics. No CLI/CommandRouter
+namespace was added -- CLI exposure is explicitly deferred to EP-087
+or a later EP, by Owner Decision. Image, audio, video, and
+presentation generation (EP-083-EP-086), the combined pipeline
+(EP-087), streaming, new providers, and content persistence/templates
+are all explicitly out of scope for this release.
+
+STEP 3's independent audit returned **PASS WITH WARNINGS**: zero
+CRITICAL/HIGH findings; one LOW finding -- a bare `assert` guarding an
+unreachable success-path invariant in `AIService.ask()` and
+`TextGenerationService.generate()`, which would silently no-op under
+Python's `-O` mode -- was fixed directly during the audit by
+replacing it with an explicit `None` check, with no architecture or
+behavior change. The audit independently confirmed `ProviderManager`'s
+method set is byte-for-byte unchanged from pre-EP-082, and
+independently re-verified the extracted executor's fallback ordering,
+eligibility, retry/exhaustion behavior, logging, and
+initial-vs-final-provider reporting against the pre-extraction
+implementation.
+
+Tests: EP-082 69/0/0 (new suite,
+`tests/EP082/test_text_generation_provider_integration.py`).
+Regression: `tests/EP069` 68/0/0 and `tests/EP069_3` 80/0/0 both fully
+executed and unaffected; `tests/EP069_2` confirmed unaffected across
+12 of its 15 sub-tests (23/0/0 assertions) -- the remaining 3
+sub-tests call the real `bootstrap.initialize()` and could not
+execute in the STEP 2/3 sandbox for lack of `PySide6` (Qt), an
+unrelated, pre-existing desktop-UI test dependency, not an EP-082
+regression. No full-repository regression count was measured for this
+release.
+
+---
+
 ## v0.1.31-ep069.4
 
 Released: 2026-09-12

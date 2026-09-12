@@ -73,17 +73,10 @@ from src.core.ai.conversation import Conversation
 from src.core.ai.conversation_manager import ConversationManager
 from src.core.ai.prompt_builder import PromptTemplateNotFoundError, PromptValidationError
 from src.core.ai.prompt_manager import PromptManager
-from src.core.ai.provider import (
-    AIProvider,
-    ModelValidationResult,
-    ProviderError,
-    ProviderNetworkError,
-    ProviderRateLimitError,
-    ProviderTimeoutError,
-    ProviderUnavailableError,
-)
+from src.core.ai.provider import ModelValidationResult
 from src.core.ai.provider_manager import ProviderManager
 from src.core.ai.provider_registry import ProviderNotFoundError
+from src.core.ai.provider_request_executor import ProviderRequestExecutor
 from src.core.command_router import CommandResult
 from src.core.config import Config
 
@@ -102,23 +95,14 @@ _NO_PROVIDER_SELECTED: str = "No AI provider is currently selected. Use 'ai use 
 
 # EP-069.1 Automatic AI Provider Fallback on Request Failure.
 #
-# Fallback-eligible ProviderError subtypes, per EP069_DESIGN.md
-# Section 15 (Owner Decision D4). Only transient/provider-availability
-# failures are eligible: ProviderUnavailableError, ProviderNetworkError,
-# ProviderTimeoutError, ProviderRateLimitError. ProviderConfigurationError,
-# ProviderAuthenticationError, and the uncategorized base ProviderError
-# are deliberately NOT included -- a bad credential or missing
-# configuration is an operator-visible defect, not a transient failure
-# to silently route around (Section 15's table). This set is the only
-# place fallback eligibility is decided; it is intentionally closed and
-# not derived from exception attributes, so eligibility stays reviewable
-# at a single glance.
-_FALLBACK_ELIGIBLE_ERRORS: tuple[type[ProviderError], ...] = (
-    ProviderUnavailableError,
-    ProviderNetworkError,
-    ProviderTimeoutError,
-    ProviderRateLimitError,
-)
+# The fallback-eligible ProviderError classification and the retry
+# loop itself moved to `ProviderRequestExecutor`
+# (src/core/ai/provider_request_executor.py) as part of EP-082 (Text
+# Generation Provider Integration), so both `ask()` below and the new
+# `TextGenerationService` share a single implementation instead of
+# each owning their own (`EP082_DESIGN.md` Section 6, 11.2, 19).
+# `ask()`'s observable behavior -- which failures trigger fallback,
+# in what order, and when they stop -- is unchanged.
 
 
 @dataclass(frozen=True)
@@ -292,6 +276,7 @@ class AIService:
         prompt_manager: PromptManager,
         context_manager: ContextManager,
         fallback_enabled: bool = False,
+        request_executor: ProviderRequestExecutor | None = None,
     ) -> None:
         """Initialize the AIService.
 
@@ -314,6 +299,16 @@ class AIService:
                 Defaults to False so `ask()`'s behavior is unchanged
                 unless explicitly opted into (`EP069_DESIGN.md`
                 Section 20/21).
+            request_executor: The shared `ProviderRequestExecutor`
+                (EP-082) `ask()` delegates fallback/retry execution
+                to. Optional and additive: when omitted, a new
+                executor is constructed from `provider_manager`,
+                reproducing this method's pre-EP-082 behavior exactly
+                -- every existing caller that does not pass this
+                argument (all current tests, and `bootstrap.py`
+                unless updated to share one instance with
+                `TextGenerationService`) is unaffected
+                (`EP082_DESIGN.md` Section 19).
         """
         self._config = config
         self._provider_manager = provider_manager
@@ -321,6 +316,7 @@ class AIService:
         self._prompt_manager = prompt_manager
         self._context_manager = context_manager
         self._fallback_enabled = fallback_enabled
+        self._request_executor = request_executor or ProviderRequestExecutor(provider_manager)
 
     # ---------- Public API ----------
 
@@ -546,67 +542,37 @@ class AIService:
             logger.error(f"Prompt Engine rejected request (provider='{name}'): {exc}")
             return AskResult(success=False, provider=name, model="", text="", error=str(exc))
 
-        candidate: AIProvider = current
-        attempted: list[str] = []
-        failure_summary: list[str] = []
+        outcome = self._request_executor.execute(
+            current,
+            built_prompt.rendered,
+            fallback_enabled=self._fallback_enabled,
+        )
+        if not outcome.success:
+            # Preserves pre-EP-082 behavior exactly: every failure
+            # reports the originally selected provider (`name`, which
+            # equals `outcome.initial_provider`), never a fallback
+            # candidate that was itself attempted and also failed.
+            return AskResult(success=False, provider=name, model="", text="", error=outcome.error)
 
-        while True:
-            candidate_name = candidate.name()
-            attempted.append(candidate_name)
-            try:
-                response = candidate.ask(built_prompt.rendered)
-            except ProviderError as exc:
-                # Unchanged from pre-EP-069.1: `exc` here is always a
-                # ProviderError instance whose message is a static,
-                # code-authored string (e.g. "Provider 'claude' is
-                # disabled."), never user-supplied prompt content --
-                # safe to log verbatim, per EP069_DESIGN.md Section 9/11.
-                logger.error(f"AI request failed (provider='{candidate_name}'): {exc}")
-                failure_summary.append(f"{candidate_name}: {type(exc).__name__}")
-
-                fallback_eligible = self._fallback_enabled and isinstance(
-                    exc, _FALLBACK_ELIGIBLE_ERRORS
-                )
-                if not fallback_eligible:
-                    # Fallback disabled, or a non-eligible failure type
-                    # (Section 15) -- preserve pre-EP-069.1 behavior
-                    # exactly: fail immediately, reporting the
-                    # originally selected provider.
-                    return AskResult(success=False, provider=name, model="", text="", error=str(exc))
-
-                remaining = self._provider_manager.list_fallback_candidates(exclude=attempted)
-                if not remaining:
-                    # Every eligible candidate has been tried (bounded
-                    # by construction -- Section 16, Owner Decision D5).
-                    # Only provider names and exception class names are
-                    # aggregated here, never `str(exc)`, per EP-068's
-                    # log-redaction precedent (Section 19).
-                    logger.error(
-                        "AI request failed on every eligible provider: "
-                        f"{', '.join(failure_summary)}."
-                    )
-                    return AskResult(
-                        success=False,
-                        provider=name,
-                        model="",
-                        text="",
-                        error=f"All providers failed. {'; '.join(failure_summary)}.",
-                    )
-
-                next_candidate = remaining[0]
-                logger.info(
-                    f"AI request falling back from provider='{candidate_name}' "
-                    f"to provider='{next_candidate.name()}'."
-                )
-                candidate = next_candidate
-                continue
-
-            break
-
+        response = outcome.response
+        if response is None:
+            # ProviderRequestOutcome.success=True always carries a
+            # non-None response by construction of `execute()` -- this
+            # is a defensive guard against that invariant ever being
+            # violated (e.g. under `-O`, where a bare `assert` would
+            # silently no-op instead of surfacing the defect), not a
+            # reachable code path in normal operation.
+            return AskResult(
+                success=False,
+                provider=outcome.final_provider,
+                model="",
+                text="",
+                error="Internal error: successful outcome carried no response.",
+            )
         self._complete_turn(conversation, response.text)
         return AskResult(
             success=True,
-            provider=candidate.name(),
+            provider=outcome.final_provider,
             model=response.model,
             text=response.text,
             error="",

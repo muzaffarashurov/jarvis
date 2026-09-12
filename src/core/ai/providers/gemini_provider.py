@@ -54,6 +54,7 @@ from src.core.ai.provider import (
     ProviderStatus,
     ProviderTimeoutError,
     ProviderUnavailableError,
+    validate_temperature,
 )
 
 __all__ = ["GeminiProvider"]
@@ -139,32 +140,53 @@ class GeminiProvider(AIProvider):
 
     # ---------- AIProvider: EP-015 real communication ----------
 
-    def ask(self, prompt: str, max_tokens: int | None = None) -> ProviderResponse:
+    def ask(
+        self,
+        prompt: str,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        system_prompt: str | None = None,
+    ) -> ProviderResponse:
         """Send `prompt` to the Google Gemini API and return its reply.
 
         Args:
             prompt: The user prompt to send.
             max_tokens: Optional override for the reply's maximum
                 token count. None uses 'providers.gemini.max_tokens'.
+            temperature: Optional per-request override for
+                'providers.gemini.temperature' (EP-082). None
+                preserves the configured default unchanged.
+            system_prompt: Optional per-request system instruction
+                sent as the Generative Language API's top-level
+                'systemInstruction' field (EP-082). None omits it,
+                unchanged from pre-EP-082 behavior.
 
         Returns:
             The provider's reply. Errors are mapped to ProviderError
             subtypes by `_send_request()`, `_raise_for_transport_status()`
             and `_build_model_not_found_error()`.
+
+        Raises:
+            ProviderConfigurationError: If this provider is disabled,
+                missing its API key, or `temperature` is outside the
+                valid 0.0-1.0 range.
         """
         if not self._enabled:
             raise ProviderConfigurationError("Provider 'gemini' is disabled.")
         if not self._api_key.strip():
             raise ProviderConfigurationError("Provider 'gemini' is missing 'api_key'.")
+        validate_temperature(temperature)
 
         url = f"{_API_BASE_URL}/{self._model}:generateContent"
         payload: dict[str, Any] = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
                 "maxOutputTokens": max_tokens if max_tokens is not None else self._max_tokens,
-                "temperature": self._temperature,
+                "temperature": temperature if temperature is not None else self._temperature,
             },
         }
+        if system_prompt is not None:
+            payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
         headers = {
             "x-goog-api-key": self._api_key,
             "content-type": "application/json",

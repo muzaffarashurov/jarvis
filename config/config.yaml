@@ -606,6 +606,29 @@ ai:
   # docs/architecture/designs/EP069_3_DESIGN.md.
   cost_aware_enabled: false
 
+content_generation:
+  # EP-082 Text Generation Provider Integration. Additive namespace
+  # for Phase C (AI Content Platform); does not alter 'ai:' or
+  # 'providers:' semantics above. Governs standalone
+  # (non-conversational) text-generation requests only -- see
+  # src/services/text_generation_service.py and
+  # docs/architecture/designs/EP082_DESIGN.md. Disabled by default,
+  # matching every other opt-in capability's own off-by-default
+  # precedent (reflection.enabled, prompt_optimizer.enabled).
+  enabled: false
+  # Default 'temperature' override applied when a caller does not
+  # supply a per-request value. Must be within the 0.0-1.0 range
+  # (src/core/ai/provider.py's validate_temperature()); an invalid or
+  # absent value falls back to each provider's own configured
+  # 'providers.<name>.temperature', never a startup failure.
+  default_temperature: 0.7
+  # Whether TextGenerationService requests may retry a fallback-
+  # eligible provider failure against another candidate, reusing the
+  # exact same EP-069.1/.2/.3 fallback/cost-aware ordering 'ai:' uses.
+  # Independent of 'ai.fallback_enabled' above, since content-
+  # generation requests are a distinct calling context from chat.
+  fallback_enabled: false
+
 conversation:
   # EP-016 Conversation Engine. Provider-independent chat session
   # storage shared by the CLI, Voice Assistant, Telegram, Desktop UI,

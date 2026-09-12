@@ -3257,4 +3257,57 @@ EP069_4 : 41 passed / 0 failed / 0 skipped
 
 ---
 
+# EP-082 — Text Generation Provider Integration
+
+Status: Released (STEP 3 independent audit PASS WITH WARNINGS; the
+one issue found was fixed on the spot during the audit -- see "Known
+limitations" below)
+
+Highlights:
+
+- This release lays internal groundwork for Jarvis to generate
+  standalone written text (like an article, summary, or caption) on
+  request, separately from an ordinary chat conversation -- it does
+  not add a new command, setting, or chat behavior you'll notice
+  day-to-day yet
+- The same reliability feature your ordinary "ai ask" conversations
+  already have -- automatically trying another configured AI provider
+  if the first one fails -- is now shared with this new, standalone
+  text-generation capability too, instead of being rebuilt separately
+- Nothing about how your existing "ai ask" conversations, providers,
+  or settings work has changed
+
+Compatibility:
+
+Fully backward compatible with every prior release. No existing
+command, setting, or behavior changed. No breaking changes.
+
+Known limitations:
+
+- There is no new chat command or menu option to use this yet -- that
+  is planned for a future release (EP-087 or later) and is not part
+  of this one.
+- The independent review that checked this release found one small,
+  purely internal issue: a safety check written in a way that could,
+  in one unusual and never-actually-used mode of running the program,
+  fail silently instead of clearly. This has already been fixed and
+  re-tested; it never affected any normal use of Jarvis.
+- Three of the automated checks for an earlier, related release
+  (EP-069.2) could not be re-run in the environment used to verify
+  this release, because that environment was missing an unrelated
+  desktop-display component. This is a gap in how thoroughly this
+  specific environment could re-confirm old, already-shipped
+  behavior -- not a problem with this release's own new capability.
+
+Validation:
+
+EP082 : 69 passed / 0 failed / 0 skipped
+EP069  : 68 passed / 0 failed / 0 skipped (regression, unchanged)
+EP069_3 : 80 passed / 0 failed / 0 skipped (regression, unchanged)
+EP069_2 : 23 of 23 executable assertions passed / 0 failed
+(regression, unchanged; 12 of 15 sub-tests executed -- 3 could not
+run, see "Known limitations")
+
+---
+
 End of document.

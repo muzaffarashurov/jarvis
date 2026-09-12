@@ -45,6 +45,7 @@ from src.core.ai.provider import (
     ProviderStatus,
     ProviderTimeoutError,
     ProviderUnavailableError,
+    validate_temperature,
 )
 
 __all__ = ["ClaudeProvider"]
@@ -132,20 +133,33 @@ class ClaudeProvider(AIProvider):
 
     # ---------- AIProvider: EP-015 real communication ----------
 
-    def ask(self, prompt: str, max_tokens: int | None = None) -> ProviderResponse:
+    def ask(
+        self,
+        prompt: str,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        system_prompt: str | None = None,
+    ) -> ProviderResponse:
         """Send `prompt` to the Anthropic Messages API and return its reply.
 
         Args:
             prompt: The user prompt to send.
             max_tokens: Optional override for the reply's maximum
                 token count. None uses 'providers.claude.max_tokens'.
+            temperature: Optional per-request override for
+                'providers.claude.temperature' (EP-082). None
+                preserves the configured default unchanged.
+            system_prompt: Optional per-request system prompt sent as
+                the Messages API's top-level 'system' field (EP-082).
+                None omits it, unchanged from pre-EP-082 behavior.
 
         Returns:
             The provider's reply.
 
         Raises:
-            ProviderConfigurationError: If this provider is disabled
-                or missing its API key.
+            ProviderConfigurationError: If this provider is disabled,
+                missing its API key, or `temperature` is outside the
+                valid 0.0-1.0 range.
             ProviderAuthenticationError: If the API key is rejected.
             ProviderRateLimitError: If the API reports a rate limit.
             ProviderTimeoutError: If the request exceeds the
@@ -158,13 +172,16 @@ class ClaudeProvider(AIProvider):
             raise ProviderConfigurationError("Provider 'claude' is disabled.")
         if not self._api_key.strip():
             raise ProviderConfigurationError("Provider 'claude' is missing 'api_key'.")
+        validate_temperature(temperature)
 
         payload: dict[str, Any] = {
             "model": self._model,
             "max_tokens": max_tokens if max_tokens is not None else self._max_tokens,
-            "temperature": self._temperature,
+            "temperature": temperature if temperature is not None else self._temperature,
             "messages": [{"role": "user", "content": prompt}],
         }
+        if system_prompt is not None:
+            payload["system"] = system_prompt
         headers = {
             "x-api-key": self._api_key,
             "anthropic-version": _ANTHROPIC_VERSION,

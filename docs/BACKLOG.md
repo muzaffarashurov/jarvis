@@ -23,9 +23,13 @@ Capability Discovery, External Capability Security/Supply-Chain
 Trust, Capability Lifecycle Management, and expanded fallback
 eligibility) remains unscoped and planning-only;
 each requires its own future, independent STEP 1 before
-implementation, per this repository's Engineering Package Policy. No
-EP-070 or Phase 11 exists anywhere in this repository as of this
-release. Two tracked, non-blocking follow-up items exist:
+implementation, per this repository's Engineering Package Policy.
+Separately, **EP-082 (Text Generation Provider Integration), the
+first slice of Phase C (AI Content Platform), is now also COMPLETE**
+-- see the EP-082 entry below and the "AI Content Platform" section
+further down. No EP-070 or Phase 11 exists anywhere in this
+repository as of this release. Two tracked, non-blocking follow-up
+items exist:
 
 - From EP-069.2's own STEP 3.1 review (see the EP-069.2 entry below,
   unchanged by this release): `ai.fallback_order` does not yet
@@ -44,6 +48,81 @@ release. Two tracked, non-blocking follow-up items exist:
   EP069.3-AUDIT-003/004/005. All three cover behavior the STEP 3 audit
   independently verified correct by hand; only the regression-test
   coverage itself is missing.
+
+### EP-082 — Text Generation Provider Integration
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), and STEP 4 (Documentation
+Synchronization) all complete. EP-082 is marked **COMPLETE / STEP 3
+PASS WITH WARNINGS**. Full design:
+`docs/architecture/designs/EP082_DESIGN.md`. No separate audit
+document was produced -- the one finding raised during STEP 3 was
+fixed directly within that same step rather than requiring a STEP
+3.1 review cycle.
+
+STEP 1 found that "asking a provider for text" existed in exactly two
+forms: `AIService.ask()`'s conversational pipeline, which
+unconditionally records conversation/context history and is not a
+fit for standalone content generation, and the direct
+`ProviderManager.get_current()` + `AIProvider.ask()` pattern
+`ReflectionModule`/`PromptOptimizerModule` already use to avoid that
+side effect -- but which also bypasses EP-069.1/EP-069.2/EP-069.3's
+fallback and cost-aware provider selection entirely, since that logic
+lived only inside `AIService.ask()`'s own inline retry loop.
+
+EP-082 therefore extracts that retry loop, unchanged in behavior,
+into a new shared `ProviderRequestExecutor`
+(`src/core/ai/provider_request_executor.py`), used by both
+`AIService` and a new, standalone `TextGenerationService`
+(`src/services/text_generation_service.py`). `ProviderManager` gains
+no new responsibilities -- it remains solely responsible for
+provider registry access, current-provider selection,
+fallback-candidate discovery, and EP-069.2/EP-069.3's ordering.
+`AIProvider.ask()` gained two additive, optional parameters
+(`temperature`, `system_prompt`), honored consistently by
+`ClaudeProvider` and `GeminiProvider` through one shared
+`validate_temperature()` rule (0.0-1.0 inclusive). A new, additive
+`content_generation:` configuration namespace was added without
+altering `ai:`/`providers:` semantics. No CLI/CommandRouter namespace
+was added -- deferred to EP-087 or a later EP by Owner Decision.
+Image, audio, video, and presentation generation (EP-083-EP-086), the
+combined pipeline (EP-087), streaming, new providers, and content
+persistence/templates are all explicitly out of scope for this
+release.
+
+STEP 3's independent audit returned **PASS WITH WARNINGS**: zero
+CRITICAL/HIGH findings; one LOW finding (a bare `assert` guarding an
+unreachable success-path invariant in `AIService.ask()` and
+`TextGenerationService.generate()`, which would silently no-op under
+Python's `-O` mode) was fixed directly during the audit itself by
+replacing it with an explicit `None` check -- no architecture or
+behavior change. The audit independently confirmed
+`ProviderManager`'s method set is byte-for-byte unchanged from
+pre-EP-082 (no execution/retry responsibility was absorbed into it),
+and independently re-verified the extracted executor's fallback
+ordering, eligibility, retry/exhaustion behavior, log-message text,
+and initial-vs-final-provider reporting against the pre-extraction
+implementation line-by-line.
+
+Tests: EP-082 69/0/0 (new suite,
+`tests/EP082/test_text_generation_provider_integration.py`).
+Regression: `tests/EP069` 68/0/0 and `tests/EP069_3` 80/0/0 both
+fully executed and unaffected. `tests/EP069_2` was confirmed
+unaffected across 12 of its 15 sub-tests (23/0/0 assertions); the
+remaining 3 sub-tests call the real `bootstrap.initialize()` and
+could not execute in the sandbox used for STEP 2/3 verification for
+lack of `PySide6` (Qt) -- an unrelated, pre-existing desktop-UI test
+dependency (traced to `tests/EP044/test_desktop_ui.py`), not an
+EP-082 regression. No full-repository regression count was measured
+for this release; this is a documented verification limitation, not
+a claim of full-suite passage.
+
+**One tracked follow-up item from this release:** confirm the 3
+unexecuted `tests/EP069_2` bootstrap-wiring sub-tests in an
+environment with `PySide6` available, as a final confirmation
+alongside the code-inspection-based assurance STEP 3 already
+performed. This requires no new EP number and is not a defect in
+EP-082's own implementation.
 
 ### EP-069.4 — Unified Capability Abstraction
 
@@ -3210,7 +3289,12 @@ Level-3 capability; neither is a domain-specific rewrite of Core.
 
 ## AI Content Platform (EP-082–EP-087)
 
-- **EP-082 — Text Generation Provider Integration** (MEDIUM)
+- **EP-082 — Text Generation Provider Integration** (MEDIUM).
+  **COMPLETE** -- see the "Next Engineering Package" section above and
+  `docs/architecture/designs/EP082_DESIGN.md`. Integrates standalone
+  text generation into the existing EP-069 provider abstraction via a
+  new shared `ProviderRequestExecutor`, reused by both `AIService` and
+  a new `TextGenerationService`.
 - **EP-083 — Image Generation Provider Integration** (MEDIUM)
 - **EP-084 — Audio & Speech Generation Integration** (MEDIUM)
 - **EP-085 — Video Generation Provider Integration** (MEDIUM)

@@ -6,6 +6,85 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.33-ep092
+
+Released: 2026-09-13
+
+Status: EP-092 COMPLETE / STEP 3 PASS (after remediation -- STEP 1
+Architecture Discovery & Design, STEP 2 Implementation & Testing,
+STEP 3 Architecture Audit, and STEP 4 Documentation Synchronization
+all complete).
+
+**EP-092 -- Personal Data Collection Framework.** STEP 1 found this
+repository had no existing mechanism for ingesting and storing
+unbounded, time-series personal operational data (e.g. a recurring
+meter reading), and that reusing `KnowledgeCollection`/
+`KnowledgeService` for this purpose was a poor fit -- its
+one-record-per-key, overwrite-on-store, fully-in-memory model either
+loses history or holds the entire personal-data history in memory
+for the life of the process. The Owner approved a dedicated,
+append-only JSONL persistence backend instead, independent of
+Knowledge Base.
+
+EP-092 introduces a new, independent `src/core/personal_data/`
+package: a `PersonalDataPoint` frozen-dataclass domain model
+(strongly typed `value: float`, `unit: str`, with an explicit,
+non-conflated `timestamp` -- measurement time, part of the dedup key
+`(source_id, category, timestamp)` -- vs. `collected_at` -- ingestion
+time, excluded from the dedup key), an abstract `PersonalDataSource`
+contract, an abstract `PersonalDataProvider` contract with one
+approved concrete implementation (`JsonlPersonalDataProvider`), a
+`PersonalDataRegistry` for source registration/lookup, a
+`PersonalDataManager` implementing the collect -> consent-gate ->
+dedupe -> persist cycle (`collect_from(source_id) -> int`, raising
+`PersonalDataCollectionError` on failure), and a new
+`PersonalDataService` (`src/services/personal_data_service.py`) --
+the only layer constructing `CommandResult`. A new, additive
+`personal_data:` configuration namespace (`config/config.yaml`:
+`enabled`, `enabled_categories`, `storage_root`) gates collection
+behind an explicit, opt-in consent allowlist -- `enabled_categories`
+is empty by default, so no personal data is collected or stored for
+any category until an operator explicitly adds it. The existing
+`Scheduler` (EP-011) and `Config`/`.env` split are reused unmodified.
+No CLI/CommandRouter namespace was added -- deferred to a future EP.
+EP-092 ships no concrete `PersonalDataSource` implementation and no
+real external API client; those are EP-093 (Electricity & Gas),
+EP-094 (Solar), and EP-097 (Weather)'s responsibility. EP-092 has no
+dependency on Knowledge Base, Embedding, Retrieval, RAG, Semantic
+Search, or Context Compression.
+
+STEP 3's independent audit found and fixed three real defects before
+reaching its final verdict: an unsanitized `category` value usable as
+a filesystem path component (EP092-AUDIT-001, HIGH -- fixed via an
+allowlist-validated `category_path()` applied identically on read and
+write); a check-then-act race in dedup (EP092-AUDIT-002, MEDIUM --
+fixed via a per-instance lock and a new atomic
+`PersonalDataProvider.store_if_new()`, now the sole production
+dedup-write path); and a startup crash on an invalid/legacy on-disk
+category filename that AUDIT-001's stricter validation made newly
+possible to hit (EP092-AUDIT-004, MEDIUM -- fixed by skipping and
+logging only the offending category during dedup-index rebuild). A
+fourth note (EP092-AUDIT-003, LOW: `PersonalDataManager`'s API
+surface exceeding STEP 1's original illustrative contract sketch) was
+accepted as a necessary, correctly-scoped addition, not a defect. The
+final, independently re-verified re-audit reproduced 19
+path-traversal/malicious-payload variants (all rejected), a
+100-thread concurrency stress test (exactly 1 stored record, no
+corruption), and a multi-invalid-category startup-recovery scenario
+(valid data loads correctly, invalid categories excluded and logged)
+-- **Final Verdict: PASS**, zero HIGH or MEDIUM findings remaining
+open.
+
+Tests: EP-092 820/0/0 (new suite,
+`tests/EP092/test_personal_data_collection_framework.py`), stable
+across 3 independent fresh runs in the final re-audit. No
+full-repository regression count was re-measured for this release;
+the audit's own environment limitation (missing third-party
+dependencies required by `src/bootstrap.py`, unrelated to EP-092) is
+unchanged from STEP 2/STEP 3.
+
+---
+
 ## v0.1.32-ep082
 
 Released: 2026-09-12

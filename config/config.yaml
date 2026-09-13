@@ -59,6 +59,22 @@ long_term_memory:
   enabled: true
   default_provider: "knowledge"
 
+personal_data:
+  # EP-092 Personal Data Collection Framework. Domain-agnostic
+  # ingestion of permitted personal operational data (see
+  # src/core/personal_data/personal_data_manager.py) for EP-093
+  # (Electricity & Gas), EP-094 (Solar), and EP-097 (Weather) to
+  # implement sources against. Persists via a dedicated append-only
+  # JSONL store (Owner Decision, EP-092 STEP 1 design §21) -- never
+  # Knowledge Base.
+  # 'enabled_categories' is an explicit, opt-in consent allowlist: a
+  # category not listed here is never collected or stored, regardless
+  # of 'enabled'. Empty by default -- no personal data is collected
+  # until the operator adds a category here.
+  enabled: true
+  enabled_categories: []
+  storage_root: "data/database/personal_data"
+
 orchestrator:
   skills_enabled: []
 

@@ -27,9 +27,14 @@ implementation, per this repository's Engineering Package Policy.
 Separately, **EP-082 (Text Generation Provider Integration), the
 first slice of Phase C (AI Content Platform), is now also COMPLETE**
 -- see the EP-082 entry below and the "AI Content Platform" section
-further down. No EP-070 or Phase 11 exists anywhere in this
-repository as of this release. Two tracked, non-blocking follow-up
-items exist:
+further down. **EP-092 (Personal Data Collection Framework), the
+first slice of Phase E (Personal Intelligence / Energy / Weather), is
+now also COMPLETE** -- see the EP-092 entry below and the "Personal
+Intelligence / Energy / Weather" section further down. No EP-070 or
+Phase 11 exists anywhere in this repository as of this release. Two
+tracked, non-blocking follow-up items exist from EP-069, plus three
+tracked, non-blocking follow-up items from EP-092 (see the EP-092
+entry below):
 
 - From EP-069.2's own STEP 3.1 review (see the EP-069.2 entry below,
   unchanged by this release): `ai.fallback_order` does not yet
@@ -123,6 +128,131 @@ environment with `PySide6` available, as a final confirmation
 alongside the code-inspection-based assurance STEP 3 already
 performed. This requires no new EP number and is not a defect in
 EP-082's own implementation.
+
+### EP-092 — Personal Data Collection Framework
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), and STEP 4 (Documentation
+Synchronization) all complete. EP-092 is marked **COMPLETE / STEP 3
+PASS** (after remediation). Full design:
+`docs/architecture/designs/EP092_DESIGN.md`. Full audit, including
+the remediation addendum recording the final verdict:
+`docs/architecture/audits/EP092_ARCHITECTURE_AUDIT.md`.
+
+STEP 1 found that this repository had no existing mechanism for
+ingesting and storing unbounded, time-series personal operational
+data (e.g. a recurring meter reading), and that reusing
+`KnowledgeCollection`/`KnowledgeService` for this purpose (Option A)
+was a poor fit -- its one-record-per-key, overwrite-on-store,
+fully-in-memory model either loses history or holds the entire
+personal-data history in memory for the life of the process. The
+Owner approved Option B instead: a dedicated, append-only JSONL
+persistence backend, independent of Knowledge Base.
+
+EP-092 therefore introduces a new, independent `src/core/personal_data/`
+package: a single `PersonalDataPoint` frozen-dataclass domain model
+(strongly typed `value: float`, `unit: str`, and an explicit,
+non-conflated `timestamp` vs. `collected_at` distinction --
+`timestamp` is part of the dedup key `(source_id, category,
+timestamp)`; `collected_at` is ingestion metadata only, excluded from
+the key), an abstract `PersonalDataSource` contract, an abstract
+`PersonalDataProvider` contract with one approved concrete
+implementation (`JsonlPersonalDataProvider`), a `PersonalDataRegistry`
+for source registration/lookup, a `PersonalDataManager` implementing
+the collect -> consent-gate -> dedupe -> persist cycle
+(`collect_from(source_id) -> int`, raising
+`PersonalDataCollectionError` on failure -- never `CommandResult`),
+and a new `PersonalDataService`
+(`src/services/personal_data_service.py`) that is the only layer
+constructing `CommandResult`. Collection is gated by a new, additive
+`personal_data:` configuration namespace
+(`config/config.yaml`: `enabled`, `enabled_categories`,
+`storage_root`) -- `enabled_categories` is an explicit, opt-in
+consent allowlist, empty by default, so no personal data is collected
+or stored for any category until an operator explicitly adds it,
+regardless of the top-level `enabled` flag. The existing `Scheduler`
+(EP-011) and `Config`/`.env` split are reused unmodified for recurring
+collection and credentials. No CLI/CommandRouter namespace was
+added -- deferred to a future EP. EP-092 ships no concrete
+`PersonalDataSource` implementation and no real external API client;
+those are EP-093 (Electricity & Gas), EP-094 (Solar), and EP-097
+(Weather)'s responsibility, each requiring its own future,
+independent STEP 1. EP-092 has no dependency on Knowledge Base,
+Embedding, Retrieval, RAG, Semantic Search, or Context Compression.
+
+STEP 3's independent audit did not accept STEP 2's self-report at
+face value: it independently reproduced every documented behavior,
+including adversarial edge cases. The original audit pass found two
+real, reproduced defects -- an unsanitized `category` value usable as
+a filesystem path component (EP092-AUDIT-001, WARNING/HIGH, currently
+unreachable since no real source exists yet but a live concern once
+EP-093/094/097 register one) and a check-then-act race in
+`collect_from()`'s deduplication (EP092-AUDIT-002, WARNING/MEDIUM) --
+plus one documentation/API-surface-only note (EP092-AUDIT-003,
+WARNING/LOW: `PersonalDataManager`'s public method set exceeds STEP
+1's original illustrative contract sketch with legitimate,
+encapsulation-preserving additions such as `register_source()`,
+`stats()`, and `is_category_enabled()`). The original pass's overall
+verdict was PASS WITH WARNINGS, zero CRITICAL, zero HIGH-blocking.
+
+All findings were then remediated and independently re-audited
+(recorded in the audit document's §18 addendum). `category_path()`
+now validates every category against an allowlist
+(`^[A-Za-z0-9_-]+$`) before it is ever used as a path, applied
+identically on the read and write directions, closing
+EP092-AUDIT-001. `JsonlPersonalDataProvider` gained a per-instance
+`threading.Lock` and a new atomic `store_if_new()` method that
+performs the existence check and the store under one lock
+acquisition; `PersonalDataManager.collect_from()` now calls only
+`store_if_new()`, closing EP092-AUDIT-002. Remediating AUDIT-001
+surfaced one new issue during re-audit -- a startup crash when an
+invalid/legacy on-disk category filename failed the new, stricter
+validation (EP092-AUDIT-004, MEDIUM) -- fixed by having
+`_rebuild_dedup_index()` catch, log, and skip only the offending
+category during startup rather than aborting construction.
+EP092-AUDIT-003 was re-evaluated and accepted as a necessary,
+correctly-scoped architectural addition (`store_if_new()` is the sole
+production dedup-write path, not a parallel mechanism), requiring no
+code change. The final, independently-verified STEP 3 re-audit
+reproduced 19 path-traversal/malicious-payload variants (all
+rejected, valid categories unaffected), a 100-thread concurrency
+stress test against an identical point (exactly 1 stored record, no
+corruption), and a multi-invalid-category startup-recovery scenario
+(valid data loads correctly, invalid categories excluded and logged,
+never silently normalized) -- **Final Verdict: PASS**, zero HIGH or
+MEDIUM findings remaining open.
+
+Tests: EP-092 820/0/0 (new suite,
+`tests/EP092/test_personal_data_collection_framework.py`), stable
+across 3 independent fresh runs in the final re-audit.
+`TestRunner().run("EP092")` and the case-insensitive `run("ep092")`
+both confirmed working; `py_compile` and `pyflakes` both clean on
+every EP-092 file. A full diff against the pristine pre-EP-092
+repository state showed exactly the expected file set at every
+checkpoint: the EP-092 package, service, and tests, plus two additive
+edits (`config/config.yaml`'s new `personal_data:` block and
+`src/modules/test_module.py`'s standard test-registration import) --
+nothing else. No full-repository regression suite was re-measured
+during STEP 3; this is the same, pre-existing environment limitation
+(missing third-party dependencies, e.g. `telegram`, required by
+`src/bootstrap.py`, unrelated to EP-092) documented in STEP 2 and
+unchanged in the audit.
+
+**Three tracked, non-blocking follow-up items from this release** (STEP
+3's Recommended Follow-Up, for Owner consideration ahead of EP-093,
+the first EP to register a real source):
+
+1. Decide where `category` validation ultimately belongs long-term
+   now that EP092-AUDIT-001 is fixed, and confirm the fix remains
+   sufficient once EP-093/094/097 wire in a real, externally-influenced
+   source.
+2. Confirm the `threading.Lock`-based fix for EP092-AUDIT-002 remains
+   correct under EP-093/094/097's actual scheduling pattern, since
+   this project's current Scheduler model is single-threaded.
+3. Fold `register_source()`/`source_ids()`/`is_source_registered()`/
+   `stats()`/`is_category_enabled()`/`store_if_new()` into the design
+   record (EP092-AUDIT-003) so EP-093+ authors know they exist without
+   reading the implementation directly.
 
 ### EP-069.4 — Unified Capability Abstraction
 
@@ -3315,8 +3445,11 @@ Level-3 capability; neither is a domain-specific rewrite of Core.
 
 ## Personal Intelligence / Energy / Weather (EP-092–EP-098)
 
-- **EP-092 — Personal Data Collection Framework** (MEDIUM). Structured
-  ingestion of permitted personal operational data.
+- **EP-092 — Personal Data Collection Framework** (MEDIUM).
+  **COMPLETE** -- see the "Next Engineering Package" section above and
+  `docs/architecture/designs/EP092_DESIGN.md`. Structured, opt-in-
+  consent-gated ingestion of permitted personal operational data via
+  a dedicated append-only JSONL store, independent of Knowledge Base.
 - **EP-093 — Electricity & Gas Monitoring** (MEDIUM).
 - **EP-094 — Solar Generation Analytics** (MEDIUM).
 - **EP-095 — Energy Visualization & Reporting** (MEDIUM).

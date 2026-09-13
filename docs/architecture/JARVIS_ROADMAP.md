@@ -122,6 +122,79 @@ Completed sub-packages:
 
 ## Current
 
+EP-092 Personal Data Collection Framework — **COMPLETE**
+(STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
+Testing, STEP 3 Architecture Audit, and STEP 4 Documentation
+Synchronization all complete -- see
+docs/architecture/designs/EP092_DESIGN.md and
+docs/architecture/audits/EP092_ARCHITECTURE_AUDIT.md). **Final
+Verdict: STEP 3 — PASS** (after remediation; the original STEP 3 pass
+audited two real findings, EP092-AUDIT-001 HIGH and EP092-AUDIT-002
+MEDIUM, plus one LOW documentation/API-surface note,
+EP092-AUDIT-003; a fourth finding, EP092-AUDIT-004 MEDIUM, surfaced
+during remediation of AUDIT-001 -- all three real defects are fixed
+and independently re-verified, see the audit's §18 remediation
+addendum). EP-092 is the first slice of Phase E (Personal
+Intelligence / Energy / Weather, planning only except this EP -- see
+below): a domain-agnostic personal-data ingestion framework
+(`PersonalDataPoint` / `PersonalDataSource` / `PersonalDataRegistry`
+/ `PersonalDataManager` / `PersonalDataProvider` /
+`PersonalDataService`) that EP-093 (Electricity & Gas), EP-094
+(Solar), and EP-097 (Weather) will each implement one source
+against, and that EP-095 (Visualization), EP-096 (Forecast/Anomaly),
+and EP-098 (Recommendation) will read through.
+
+`PersonalDataPoint` is strongly typed (`value: float`, `unit: str`)
+with an explicit, non-conflated `timestamp` (measurement time, part
+of the dedup key `(source_id, category, timestamp)`) vs.
+`collected_at` (ingestion time, excluded from the dedup key)
+distinction. Persistence is a single, unambiguous chain --
+`PersonalDataManager` -> `PersonalDataProvider` (abstract) ->
+`JsonlPersonalDataProvider` (the sole approved concrete
+implementation, Owner Decision) -> `PersonalDataPersistence`
+(low-level JSONL file I/O only) -- deliberately independent of
+Knowledge Base, whose overwrite-per-key, fully in-memory model does
+not fit unbounded time-series data; EP-092 has no dependency on
+Knowledge Base, Embedding, Retrieval, RAG, Semantic Search, or
+Context Compression. Collection is gated by a per-category, opt-in
+consent allowlist (`config/config.yaml`'s new, additive
+`personal_data:` block -- `enabled`, `enabled_categories` (empty by
+default; no category is collected until explicitly added), and
+`storage_root`); no data is collected or stored for a category not
+on that allowlist regardless of the top-level `enabled` flag. No
+CLI/CommandRouter namespace was added -- CLI exposure is deferred to
+a future EP. `Config`, `Scheduler` (EP-011), `CommandResult`/
+`command_router`, and `BaseTest`/`TestRegistry`/`TestRunner` are
+reused unmodified; no real external source (EP-093/094/097) ships in
+this release.
+
+STEP 3's independent audit found and fixed three real defects before
+reaching its final PASS: unsanitized `category` values used as a
+filesystem path component (EP092-AUDIT-001, HIGH, fixed via an
+allowlist-validated `category_path()` applied identically on read
+and write); a check-then-act race in dedup (EP092-AUDIT-002, MEDIUM,
+fixed via a per-instance lock and a new atomic
+`PersonalDataProvider.store_if_new()` that is now the sole
+production dedup-write path); and a startup crash on an
+invalid/legacy on-disk category filename that the AUDIT-001 fix's
+stricter validation made newly possible to hit (EP092-AUDIT-004,
+MEDIUM, fixed by skipping and logging only the offending category
+during dedup-index rebuild). A fourth note, `PersonalDataManager`'s
+API surface exceeding STEP 1's original illustrative contract sketch
+(EP092-AUDIT-003, LOW), was accepted as a necessary, correctly-scoped
+addition rather than a defect.
+
+Tests: EP-092 820/0/0 (new suite,
+`tests/EP092/test_personal_data_collection_framework.py`), stable
+across 3 independent fresh runs in the final STEP 3 re-audit, plus 19
+path-traversal payload variants, a 100-thread concurrency stress
+test, and a multi-invalid-category startup-recovery scenario all
+independently reproduced and passing. Full-repository regression was
+not re-measured for this documentation-finalization release; the
+audit's own environment limitation (missing third-party dependencies
+required by `src/bootstrap.py`, unrelated to EP-092) is unchanged
+from STEP 2/STEP 3.
+
 EP-082 Text Generation Provider Integration — **COMPLETE**
 (STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
 Testing, STEP 3 Architecture Audit, and STEP 4 Documentation
@@ -2563,9 +2636,17 @@ per this repository's Engineering Package Policy.
 
 EP-088–EP-091.
 
-## Phase E — Personal Intelligence / Energy / Weather (planning only)
+## Phase E — Personal Intelligence / Energy / Weather (planning only, except EP-092)
 
-EP-092–EP-098.
+EP-092–EP-098. **EP-092 (Personal Data Collection Framework) is
+COMPLETE** -- see "## Current" above and
+`docs/architecture/designs/EP092_DESIGN.md`. EP-093-EP-098
+(Electricity & Gas Monitoring, Solar Generation Analytics, Energy
+Visualization & Reporting, Energy Forecast & Anomaly Detection,
+Weather Intelligence Agent, and the combined Personal Daily/Weekly
+Recommendation Engine) remain planning-only; each requires its own
+future, independent STEP 1 before implementation, per this
+repository's Engineering Package Policy.
 
 ## Phase F — Enterprise & Work Automation (planning only)
 
@@ -2605,15 +2686,19 @@ EP-138–EP-139.
 
 EP-140.
 
-**Phases A–N and EP-069–EP-140 are strategic planning only, with one
-exception: EP-069.1 (Automatic AI Provider Fallback on Request
+**Phases A–N and EP-069–EP-140 are strategic planning only, with
+exceptions: EP-069.1 (Automatic AI Provider Fallback on Request
 Failure), EP-069.2 (Configured AI Provider Fallback Ordering),
 EP-069.3 (Cost-Aware AI Provider Selection), and EP-069.4 (Unified
 Capability Abstraction) are
-COMPLETE — see "## Current" above.** Unlike Phases 1–10
-above, none of the other EPs in Phases A–N has a design document, an
-audit, or an owner decision yet, and EP-069's own remaining scope
-(beyond EP-069.1/EP-069.2/EP-069.3/EP-069.4) is likewise still planning-only. The ordering into
+COMPLETE — see "## Current" above; and EP-092 (Personal Data
+Collection Framework, Phase E) is likewise COMPLETE — see "## Current"
+above and `docs/architecture/designs/EP092_DESIGN.md`.** Unlike
+Phases 1–10 above, none of the other EPs in Phases A–N has a design
+document, an audit, or an owner decision yet, and EP-069's own
+remaining scope (beyond EP-069.1/EP-069.2/EP-069.3/EP-069.4), and
+Phase E's own remaining scope (EP-093–EP-098), are likewise still
+planning-only. The ordering into
 Phases A–N reflects the current
 strategic grouping only; it is not a guaranteed implementation
 sequence, and a future STEP 1 for any of these EPs may reorder,

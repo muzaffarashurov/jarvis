@@ -3310,4 +3310,62 @@ run, see "Known limitations")
 
 ---
 
+# EP-092 — Personal Data Collection Framework
+
+Status: Released (STEP 3 independent audit PASS, after remediation --
+see "Known limitations" for the items that were found and fixed)
+
+Highlights:
+
+- This release lays internal groundwork for Jarvis to collect and
+  store your own recurring personal measurements -- things like a
+  utility meter reading, solar output, or a weather reading -- so a
+  future release can act on that history. It does not add any new
+  command, setting, or chat behavior you'll notice day-to-day yet,
+  because no actual data source is connected in this release
+- Nothing is ever collected automatically: every category of data is
+  off by default, and Jarvis will only start collecting a given
+  category once you (or whoever configures Jarvis) explicitly turns
+  it on
+- Whatever is collected is kept in its own dedicated, append-only
+  storage area, separate from Jarvis's existing knowledge base and
+  memory -- so this personal data is never mixed into search,
+  retrieval, or AI context by default
+- Nothing about how your existing conversations, providers, or
+  settings work has changed
+
+Compatibility:
+
+Fully backward compatible with every prior release. No existing
+command, setting, or behavior changed. No breaking changes.
+
+Known limitations:
+
+- There is no new chat command or menu option to use this yet -- that
+  depends on future releases (electricity/gas, solar, and weather
+  monitoring) actually connecting a real data source, which is not
+  part of this release.
+- The independent review that checked this release found two real
+  issues before giving final approval: an internal file-naming
+  weakness that, in principle, could have been used to write data to
+  an unintended location on disk, and a rare timing issue that could
+  have let the same measurement be counted twice under concurrent
+  use. Both were fixed and independently re-tested; neither ever
+  affected any released feature, since no real data source is wired
+  up yet.
+- As with the previous release, some automated checks for the full
+  existing test suite could not be re-run in the environment used to
+  verify this one, because that environment was missing some
+  unrelated third-party components. This is a gap in how thoroughly
+  this specific environment could re-confirm old, already-shipped
+  behavior -- not a problem with this release's own new capability.
+
+Validation:
+
+EP092 : 820 passed / 0 failed / 0 skipped (stable across 3 independent
+runs during final review, including additional adversarial checks for
+the two issues above)
+
+---
+
 End of document.

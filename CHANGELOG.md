@@ -6,6 +6,81 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.35-ep083
+
+Released: 2026-09-13
+
+Status: EP-083 COMPLETE / STEP 3 PASS WITH WARNINGS (STEP 1
+Architecture Discovery & Design, STEP 2 Implementation & Testing,
+STEP 3 Architecture Audit, and STEP 4 Documentation Synchronization
+all complete).
+
+**EP-083 -- Image Generation Provider Integration.** STEP 1 confirmed
+this EP's official scope against the repository's own planning
+documents (a prior "Agent Harness" proposal for this EP number was
+set aside -- that concept does not exist anywhere in this
+repository), then integrated standalone image generation into the
+same provider architecture EP-082 established for text, extending
+rather than duplicating it.
+
+`ProviderRequestExecutor` gained `execute_image()`, sharing the exact
+same private `_run()` retry/fallback control flow `execute()` (text)
+already uses -- there remains exactly one fallback/retry
+implementation in the repository, now serving `AIService`,
+`TextGenerationService`, and the new `ImageGenerationService`.
+`execute_image()`'s one addition over `execute()`: fallback
+candidates are filtered through a new, additive `AIProvider.
+supports_image_generation()` method before being attempted, so a
+provider that doesn't support image generation is skipped rather than
+attempted and logged as a wasted failure. `ProviderManager` gained no
+new responsibilities and its method set is unchanged. `AIProvider`
+also gained `generate_image()`, defaulting to raise
+`ProviderUnavailableError` -- every existing provider (`ClaudeProvider`,
+the `openai`/`ollama`/`lmstudio` placeholders) remains valid without
+modification. `GeminiProvider` is the one concrete implementation: the
+same `generateContent` endpoint `ask()` already calls, with an
+image-capable model (`providers.gemini.image_model`, distinct from
+the text `model`) and `generationConfig.responseModalities: ["IMAGE"]`,
+extracting one or more `inlineData` image parts from the response --
+no new SDK, no new dependency, the existing raw-HTTP `requests`
+architecture only. A new, standalone, non-conversational
+`ImageGenerationService` mirrors `TextGenerationService` exactly -- no
+`ConversationManager`, `ContextManager`, or persistence dependency of
+any kind. A new, additive `image_generation:` configuration namespace
+(`enabled`, `fallback_enabled`) and `providers.gemini.image_model`
+were added without altering `ai:`/`providers:`/`content_generation:`
+semantics. No CLI/CommandRouter namespace was added, matching EP-082's
+own precedent.
+
+STEP 3's independent, adversarial audit returned **PASS WITH
+WARNINGS**: zero CRITICAL/HIGH/MEDIUM findings; one LOW finding --
+redundant duplicate validation followed by a now-dead bare `assert`
+in `GeminiProvider.generate_image()` -- was hardened directly during
+the audit, replaced with a single, `-O`-safe explicit narrowing check.
+Three further LOW/INFORMATIONAL findings were reviewed and left
+intentionally unfixed as either by-design (the executor's
+initial-provider capability check is `ImageGenerationService`'s
+responsibility) or appropriately deferred (an empty prompt isn't
+explicitly rejected; a malformed individual image part is silently
+dropped, both mirroring pre-existing parsing conventions;
+`ImageGenerationRequest.size` is accepted but not yet forwarded by
+`GeminiProvider`, to avoid inventing undocumented API behavior). The
+audit also added two tests closing genuine coverage gaps it found:
+multiple/mixed image response parts, and the image path's own new 404
+"model not found" handling.
+
+Tests: EP-083 60/0/0 (new suite, expanded from 54 to 60 during the
+STEP 3 audit). Regression: `tests/EP082` 69/0/0, `tests/EP069`
+68/0/0, `tests/EP069_3` 80/0/0, and `tests/EP069_4` 41/0/0 all fully
+executed and unaffected; `tests/EP069_2` confirmed unaffected across
+12 of its 15 sub-tests (23/0/0 assertions) -- the remaining 3
+sub-tests call the real `bootstrap.initialize()` and could not
+execute in the STEP 2/3 sandbox for lack of `PySide6` (Qt), the same
+pre-existing, unrelated desktop-UI test dependency first identified
+during EP-082's STEP 3, not an EP-083 regression.
+
+---
+
 ## v0.1.34-ep092
 
 Released: 2026-09-13

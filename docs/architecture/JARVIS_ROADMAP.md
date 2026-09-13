@@ -122,6 +122,84 @@ Completed sub-packages:
 
 ## Current
 
+EP-083 Image Generation Provider Integration — **COMPLETE**
+(STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
+Testing, STEP 3 Architecture Audit, and STEP 4 Documentation
+Synchronization all complete -- see
+docs/architecture/designs/EP083_DESIGN.md and
+docs/architecture/audits/EP083_ARCHITECTURE_AUDIT.md). **Final
+Verdict: STEP 3 — PASS WITH WARNINGS, ZERO CRITICAL, ZERO HIGH, ZERO
+MEDIUM** (one LOW finding, hardened directly during STEP 3: a
+redundant duplicate validation check followed by a now-dead bare
+`assert` in `GeminiProvider.generate_image()` was removed and
+replaced with a single, `-O`-safe explicit narrowing check; three
+further LOW/INFORMATIONAL findings were reviewed and left
+intentionally unfixed as either by-design or appropriately deferred,
+per `EP083_ARCHITECTURE_AUDIT.md`). EP-083 is the second slice of
+Phase C (AI Content Platform, planning only except EP-082 and this
+EP): it integrates standalone image generation into the same
+provider abstraction and shared execution path EP-082 established
+for text, without redesigning or duplicating any of it.
+
+The core addition is `ProviderRequestExecutor.execute_image()`
+(`src/core/ai/provider_request_executor.py`), sharing the exact same
+private `_run()` retry/fallback control flow `execute()` (text,
+EP-082) already uses -- there remains exactly one fallback/retry
+implementation in the repository, now used by three callers
+(`AIService`, `TextGenerationService`, and the new
+`ImageGenerationService`). `execute_image()` adds one capability-aware
+addition over `execute()`: fallback candidates are filtered through
+`AIProvider.supports_image_generation()` before being attempted, so a
+provider that simply doesn't support image generation is skipped
+rather than attempted and logged as a wasted failure.
+`ProviderManager` gained no new responsibilities and its method set
+is confirmed byte-for-byte unchanged; `execute()`'s own public
+signature, behavior, and every log line are confirmed unchanged by
+regression (`tests/EP082` 69/69, `tests/EP069` 68/68).
+
+`AIProvider` gained two additive, optional-by-default methods --
+`supports_image_generation()` (defaults `False`) and
+`generate_image()` (defaults to raising `ProviderUnavailableError`)
+-- so every existing provider (`ClaudeProvider`, and the `openai`/
+`ollama`/`lmstudio` placeholders) remains valid without modification.
+`GeminiProvider` is the one concrete implementation
+(`src/core/ai/providers/gemini_provider.py`): it calls the same
+`generateContent` endpoint `ask()` already uses, with an
+image-capable model (`providers.gemini.image_model`, distinct from
+the text `model`) and `generationConfig.responseModalities: ["IMAGE"]`,
+extracting one or more `inlineData` image parts from the response --
+no new SDK, no new dependency, the existing raw-HTTP `requests`
+architecture only. Anthropic's Claude API has no public
+image-generation endpoint, so `ClaudeProvider` is unaffected and
+`supports_image_generation()` correctly returns `False` for it. A new,
+standalone, non-conversational `ImageGenerationService`
+(`src/services/image_generation_service.py`) mirrors
+`TextGenerationService` exactly -- no `ConversationManager`,
+`ContextManager`, or persistence dependency of any kind. A new,
+additive `image_generation:` configuration namespace (`enabled`,
+`fallback_enabled`) and `providers.gemini.image_model` were added
+without altering `ai:`/`providers:`/`content_generation:` semantics.
+No CLI/CommandRouter namespace was added -- deferred, matching
+EP-082's own precedent. EP-069.4's Unified Capability Abstraction
+(`src/core/capability/`) was confirmed present, correctly
+implemented, and confirmed -- by reading its actual code, not merely
+its documentation -- to be an unrelated concept (external/internal
+tool cataloging, not AI-provider content modality), so it required no
+change and was not duplicated.
+
+Tests: EP-083 60/0/0 (new suite,
+`tests/EP083/test_image_generation_provider_integration.py`, expanded
+from 54 to 60 during the STEP 3 audit to close two genuine coverage
+gaps -- multiple/mixed image response parts, and the image path's own
+new 404 "model not found" handling). Regression: `tests/EP082` 69/0/0,
+`tests/EP069` 68/0/0, `tests/EP069_3` 80/0/0, and `tests/EP069_4`
+41/0/0 all fully executed and unaffected; `tests/EP069_2` confirmed
+unaffected across 12 of its 15 sub-tests (23/0/0 assertions) -- the
+remaining 3 sub-tests call the real `bootstrap.initialize()` and
+could not execute in the STEP 2/3 sandbox for lack of `PySide6` (Qt),
+the same pre-existing, unrelated desktop-UI test dependency first
+identified during EP-082's own STEP 3, not an EP-083 regression.
+
 EP-092 Personal Data Collection Framework — **COMPLETE**
 (STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
 Testing, STEP 3 Architecture Audit, and STEP 4 Documentation
@@ -2681,13 +2759,14 @@ retired/merged placeholder — see `docs/BACKLOG.md`).
 
 EP-077–EP-081.
 
-## Phase C — AI Content Platform (planning only, except EP-082)
+## Phase C — AI Content Platform (planning only, except EP-082 and EP-083)
 
-EP-082–EP-087. **EP-082 (Text Generation Provider Integration) is
-COMPLETE** -- see "## Current" above and
-`docs/architecture/designs/EP082_DESIGN.md`. EP-083-EP-087 (Image,
-Audio & Speech, Video, and Presentation Generation Integration, and
-the combined Content Production Pipeline) remain planning-only; each
+EP-082–EP-087. **EP-082 (Text Generation Provider Integration) and
+EP-083 (Image Generation Provider Integration) are COMPLETE** -- see
+"## Current" above, `docs/architecture/designs/EP082_DESIGN.md`, and
+`docs/architecture/designs/EP083_DESIGN.md`. EP-084-EP-087 (Audio &
+Speech, Video, and Presentation Generation Integration, and the
+combined Content Production Pipeline) remain planning-only; each
 requires its own future, independent STEP 1 before implementation,
 per this repository's Engineering Package Policy.
 
@@ -2753,13 +2832,16 @@ Capability Abstraction), and EP-069.5 (Capability Discovery Engine)
 are
 COMPLETE — see "## Current" above; EP-082 (Text Generation Provider
 Integration, Phase C) is likewise COMPLETE — see "## Current" above
-and `docs/architecture/designs/EP082_DESIGN.md`; and EP-092 (Personal
-Data Collection Framework, Phase E) is likewise COMPLETE — see
-"## Current" above and `docs/architecture/designs/EP092_DESIGN.md`.**
+and `docs/architecture/designs/EP082_DESIGN.md`; EP-083 (Image
+Generation Provider Integration, Phase C) is likewise COMPLETE — see
+"## Current" above and `docs/architecture/designs/EP083_DESIGN.md`;
+and EP-092 (Personal Data Collection Framework, Phase E) is likewise
+COMPLETE — see "## Current" above and
+`docs/architecture/designs/EP092_DESIGN.md`.**
 Unlike Phases 1–10 above, none of the other EPs in Phases A–N has a
 design document, an audit, or an owner decision yet, and EP-069's own
 remaining scope (beyond EP-069.1/EP-069.2/EP-069.3/EP-069.4/EP-069.5),
-Phase C's own remaining scope (EP-083–EP-087), and Phase E's own
+Phase C's own remaining scope (EP-084–EP-087), and Phase E's own
 remaining scope (EP-093–EP-098), are likewise still
 planning-only. The ordering into
 Phases A–N reflects the current

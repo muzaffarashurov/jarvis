@@ -42,6 +42,9 @@ from loguru import logger
 
 from src.core.ai.provider import (
     AIProvider,
+    GeneratedImage,
+    ImageGenerationRequest,
+    ImageGenerationResult,
     ModelValidationResult,
     PingResult,
     ProviderAuthenticationError,
@@ -76,6 +79,7 @@ class GeminiProvider(AIProvider):
         timeout: int,
         max_tokens: int,
         temperature: float,
+        image_model: str | None = None,
     ) -> None:
         """Initialize the GeminiProvider.
 
@@ -87,6 +91,13 @@ class GeminiProvider(AIProvider):
             timeout: Value of 'providers.gemini.timeout', in seconds.
             max_tokens: Value of 'providers.gemini.max_tokens'.
             temperature: Value of 'providers.gemini.temperature'.
+            image_model: Value of 'providers.gemini.image_model'
+                (EP-083). None or empty means this provider instance
+                does not support image generation --
+                `supports_image_generation()` returns False and
+                `generate_image()` is never expected to be called.
+                Distinct from `model` above, which remains the text
+                model EP-082 already uses.
         """
         self._enabled = enabled
         self._api_key = api_key
@@ -94,6 +105,7 @@ class GeminiProvider(AIProvider):
         self._timeout = timeout
         self._max_tokens = max_tokens
         self._temperature = temperature
+        self._image_model = image_model or None
 
     # ---------- AIProvider: identity / configuration / health ----------
 
@@ -126,6 +138,7 @@ class GeminiProvider(AIProvider):
             "timeout": self._timeout,
             "max_tokens": self._max_tokens,
             "temperature": self._temperature,
+            "image_model": self._image_model,
         }
 
     def health(self) -> ProviderHealth:
@@ -201,6 +214,115 @@ class GeminiProvider(AIProvider):
         logger.info(
             f"AI request finished (provider='gemini', model='{result.model}', "
             f"latency={latency_ms:.0f}ms)."
+        )
+        return result
+
+    # ---------- AIProvider: EP-083 image generation ----------
+
+    def supports_image_generation(self) -> bool:
+        """Return whether this provider instance is configured for image generation.
+
+        True only when 'providers.gemini.image_model' is set to a
+        non-empty value (EP-083) -- independent of `is_available()`,
+        which governs text generation via `enabled`/`api_key` only.
+        A `True` result here does not by itself mean a request will
+        succeed (the API key or model may still be invalid); it means
+        this provider instance is *configured* to attempt one.
+        """
+        return self._image_model is not None
+
+    def generate_image(self, request: ImageGenerationRequest) -> ImageGenerationResult:
+        """Generate image(s) via the Google Gemini API and return the result.
+
+        Uses the same `generateContent` endpoint `ask()` already
+        calls, per Google's documented image-generation support: an
+        image-capable model (`providers.gemini.image_model`, distinct
+        from the text `model`) is requested with
+        `generationConfig.responseModalities: ["IMAGE"]`, and the
+        response's candidate `parts` are expected to contain
+        `inlineData` entries (`{mimeType, data}`, base64-encoded)
+        instead of/alongside `text` (`EP083_DESIGN.md` Section 7,
+        verified against Google's current API documentation during
+        STEP 1/preflight, not assumed).
+
+        Args:
+            request: The provider-independent image-generation
+                request.
+
+        Returns:
+            The provider's reply, containing one or more
+            `GeneratedImage` entries.
+
+        Raises:
+            ProviderConfigurationError: If this provider is disabled,
+                missing its API key, not configured with an
+                'image_model', or `request.number_of_images` is not a
+                positive integer.
+            ProviderAuthenticationError: If the API key is rejected.
+            ProviderRateLimitError: If the API reports a rate limit.
+            ProviderTimeoutError: If the request exceeds the
+                configured timeout.
+            ProviderNetworkError: If the request cannot reach the API.
+            ProviderUnavailableError: If the API is unreachable, the
+                configured image model is not found, or the response
+                contains no image data.
+        """
+        if not self._enabled:
+            raise ProviderConfigurationError("Provider 'gemini' is disabled.")
+        if not self._api_key.strip():
+            raise ProviderConfigurationError("Provider 'gemini' is missing 'api_key'.")
+        if not self.supports_image_generation():
+            raise ProviderConfigurationError(
+                "Provider 'gemini' is not configured for image generation "
+                "(set 'providers.gemini.image_model')."
+            )
+        # `self._image_model` is `str | None`; `supports_image_generation()`
+        # (line above) already guarantees it is not None here, but that
+        # guarantee is not visible to a static type checker across a
+        # method call. Narrow it explicitly into a local variable rather
+        # than a bare `assert` (EP-082 STEP 3 hardening precedent:
+        # `assert` is stripped under Python's `-O` mode and must never be
+        # the sole runtime enforcement of an invariant). This replaces
+        # STEP 2's original, functionally-redundant second `if ... is
+        # None: raise` block, which duplicated this same check and error
+        # message (EP-083 STEP 3 audit finding F1).
+        image_model = self._image_model
+        if image_model is None:
+            raise ProviderConfigurationError(
+                "Provider 'gemini' is not configured for image generation "
+                "(set 'providers.gemini.image_model')."
+            )
+        if request.number_of_images < 1:
+            raise ProviderConfigurationError(
+                f"Invalid 'number_of_images': {request.number_of_images!r} "
+                "must be a positive integer."
+            )
+
+        url = f"{_API_BASE_URL}/{image_model}:generateContent"
+        user_parts: list[dict[str, Any]] = [{"text": request.prompt}]
+        if request.negative_prompt:
+            user_parts.append({"text": f"Avoid: {request.negative_prompt}"})
+        generation_config: dict[str, Any] = {"responseModalities": ["IMAGE"]}
+        if request.seed is not None:
+            generation_config["seed"] = request.seed
+        payload: dict[str, Any] = {
+            "contents": [{"role": "user", "parts": user_parts}],
+            "generationConfig": generation_config,
+        }
+        headers = {
+            "x-goog-api-key": self._api_key,
+            "content-type": "application/json",
+        }
+
+        logger.info(f"AI image request started (provider='gemini', model='{self._image_model}').")
+        started = time.monotonic()
+        response = self._send_request("POST", url, headers, "image request", json=payload)
+
+        latency_ms = (time.monotonic() - started) * 1000
+        result = self._parse_image_response(response, latency_ms)
+        logger.info(
+            f"AI image request finished (provider='gemini', model='{result.model}', "
+            f"images={len(result.images)}, latency={latency_ms:.0f}ms)."
         )
         return result
 
@@ -505,6 +627,58 @@ class GeminiProvider(AIProvider):
             return "".join(str(p.get("text", "")) for p in parts if isinstance(p, dict)).strip()
         except (KeyError, IndexError, TypeError, AttributeError):
             return ""
+
+    def _parse_image_response(
+        self, response: requests.Response, latency_ms: float
+    ) -> ImageGenerationResult:
+        """Translate a raw `requests.Response` from an image `generateContent` call (EP-083).
+
+        A 404 here means the configured 'image_model' was not found --
+        reported directly (not via `_build_model_not_found_error()`,
+        which is specific to the text `model` field) so the error
+        names the correct configuration key. Every other non-2xx
+        status is shared with `ask()` via `_raise_for_transport_status()`.
+        """
+        if response.status_code == 404:
+            raise ProviderUnavailableError(
+                f"Gemini image model '{self._image_model}' was not found for this API key "
+                "(HTTP 404). Check 'providers.gemini.image_model' in config.yaml."
+            )
+        self._raise_for_transport_status(response, "image request")
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ProviderUnavailableError("Gemini returned an invalid response body.") from exc
+
+        images = self._extract_images(data)
+        if not images:
+            raise ProviderUnavailableError(
+                "Gemini image request succeeded but the response contained no image data."
+            )
+        return ImageGenerationResult(
+            images=tuple(images), model=str(self._image_model), latency_ms=latency_ms
+        )
+
+    @staticmethod
+    def _extract_images(data: dict[str, Any]) -> list[GeneratedImage]:
+        """Extract every `inlineData` image part of the first candidate in a generateContent response."""
+        try:
+            parts = data["candidates"][0]["content"]["parts"]
+        except (KeyError, IndexError, TypeError):
+            return []
+        images: list[GeneratedImage] = []
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            inline_data = part.get("inlineData")
+            if not isinstance(inline_data, dict):
+                continue
+            encoded = inline_data.get("data")
+            mime_type = inline_data.get("mimeType")
+            if isinstance(encoded, str) and isinstance(mime_type, str) and encoded:
+                images.append(GeneratedImage(data_base64=encoded, mime_type=mime_type))
+        return images
 
     @staticmethod
     def _extract_error_message(response: requests.Response) -> str:

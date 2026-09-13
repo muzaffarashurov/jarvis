@@ -1,15 +1,18 @@
-"""Shared provider-request execution for EP-082 Text Generation Provider Integration.
+"""Shared provider-request execution for EP-082 Text Generation Provider
+Integration and EP-083 Image Generation Provider Integration.
 
 `ProviderRequestExecutor` extracts the fallback/retry loop that
-`AIService.ask()` (EP-018) previously owned inline, so both `AIService`
-and the new, standalone `TextGenerationService` (EP-082) can execute a
-provider request with EP-069.1/.2/.3 fallback and cost-aware provider
-ordering, without either component owning a second implementation of
-that loop (`EP082_DESIGN.md` Section 6, 11.2 -- Rule 3/Rule 4: never
-introduce a second implementation of existing functionality).
+`AIService.ask()` (EP-018) previously owned inline, so `AIService`,
+`TextGenerationService` (EP-082), and now `ImageGenerationService`
+(EP-083) can all execute a provider request with EP-069.1/.2/.3
+fallback and cost-aware provider ordering, without any of them owning
+a second implementation of that loop (`EP082_DESIGN.md` Section 6,
+11.2; `EP083_DESIGN.md` Section 8.2, Owner Decision 1 -- Rule 3/Rule
+4: never introduce a second implementation of existing functionality).
 
 Responsibility boundaries (`EP082_DESIGN.md` Section 6, Owner Decision
-1) are deliberately narrow and do not change `ProviderManager`:
+1; unchanged by EP-083) are deliberately narrow and do not change
+`ProviderManager`:
 
     - `ProviderManager` remains the sole owner of provider
       registry/current-provider access, fallback candidate discovery,
@@ -22,12 +25,25 @@ Responsibility boundaries (`EP082_DESIGN.md` Section 6, Owner Decision
       own and makes no selection decisions `ProviderManager` doesn't
       already make.
     - `AIService` continues to own conversation/context/prompt
-      orchestration; it calls this executor instead of running its
-      own inline loop, with its public method signature, `AskResult`
+      orchestration; it calls `execute()` instead of running its own
+      inline loop, with its public method signature, `AskResult`
       contract, and all other observable behavior unchanged
       (`EP082_DESIGN.md` Section 19).
-    - `TextGenerationService` (EP-082) calls this same executor
-      directly, with no conversation/context/prompt involvement.
+    - `TextGenerationService` (EP-082) calls `execute()` directly,
+      with no conversation/context/prompt involvement.
+    - `ImageGenerationService` (EP-083) calls the new, additive
+      `execute_image()`, with the same non-conversational shape.
+
+EP-083 adds `execute_image()` alongside the existing `execute()`
+WITHOUT changing `execute()`'s public signature, behavior, or any log
+line (`EP083_DESIGN.md` Section 8.2, Owner Decision 1, Option A). Both
+methods now delegate to a single private `_run()` helper that is
+generic over which provider method is invoked (`.ask()` for text,
+`.generate_image()` for images) and optionally filters fallback
+candidates by capability (used only by `execute_image()`, via
+`AIProvider.supports_image_generation()` -- `execute()` passes no
+filter, reproducing its pre-EP-083 behavior exactly). There remains
+exactly ONE retry/fallback implementation in this module.
 
 Fallback eligibility and ordering exactly reproduce EP-069.1/.2/.3's
 existing, already-shipped semantics (`EP069_DESIGN.md`,
@@ -37,18 +53,21 @@ existing, already-shipped semantics (`EP069_DESIGN.md`,
 eligible; `ProviderConfigurationError`, `ProviderAuthenticationError`,
 and the base `ProviderError` are not, and stop retrying immediately.
 This set is intentionally closed here, exactly as it was in
-`ai_service.py` before this extraction, and is not derived from
-exception attributes or broadened.
+`ai_service.py` before the EP-082 extraction, and is not derived from
+exception attributes or broadened by EP-083.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from loguru import logger
 
 from src.core.ai.provider import (
     AIProvider,
+    ImageGenerationRequest,
+    ImageGenerationResult,
     ProviderError,
     ProviderNetworkError,
     ProviderRateLimitError,
@@ -58,14 +77,18 @@ from src.core.ai.provider import (
 )
 from src.core.ai.provider_manager import ProviderManager
 
-__all__ = ["ProviderRequestExecutor", "ProviderRequestOutcome"]
+__all__ = [
+    "ProviderRequestExecutor",
+    "ProviderRequestOutcome",
+    "ImageProviderRequestOutcome",
+]
 
 # Fallback-eligible ProviderError subtypes, unchanged from EP-069.1
 # (`EP069_DESIGN.md` Section 15, Owner Decision D4) -- moved here
 # verbatim as part of the EP-082 extraction. Only transient/
 # provider-availability failures are eligible; a bad credential or
 # missing configuration is an operator-visible defect, not a
-# transient failure to silently route around.
+# transient failure to silently route around. Unchanged by EP-083.
 _FALLBACK_ELIGIBLE_ERRORS: tuple[type[ProviderError], ...] = (
     ProviderUnavailableError,
     ProviderNetworkError,
@@ -105,13 +128,61 @@ class ProviderRequestOutcome:
     error: str
 
 
+@dataclass(frozen=True)
+class ImageProviderRequestOutcome:
+    """Result of `ProviderRequestExecutor.execute_image()` (EP-083).
+
+    Mirrors `ProviderRequestOutcome`'s shape exactly, replacing
+    `response: ProviderResponse | None` with
+    `result: ImageGenerationResult | None` -- a dedicated type rather
+    than a renamed/repurposed field on `ProviderRequestOutcome`, so
+    neither outcome type's field name or shape needs to change for the
+    other's sake.
+
+    Attributes:
+        success: Whether some capable provider in the attempt chain
+            produced a result.
+        initial_provider: Name of the provider `execute_image()` was
+            asked to start with, regardless of whether fallback
+            occurred.
+        final_provider: Name of the provider that actually produced
+            `result` (may differ from `initial_provider` when
+            fallback occurred), or "" on failure.
+        result: The successful `ImageGenerationResult`, or None on
+            failure.
+        error: A user-friendly error message, or "" on success.
+    """
+
+    success: bool
+    initial_provider: str
+    final_provider: str
+    result: ImageGenerationResult | None
+    error: str
+
+
+@dataclass(frozen=True)
+class _RunResult:
+    """Internal, generic outcome of `ProviderRequestExecutor._run()` (EP-083).
+
+    Not part of this module's public surface (`__all__`) -- `execute()`
+    and `execute_image()` each translate this into their own public,
+    strongly-typed outcome type.
+    """
+
+    success: bool
+    initial_provider: str
+    final_provider: str
+    value: object
+    error: str
+
+
 class ProviderRequestExecutor:
     """Executes a provider request with EP-069.1/.2/.3 fallback semantics.
 
     Holds no provider-selection state of its own: every call re-reads
     `ProviderManager.list_fallback_candidates()` fresh, exactly as
-    `AIService.ask()` did before this extraction, so eligibility and
-    ordering can never go stale relative to provider
+    `AIService.ask()` did before the EP-082 extraction, so eligibility
+    and ordering can never go stale relative to provider
     registration/removal.
     """
 
@@ -123,10 +194,11 @@ class ProviderRequestExecutor:
                 fallback candidates when the initial provider fails.
                 This executor never calls `get_current()` or
                 `set_current()` on it -- the caller supplies the
-                provider to start with (Section `execute()`), so a
-                fallback occurring mid-request never changes which
-                provider is "current" for the next fresh request
-                (EP-069.1 Owner Decision D1, preserved unchanged).
+                provider to start with (`execute()`/`execute_image()`),
+                so a fallback occurring mid-request never changes
+                which provider is "current" for the next fresh
+                request (EP-069.1 Owner Decision D1, preserved
+                unchanged).
         """
         self._provider_manager = provider_manager
 
@@ -150,7 +222,11 @@ class ProviderRequestExecutor:
         succeeds or every eligible candidate has been tried. A
         non-eligible failure, or `fallback_enabled=False`, fails
         immediately with zero fallback candidates queried -- byte-
-        identical to pre-EP-069.1 behavior.
+        identical to pre-EP-069.1 behavior. This method's public
+        signature and behavior are unchanged by EP-083
+        (`EP083_DESIGN.md` Section 8.2, Owner Decision 1): internally
+        it now delegates to `_run()`, passing no `capability_filter`,
+        which reproduces exactly what "no filtering" already meant.
 
         `max_tokens`/`temperature`/`system_prompt` are only passed to
         `provider.ask()` when not None, so a caller that omits them
@@ -180,11 +256,6 @@ class ProviderRequestExecutor:
         Returns:
             A ProviderRequestOutcome describing the final result.
         """
-        candidate = provider
-        initial_name = provider.name()
-        attempted: list[str] = []
-        failure_summary: list[str] = []
-
         extra_kwargs: dict[str, object] = {}
         if max_tokens is not None:
             extra_kwargs["max_tokens"] = max_tokens
@@ -193,11 +264,119 @@ class ProviderRequestExecutor:
         if system_prompt is not None:
             extra_kwargs["system_prompt"] = system_prompt
 
+        def request_fn(candidate: AIProvider) -> ProviderResponse:
+            return candidate.ask(prompt, **extra_kwargs)
+
+        run_result = self._run(provider, request_fn, fallback_enabled=fallback_enabled)
+        return ProviderRequestOutcome(
+            success=run_result.success,
+            initial_provider=run_result.initial_provider,
+            final_provider=run_result.final_provider,
+            response=run_result.value,  # type: ignore[arg-type]
+            error=run_result.error,
+        )
+
+    def execute_image(
+        self,
+        provider: AIProvider,
+        request: ImageGenerationRequest,
+        *,
+        fallback_enabled: bool,
+    ) -> ImageProviderRequestOutcome:
+        """Send `request` to `provider`, retrying eligible failures via fallback (EP-083).
+
+        Identical retry/fallback semantics to `execute()` (same
+        `_run()` helper, same fallback-eligible exception set, same
+        `ProviderManager.list_fallback_candidates()` ordering), with
+        one addition: every fallback candidate is filtered through
+        `AIProvider.supports_image_generation()` before being
+        attempted, so a provider that is merely unavailable is
+        retried, but a provider that never supports image generation
+        at all is silently skipped rather than attempted and logged
+        as a wasted failure (`EP083_DESIGN.md` Section 9, point 6).
+        The *initial* `provider` argument is never capability-checked
+        here -- that is `ImageGenerationService`'s responsibility
+        (`EP083_DESIGN.md` Section 9, point 7), so a request for an
+        already-known-incapable current provider fails fast before
+        this method is even called.
+
+        Args:
+            provider: The provider to attempt first.
+            request: The provider-independent image-generation
+                request.
+            fallback_enabled: Whether a fallback-eligible failure may
+                be retried against another image-capable candidate.
+
+        Returns:
+            An ImageProviderRequestOutcome describing the final
+            result.
+        """
+
+        def request_fn(candidate: AIProvider) -> ImageGenerationResult:
+            return candidate.generate_image(request)
+
+        run_result = self._run(
+            provider,
+            request_fn,
+            fallback_enabled=fallback_enabled,
+            capability_filter=lambda candidate: candidate.supports_image_generation(),
+        )
+        return ImageProviderRequestOutcome(
+            success=run_result.success,
+            initial_provider=run_result.initial_provider,
+            final_provider=run_result.final_provider,
+            result=run_result.value,  # type: ignore[arg-type]
+            error=run_result.error,
+        )
+
+    def _run(
+        self,
+        provider: AIProvider,
+        request_fn: Callable[[AIProvider], object],
+        *,
+        fallback_enabled: bool,
+        capability_filter: Callable[[AIProvider], bool] | None = None,
+    ) -> _RunResult:
+        """Shared retry/fallback control flow for `execute()`/`execute_image()` (EP-083).
+
+        This is the single, non-duplicated implementation of EP-069's
+        fallback/retry semantics (`EP083_DESIGN.md` Section 8.2, Owner
+        Decision 1) -- `execute()` passes `capability_filter=None`
+        (no filtering, its pre-EP-083 behavior exactly);
+        `execute_image()` passes a capability check. Every log line
+        and every piece of `_FALLBACK_ELIGIBLE_ERRORS`
+        classification logic here is identical to what `execute()`
+        alone contained before this refactor.
+
+        Args:
+            provider: The provider to attempt first.
+            request_fn: Called with each attempted provider in turn;
+                returns that provider's successful result or raises a
+                `ProviderError`. `.ask()`-wrapping for `execute()`,
+                `.generate_image()`-wrapping for `execute_image()`.
+            fallback_enabled: Whether a fallback-eligible failure may
+                be retried against another candidate.
+            capability_filter: If not None, every fallback candidate
+                `ProviderManager.list_fallback_candidates()` returns
+                is additionally required to satisfy this predicate
+                before being attempted. None means no filtering
+                (every returned candidate is attempted, reproducing
+                `execute()`'s original, pre-EP-083 behavior exactly).
+
+        Returns:
+            A _RunResult describing the final outcome, generic over
+            whatever `request_fn` returns on success.
+        """
+        candidate = provider
+        initial_name = provider.name()
+        attempted: list[str] = []
+        failure_summary: list[str] = []
+
         while True:
             candidate_name = candidate.name()
             attempted.append(candidate_name)
             try:
-                response = candidate.ask(prompt, **extra_kwargs)
+                value = request_fn(candidate)
             except ProviderError as exc:
                 # `exc` here is always a ProviderError instance whose
                 # message is a static, code-authored string, never
@@ -210,15 +389,17 @@ class ProviderRequestExecutor:
                     exc, _FALLBACK_ELIGIBLE_ERRORS
                 )
                 if not fallback_eligible:
-                    return ProviderRequestOutcome(
+                    return _RunResult(
                         success=False,
                         initial_provider=initial_name,
                         final_provider="",
-                        response=None,
+                        value=None,
                         error=str(exc),
                     )
 
                 remaining = self._provider_manager.list_fallback_candidates(exclude=attempted)
+                if capability_filter is not None:
+                    remaining = [p for p in remaining if capability_filter(p)]
                 if not remaining:
                     # Every eligible candidate has been tried (bounded
                     # by construction). Only provider names and
@@ -228,11 +409,11 @@ class ProviderRequestExecutor:
                         "AI request failed on every eligible provider: "
                         f"{', '.join(failure_summary)}."
                     )
-                    return ProviderRequestOutcome(
+                    return _RunResult(
                         success=False,
                         initial_provider=initial_name,
                         final_provider="",
-                        response=None,
+                        value=None,
                         error=f"All providers failed. {'; '.join(failure_summary)}.",
                     )
 
@@ -244,10 +425,11 @@ class ProviderRequestExecutor:
                 candidate = next_candidate
                 continue
 
-            return ProviderRequestOutcome(
+            return _RunResult(
                 success=True,
                 initial_provider=initial_name,
                 final_provider=candidate.name(),
-                response=response,
+                value=value,
                 error="",
             )
+

@@ -3410,4 +3410,74 @@ run, see "Known limitations")
 
 ---
 
+# EP-083 — Image Generation Provider Integration
+
+Status: Released (STEP 3 independent, adversarial audit PASS WITH
+WARNINGS; the one issue found was fixed on the spot during the audit
+-- see "Known limitations" below)
+
+Highlights:
+
+- Jarvis can now generate images from a text description internally,
+  using the same reliable, multi-provider-aware foundation that
+  standalone text generation (the previous release) already uses --
+  it does not add a new chat command or setting you'll notice
+  day-to-day yet.
+- If the image-generation provider has a temporary problem, Jarvis can
+  automatically try another configured provider that also supports
+  image generation, the same reliability feature your ordinary AI
+  conversations and the previous text-generation release already
+  have -- a provider that simply can't make images at all is skipped
+  automatically rather than being tried and failing.
+- Nothing about how your existing conversations, text generation,
+  providers, or settings work has changed.
+
+Compatibility:
+
+Fully backward compatible with every prior release, including last
+release's text-generation feature. No existing command, setting, or
+behavior changed. No breaking changes. No new external software
+package was added -- image generation uses the same connection method
+already used for text.
+
+Known limitations:
+
+- There is no new chat command or menu option to use this yet -- that
+  is planned for a future release (EP-087 or later) and is not part
+  of this one.
+- Only one AI provider currently knows how to make images; if that
+  provider isn't configured, image generation won't work yet.
+  Anthropic's Claude does not currently offer image generation, so
+  this doesn't apply to it.
+- A size/dimensions option exists in the request shape for future use,
+  but isn't wired up to actually change the generated image's size
+  yet, to avoid guessing at behavior that hasn't been officially
+  documented by the provider.
+- The independent review that checked this release found one small,
+  purely internal issue, similar in spirit to one found in the
+  previous release: leftover, redundant safety-check code that could
+  have been confusing to future maintainers. This has already been
+  cleaned up and re-tested; it never affected any normal use of
+  Jarvis.
+- The same three automated checks from an earlier, related release
+  (EP-069.2) that could not be re-run in the previous release's
+  verification environment still could not be re-run in this one,
+  for the same reason (a missing, unrelated desktop-display
+  component). This is a gap in how thoroughly this specific
+  environment could re-confirm old, already-shipped behavior -- not a
+  problem with this release's own new capability.
+
+Validation:
+
+EP083 : 60 passed / 0 failed / 0 skipped
+EP082 : 69 passed / 0 failed / 0 skipped (regression, unchanged)
+EP069  : 68 passed / 0 failed / 0 skipped (regression, unchanged)
+EP069_3 : 80 passed / 0 failed / 0 skipped (regression, unchanged)
+EP069_4 : 41 passed / 0 failed / 0 skipped (regression, unchanged)
+EP069_2 : 23 of 23 executable assertions passed / 0 failed
+(regression, unchanged; 12 of 15 sub-tests executed -- 3 could not
+run, see "Known limitations")
+
+---
+
 End of document.

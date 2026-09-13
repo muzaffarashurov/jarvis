@@ -208,6 +208,12 @@ class ProviderFactory:
         timeout = self._config.get("providers.gemini.timeout", 120)
         max_tokens = self._config.get("providers.gemini.max_tokens", 4096)
         temperature = self._config.get("providers.gemini.temperature", 0.2)
+        # EP-083 Image Generation Provider Integration (additive).
+        # None/empty means this GeminiProvider instance does not
+        # support image generation.
+        image_model = self._config.get("providers.gemini.image_model", None)
+        if not isinstance(image_model, str):
+            image_model = None
 
         return GeminiProvider(
             enabled=enabled,
@@ -216,4 +222,5 @@ class ProviderFactory:
             timeout=int(timeout) if isinstance(timeout, (int, float)) else 120,
             max_tokens=int(max_tokens) if isinstance(max_tokens, (int, float)) else 4096,
             temperature=float(temperature) if isinstance(temperature, (int, float)) else 0.2,
+            image_model=image_model,
         )

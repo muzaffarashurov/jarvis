@@ -121,6 +121,7 @@ from src.modules.telegram_module import TelegramModule
 from src.modules.runtime_module import RuntimeModule
 from src.services.agent_service import AgentService
 from src.services.ai_service import AIService
+from src.services.image_generation_service import ImageGenerationService
 from src.services.text_generation_service import TextGenerationService
 from src.services.collaboration_service import CollaborationService
 from src.services.context_compression_service import CompressionService
@@ -819,6 +820,23 @@ class Bootstrap:
             enabled=bool(config.get("content_generation.enabled", False)),
             default_temperature=_parse_content_generation_default_temperature(config),
             fallback_enabled=bool(config.get("content_generation.fallback_enabled", False)),
+        )
+
+        # EP-083 Image Generation Provider Integration. Standalone,
+        # non-conversational content-generation entry point mirroring
+        # `text_generation_service` exactly -- same shared
+        # `ai_request_executor` (so there remains exactly one
+        # fallback/retry implementation in the repository,
+        # EP083_DESIGN.md Section 8), no ConversationManager/
+        # ContextManager/PromptManager dependency, no CommandRouter
+        # registration (CLI exposure deferred to EP-087 or a later EP,
+        # EP083_DESIGN.md Section 17). Stored for a future in-process
+        # consumer, exactly like `text_generation_service` above.
+        self._image_generation_service = ImageGenerationService(
+            provider_manager=ai_provider_manager,
+            request_executor=ai_request_executor,
+            enabled=bool(config.get("image_generation.enabled", False)),
+            fallback_enabled=bool(config.get("image_generation.fallback_enabled", False)),
         )
 
         # EP-054 Self Reflection. On-demand session/conversation

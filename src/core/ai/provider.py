@@ -92,6 +92,77 @@ class ProviderResponse:
 
 
 @dataclass(frozen=True)
+class ImageGenerationRequest:
+    """A provider-independent request to generate one or more images (EP-083).
+
+    Only fields with a plausible, common meaning across image-
+    generation APIs in general are included here -- provider-specific
+    options belong in that provider's own `providers.<name>.*`
+    configuration, not in this common contract
+    (`EP083_DESIGN.md` Section 12).
+
+    This dataclass performs no validation itself beyond the
+    immutability a frozen dataclass gives for free. Each concrete
+    `AIProvider.generate_image()` implementation validates the fields
+    it can actually honor and raises `ProviderConfigurationError` for
+    anything it cannot -- the same layering `validate_temperature()`
+    already established for `ask()` (EP-082).
+
+    Attributes:
+        prompt: The image description. Required, non-empty.
+        negative_prompt: What to avoid in the generated image. None
+            means no negative prompt is supplied.
+        size: Requested output dimensions as "WIDTHxHEIGHT" (e.g.
+            "1024x1024"), or None to use the provider's own default.
+        number_of_images: How many images to generate. Must be a
+            positive integer.
+        seed: Optional deterministic seed. None means no seed
+            requested (provider default randomness).
+    """
+
+    prompt: str
+    negative_prompt: str | None = None
+    size: str | None = None
+    number_of_images: int = 1
+    seed: int | None = None
+
+
+@dataclass(frozen=True)
+class GeneratedImage:
+    """One generated image (EP-083).
+
+    In-memory only -- EP-083 introduces no file persistence
+    (`EP083_DESIGN.md` Section 4).
+
+    Attributes:
+        data_base64: The image's raw bytes, base64-encoded.
+        mime_type: The image's MIME type (e.g. "image/png").
+    """
+
+    data_base64: str
+    mime_type: str
+
+
+@dataclass(frozen=True)
+class ImageGenerationResult:
+    """Result of a successful `AIProvider.generate_image()` call (EP-083).
+
+    Mirrors `ProviderResponse`'s shape (`model`, `latency_ms`),
+    replacing its single `text: str` with `images` -- the smallest
+    change that fits the same existing pattern.
+
+    Attributes:
+        images: The generated image(s). Always non-empty on success.
+        model: The model identifier that produced `images`.
+        latency_ms: Wall-clock time the request took, in milliseconds.
+    """
+
+    images: tuple[GeneratedImage, ...]
+    model: str
+    latency_ms: float
+
+
+@dataclass(frozen=True)
 class PingResult:
     """Result of an `AIProvider.ping()` connectivity check (EP-015).
 
@@ -295,6 +366,44 @@ class AIProvider(ABC):
         """
         raise ProviderUnavailableError(
             f"Provider '{self.name()}' does not support chat requests."
+        )
+
+    def supports_image_generation(self) -> bool:
+        """Return whether this provider instance can generate images (EP-083).
+
+        Base implementation always returns False. This is a narrow,
+        provider-level capability flag -- distinct from, and not a
+        replacement for, EP-069.4's Unified Capability Abstraction
+        (`src/core/capability/`), which catalogs external/internal
+        tools and services, not AI-provider content modalities
+        (`EP083_DESIGN.md` Section 6).
+
+        Returns:
+            True if `generate_image()` is meaningfully implemented by
+            this provider (and configured), False otherwise.
+        """
+        return False
+
+    def generate_image(self, request: ImageGenerationRequest) -> ImageGenerationResult:
+        """Generate one or more images from `request` (EP-083).
+
+        Base implementation always raises: this provider does not
+        implement image generation. Providers that do (e.g.
+        GeminiProvider, when configured with an image-capable model)
+        must override this method and `supports_image_generation()`.
+
+        Args:
+            request: The provider-independent image-generation
+                request.
+
+        Returns:
+            The provider's reply.
+
+        Raises:
+            ProviderError: Always, unless overridden.
+        """
+        raise ProviderUnavailableError(
+            f"Provider '{self.name()}' does not support image generation."
         )
 
     def ping(self) -> PingResult:

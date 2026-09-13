@@ -13,13 +13,14 @@ Status: Active
 **None yet defined beyond EP-069's own remaining scope.** EP-069.1
 (Automatic AI Provider Fallback on Request Failure), EP-069.2
 (Configured AI Provider Fallback Ordering), EP-069.3 (Cost-Aware
-AI Provider Selection), and EP-069.4 (Unified Capability Abstraction)
-completed the first four, independently-scoped
+AI Provider Selection), EP-069.4 (Unified Capability Abstraction), and
+EP-069.5 (Capability Discovery Engine)
+completed the first five, independently-scoped
 sub-packages of the EP-069 ("AI Provider & Tool Registry") planning
 identifier -- see the Long-Term Roadmap section below, whose EP-069
-bullet is unchanged in wording but whose first four slices are now
+bullet is unchanged in wording but whose first five slices are now
 implemented. EP-069's remaining scope (LLM function/tool calling,
-Capability Discovery, External Capability Security/Supply-Chain
+External Capability Security/Supply-Chain
 Trust, Capability Lifecycle Management, and expanded fallback
 eligibility) remains unscoped and planning-only;
 each requires its own future, independent STEP 1 before
@@ -31,10 +32,11 @@ further down. **EP-092 (Personal Data Collection Framework), the
 first slice of Phase E (Personal Intelligence / Energy / Weather), is
 now also COMPLETE** -- see the EP-092 entry below and the "Personal
 Intelligence / Energy / Weather" section further down. No EP-070 or
-Phase 11 exists anywhere in this repository as of this release. Two
-tracked, non-blocking follow-up items exist from EP-069, plus three
-tracked, non-blocking follow-up items from EP-092 (see the EP-092
-entry below):
+Phase 11 exists anywhere in this repository as of this
+release. Two tracked, non-blocking follow-up items exist from EP-069,
+one tracked, non-blocking follow-up item from EP-082, plus three
+tracked, non-blocking follow-up items from EP-092 (see the EP-082 and
+EP-092 entries below):
 
 - From EP-069.2's own STEP 3.1 review (see the EP-069.2 entry below,
   unchanged by this release): `ai.fallback_order` does not yet
@@ -53,81 +55,6 @@ entry below):
   EP069.3-AUDIT-003/004/005. All three cover behavior the STEP 3 audit
   independently verified correct by hand; only the regression-test
   coverage itself is missing.
-
-### EP-082 — Text Generation Provider Integration
-
-STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
-Testing), STEP 3 (Architecture Audit), and STEP 4 (Documentation
-Synchronization) all complete. EP-082 is marked **COMPLETE / STEP 3
-PASS WITH WARNINGS**. Full design:
-`docs/architecture/designs/EP082_DESIGN.md`. No separate audit
-document was produced -- the one finding raised during STEP 3 was
-fixed directly within that same step rather than requiring a STEP
-3.1 review cycle.
-
-STEP 1 found that "asking a provider for text" existed in exactly two
-forms: `AIService.ask()`'s conversational pipeline, which
-unconditionally records conversation/context history and is not a
-fit for standalone content generation, and the direct
-`ProviderManager.get_current()` + `AIProvider.ask()` pattern
-`ReflectionModule`/`PromptOptimizerModule` already use to avoid that
-side effect -- but which also bypasses EP-069.1/EP-069.2/EP-069.3's
-fallback and cost-aware provider selection entirely, since that logic
-lived only inside `AIService.ask()`'s own inline retry loop.
-
-EP-082 therefore extracts that retry loop, unchanged in behavior,
-into a new shared `ProviderRequestExecutor`
-(`src/core/ai/provider_request_executor.py`), used by both
-`AIService` and a new, standalone `TextGenerationService`
-(`src/services/text_generation_service.py`). `ProviderManager` gains
-no new responsibilities -- it remains solely responsible for
-provider registry access, current-provider selection,
-fallback-candidate discovery, and EP-069.2/EP-069.3's ordering.
-`AIProvider.ask()` gained two additive, optional parameters
-(`temperature`, `system_prompt`), honored consistently by
-`ClaudeProvider` and `GeminiProvider` through one shared
-`validate_temperature()` rule (0.0-1.0 inclusive). A new, additive
-`content_generation:` configuration namespace was added without
-altering `ai:`/`providers:` semantics. No CLI/CommandRouter namespace
-was added -- deferred to EP-087 or a later EP by Owner Decision.
-Image, audio, video, and presentation generation (EP-083-EP-086), the
-combined pipeline (EP-087), streaming, new providers, and content
-persistence/templates are all explicitly out of scope for this
-release.
-
-STEP 3's independent audit returned **PASS WITH WARNINGS**: zero
-CRITICAL/HIGH findings; one LOW finding (a bare `assert` guarding an
-unreachable success-path invariant in `AIService.ask()` and
-`TextGenerationService.generate()`, which would silently no-op under
-Python's `-O` mode) was fixed directly during the audit itself by
-replacing it with an explicit `None` check -- no architecture or
-behavior change. The audit independently confirmed
-`ProviderManager`'s method set is byte-for-byte unchanged from
-pre-EP-082 (no execution/retry responsibility was absorbed into it),
-and independently re-verified the extracted executor's fallback
-ordering, eligibility, retry/exhaustion behavior, log-message text,
-and initial-vs-final-provider reporting against the pre-extraction
-implementation line-by-line.
-
-Tests: EP-082 69/0/0 (new suite,
-`tests/EP082/test_text_generation_provider_integration.py`).
-Regression: `tests/EP069` 68/0/0 and `tests/EP069_3` 80/0/0 both
-fully executed and unaffected. `tests/EP069_2` was confirmed
-unaffected across 12 of its 15 sub-tests (23/0/0 assertions); the
-remaining 3 sub-tests call the real `bootstrap.initialize()` and
-could not execute in the sandbox used for STEP 2/3 verification for
-lack of `PySide6` (Qt) -- an unrelated, pre-existing desktop-UI test
-dependency (traced to `tests/EP044/test_desktop_ui.py`), not an
-EP-082 regression. No full-repository regression count was measured
-for this release; this is a documented verification limitation, not
-a claim of full-suite passage.
-
-**One tracked follow-up item from this release:** confirm the 3
-unexecuted `tests/EP069_2` bootstrap-wiring sub-tests in an
-environment with `PySide6` available, as a final confirmation
-alongside the code-inspection-based assurance STEP 3 already
-performed. This requires no new EP number and is not a defect in
-EP-082's own implementation.
 
 ### EP-092 — Personal Data Collection Framework
 
@@ -253,6 +180,150 @@ the first EP to register a real source):
    `stats()`/`is_category_enabled()`/`store_if_new()` into the design
    record (EP092-AUDIT-003) so EP-093+ authors know they exist without
    reading the implementation directly.
+
+### EP-069.5 — Capability Discovery Engine
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), and STEP 4 (Documentation
+Synchronization) all complete. No STEP 3.1 was required. EP-069.5 is
+marked **COMPLETE / STEP 3 PASS, READY FOR STEP 4**. Full design:
+`docs/architecture/designs/EP069_5_DESIGN.md`. Audit:
+`docs/architecture/audits/EP069_5_ARCHITECTURE_AUDIT.md`.
+
+STEP 1 found that Planning Engine (EP-029) maps a request's text to a
+`(subsystem, action)` pair using a fixed, in-source keyword table, and
+Agent Framework (EP-028) performs no real dispatch at all -- neither
+can express "given this task, which registered capability actually
+fits, is trustworthy, and is affordable" -- because EP-069.4 defined
+what a capability is but explicitly deferred matching a task to one as
+"EP-069.5's entire subject."
+
+EP-069.5 therefore adds a new `src/core/capability_discovery/`
+package: `CapabilityMatch`/`CapabilityDiscoveryResult` (plain outcome
+data), a `CapabilityDiscoveryProvider` `ABC` with exactly one
+concrete, deterministic, non-AI implementation
+(`DefaultCapabilityDiscoveryProvider`, using token/substring text
+matching against `Capability.name`/`description` -- no semantic
+search, no embeddings, no LLM call), and a `CapabilityDiscoveryEngine`
+that fetches a `CapabilityRegistry`'s `enabled` capabilities and ranks
+them by fit, then trust (`CapabilityTrustLevel`, `UNVERIFIED` included
+but ranked lowest), then an optional externally supplied `cost_hints`
+signal, then id, as a fully deterministic tie-break chain. A dedicated
+`CapabilityDiscoveryError`/`CapabilityDiscoveryProviderError`
+hierarchy is included, correctly rooted from the start. **Zero
+modification to `Capability`, `CapabilityRegistry`, or
+`CapabilityBackend` (EP-069.4, confirmed byte-for-byte unchanged)** --
+no cost field was added to `Capability`; `cost_hints` is a pure,
+externally supplied `discover()` parameter instead, per Owner Decision
+OD3. **No `CapabilityDiscoveryManager`, and no
+`src/bootstrap.py`/`config/config.yaml`/CLI wiring of any kind** (OD2)
+-- the engine is directly constructible and independently usable,
+mirroring EP-069.4's own precedent. Registry population (bridging
+`Tool`/`Plugin` into real `Capability` entries) and Planning/Agent
+Framework integration both remain explicitly deferred to a future EP.
+
+STEP 3's independent audit returned **PASS**: zero CRITICAL/HIGH/
+MEDIUM findings. The audit independently re-derived the ranking
+algorithm by hand against representative inputs (not merely trusting
+the passing test suite) and confirmed exact conformance to the
+approved design and all six Owner Decisions (OD1-OD6), with zero
+deviation. Two informational findings were recorded and require no
+action: one test asserts a private attribute to verify default-
+provider construction, since no public accessor exists by design
+(EP069.5-AUDIT-001); and the `cost_hints` unknown-key validation is
+scoped to enabled candidates rather than final post-filtering matches,
+a self-consistent reading of the approved design text
+(EP069.5-AUDIT-002). Unlike EP-069.4's own STEP 3 (which found a
+genuine MEDIUM gap requiring a STEP 3.1 fix), EP-069.5 required no
+follow-up resolution pass.
+
+Tests: EP-069_5 37/0/0
+(`tests/EP069_5/test_capability_discovery_engine.py`). Full
+regression: 7277 passed / 3 failed / 1 skipped, identical in identity
+and count to the pre-EP-069.5 baseline of 7240/3/1 -- the `+37` delta
+exactly equals this release's own new assertion count. The 3
+pre-existing failures (`EP047` x2, `EP049` x1) and 2 environment-
+blocked suites (`EP046`, `EP048`, missing PortAudio) are unrelated to
+and unaffected by EP-069.5. See
+`docs/architecture/audits/EP069_5_ARCHITECTURE_AUDIT.md` for detail.
+
+**No tracked follow-up items from this release.** Both STEP 3 findings
+are informational and closed; neither requires further work.
+
+### EP-082 — Text Generation Provider Integration
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Architecture Audit), and STEP 4 (Documentation
+Synchronization) all complete. EP-082 is marked **COMPLETE / STEP 3
+PASS WITH WARNINGS**. Full design:
+`docs/architecture/designs/EP082_DESIGN.md`. No separate audit
+document was produced -- the one finding raised during STEP 3 was
+fixed directly within that same step rather than requiring a STEP
+3.1 review cycle.
+
+STEP 1 found that "asking a provider for text" existed in exactly two
+forms: `AIService.ask()`'s conversational pipeline, which
+unconditionally records conversation/context history and is not a
+fit for standalone content generation, and the direct
+`ProviderManager.get_current()` + `AIProvider.ask()` pattern
+`ReflectionModule`/`PromptOptimizerModule` already use to avoid that
+side effect -- but which also bypasses EP-069.1/EP-069.2/EP-069.3's
+fallback and cost-aware provider selection entirely, since that logic
+lived only inside `AIService.ask()`'s own inline retry loop.
+
+EP-082 therefore extracts that retry loop, unchanged in behavior,
+into a new shared `ProviderRequestExecutor`
+(`src/core/ai/provider_request_executor.py`), used by both
+`AIService` and a new, standalone `TextGenerationService`
+(`src/services/text_generation_service.py`). `ProviderManager` gains
+no new responsibilities -- it remains solely responsible for
+provider registry access, current-provider selection,
+fallback-candidate discovery, and EP-069.2/EP-069.3's ordering.
+`AIProvider.ask()` gained two additive, optional parameters
+(`temperature`, `system_prompt`), honored consistently by
+`ClaudeProvider` and `GeminiProvider` through one shared
+`validate_temperature()` rule (0.0-1.0 inclusive). A new, additive
+`content_generation:` configuration namespace was added without
+altering `ai:`/`providers:` semantics. No CLI/CommandRouter namespace
+was added -- deferred to EP-087 or a later EP by Owner Decision.
+Image, audio, video, and presentation generation (EP-083-EP-086), the
+combined pipeline (EP-087), streaming, new providers, and content
+persistence/templates are all explicitly out of scope for this
+release.
+
+STEP 3's independent audit returned **PASS WITH WARNINGS**: zero
+CRITICAL/HIGH findings; one LOW finding (a bare `assert` guarding an
+unreachable success-path invariant in `AIService.ask()` and
+`TextGenerationService.generate()`, which would silently no-op under
+Python's `-O` mode) was fixed directly during the audit itself by
+replacing it with an explicit `None` check -- no architecture or
+behavior change. The audit independently confirmed
+`ProviderManager`'s method set is byte-for-byte unchanged from
+pre-EP-082 (no execution/retry responsibility was absorbed into it),
+and independently re-verified the extracted executor's fallback
+ordering, eligibility, retry/exhaustion behavior, log-message text,
+and initial-vs-final-provider reporting against the pre-extraction
+implementation line-by-line.
+
+Tests: EP-082 69/0/0 (new suite,
+`tests/EP082/test_text_generation_provider_integration.py`).
+Regression: `tests/EP069` 68/0/0 and `tests/EP069_3` 80/0/0 both
+fully executed and unaffected. `tests/EP069_2` was confirmed
+unaffected across 12 of its 15 sub-tests (23/0/0 assertions); the
+remaining 3 sub-tests call the real `bootstrap.initialize()` and
+could not execute in the sandbox used for STEP 2/3 verification for
+lack of `PySide6` (Qt) -- an unrelated, pre-existing desktop-UI test
+dependency (traced to `tests/EP044/test_desktop_ui.py`), not an
+EP-082 regression. No full-repository regression count was measured
+for this release; this is a documented verification limitation, not
+a claim of full-suite passage.
+
+**One tracked follow-up item from this release:** confirm the 3
+unexecuted `tests/EP069_2` bootstrap-wiring sub-tests in an
+environment with `PySide6` available, as a final confirmation
+alongside the code-inspection-based assurance STEP 3 already
+performed. This requires no new EP number and is not a defect in
+EP-082's own implementation.
 
 ### EP-069.4 — Unified Capability Abstraction
 
@@ -3194,20 +3265,30 @@ Priority may change.
 
 # Long-Term Roadmap — Future Engineering Packages (EP-069–EP-140)
 
-Status: PLANNING ONLY, with one exception. Nothing in this section has
+Status: PLANNING ONLY, with exceptions. Nothing in this section has
 been implemented, designed, or scheduled, **except EP-069's first
-four sub-packages, EP-069.1 (Automatic AI Provider Fallback on
+five sub-packages, EP-069.1 (Automatic AI Provider Fallback on
 Request Failure), EP-069.2 (Configured AI Provider Fallback Ordering),
-EP-069.3 (Cost-Aware AI Provider Selection), and EP-069.4 (Unified
-Capability Abstraction), which are COMPLETE**
+EP-069.3 (Cost-Aware AI Provider Selection), EP-069.4 (Unified
+Capability Abstraction), and EP-069.5 (Capability Discovery Engine),
+which are COMPLETE**
 -- see the "Next Engineering Package" section above and
 `docs/architecture/designs/EP069_DESIGN.md`/
 `docs/architecture/designs/EP069_2_DESIGN.md`/
 `docs/architecture/designs/EP069_3_DESIGN.md`/
-`docs/architecture/designs/EP069_4_DESIGN.md`. No
+`docs/architecture/designs/EP069_4_DESIGN.md`/
+`docs/architecture/designs/EP069_5_DESIGN.md`; **EP-082 (Text
+Generation Provider Integration), which is COMPLETE** -- see the
+"Next Engineering Package" section above and
+`docs/architecture/designs/EP082_DESIGN.md`; and **EP-092 (Personal
+Data Collection Framework), which is COMPLETE** -- see the "Next
+Engineering Package" section above and
+`docs/architecture/designs/EP092_DESIGN.md`. No
 other EP number below has an owner, a design document, or a STEP 1
 report yet, and EP-069's own remaining scope (beyond
-EP-069.1/EP-069.2/EP-069.3/EP-069.4) is likewise still planning-only -- this
+EP-069.1/EP-069.2/EP-069.3/EP-069.4/EP-069.5), Phase C's own remaining
+scope (EP-083–EP-087), and Phase E's own remaining scope
+(EP-093–EP-098), are likewise still planning-only -- this
 section otherwise exists solely to record the long-term direction so
 future work has a stable set of planning identifiers to start from.
 
@@ -3249,13 +3330,14 @@ remote shell.
   awareness, so Jarvis is never hard-coded to one AI provider.
   **EP-069.1 (Automatic AI Provider Fallback on Request Failure),
   EP-069.2 (Configured AI Provider Fallback Ordering), EP-069.3
-  (Cost-Aware AI Provider Selection), and EP-069.4 (Unified Capability
-  Abstraction) are
+  (Cost-Aware AI Provider Selection), EP-069.4 (Unified Capability
+  Abstraction), and EP-069.5 (Capability Discovery Engine) are
   COMPLETE** -- see the "Next Engineering Package" section above,
   `docs/architecture/designs/EP069_DESIGN.md`,
   `docs/architecture/designs/EP069_2_DESIGN.md`,
-  `docs/architecture/designs/EP069_3_DESIGN.md`, and
-  `docs/architecture/designs/EP069_4_DESIGN.md`. The remaining scope
+  `docs/architecture/designs/EP069_3_DESIGN.md`,
+  `docs/architecture/designs/EP069_4_DESIGN.md`, and
+  `docs/architecture/designs/EP069_5_DESIGN.md`. The remaining scope
   described in this bullet (tools and capabilities)
   remains unscoped and planning-only;
   each requires its own future, independent STEP 1, per this
@@ -3265,8 +3347,9 @@ remote shell.
   GitHub projects/CLI tools, REST APIs, external web services, and
   browser-only services) as an extension of the tool/capability
   registry, rather than as parallel, disconnected infrastructure or
-  one EP per adapter type. The first of the four, EP-069.4, is now
-  COMPLETE; the remaining three (EP-069.5–EP-069.7) are still
+  one EP per adapter type. The first two of the four, EP-069.4 and
+  EP-069.5, are now
+  COMPLETE; the remaining two (EP-069.6–EP-069.7) are still
   planning-only:
   - **EP-069.4 — Unified Capability Abstraction** (HIGH). **COMPLETE**
     -- see the "Next Engineering Package" section above and
@@ -3280,11 +3363,23 @@ remote shell.
     the `Capability`/`CapabilityRegistry`/`CapabilityBackend`
     abstractions with **zero concrete backend implementations** --
     discovery, security enforcement, and lifecycle management remain
-    EP-069.5/.6/.7's own, still-planning-only, future scope.
-  - **EP-069.5 — Capability Discovery Engine** (HIGH). Given a task,
+    EP-069.5/.6/.7's own scope.
+  - **EP-069.5 — Capability Discovery Engine** (HIGH). **COMPLETE**
+    -- see the "Next Engineering Package" section above and
+    `docs/architecture/designs/EP069_5_DESIGN.md`. Given a task,
     finds matching internal, local, or remote capabilities and ranks
-    them by fit, trust, and cost; the single decision point Planning/
-    Agents use instead of hard-coding "which tool for which task."
+    them by fit, trust, and an optional externally supplied cost
+    signal (`cost_hints` -- no cost field was added to `Capability`);
+    the single decision point Planning/Agents can use instead of
+    hard-coding "which tool for which task." Ships
+    `CapabilityDiscoveryProvider`/`DefaultCapabilityDiscoveryProvider`
+    (deterministic, non-AI text matching -- no semantic search, no
+    embeddings, no LLM call) and `CapabilityDiscoveryEngine`, with
+    **no Manager and no bootstrap/config/CLI wiring of any kind** --
+    the engine is directly constructible and independently usable.
+    Registry population and actual Planning/Agent Framework
+    integration remain EP-069.6/.7's and a future EP's own,
+    still-planning-only, scope.
   - **EP-069.6 — External Capability Security & Supply-Chain Trust**
     (HIGH). Source-provenance checks, dependency/package inspection,
     permission mapping (filesystem/network/credential/process access),

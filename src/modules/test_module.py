@@ -71,8 +71,10 @@ import tests.EP069.test_ai_provider_fallback
 import tests.EP069_2.test_provider_fallback_ordering
 import tests.EP069_3.test_cost_aware_provider_selection
 import tests.EP069_4.test_unified_capability_abstraction
+import tests.EP069_5.test_capability_discovery_engine
 import tests.EP082.test_text_generation_provider_integration
 import tests.EP092.test_personal_data_collection_framework
+
 
 class TestModule(CommandModule):
 

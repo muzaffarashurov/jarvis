@@ -3257,59 +3257,6 @@ EP069_4 : 41 passed / 0 failed / 0 skipped
 
 ---
 
-# EP-082 — Text Generation Provider Integration
-
-Status: Released (STEP 3 independent audit PASS WITH WARNINGS; the
-one issue found was fixed on the spot during the audit -- see "Known
-limitations" below)
-
-Highlights:
-
-- This release lays internal groundwork for Jarvis to generate
-  standalone written text (like an article, summary, or caption) on
-  request, separately from an ordinary chat conversation -- it does
-  not add a new command, setting, or chat behavior you'll notice
-  day-to-day yet
-- The same reliability feature your ordinary "ai ask" conversations
-  already have -- automatically trying another configured AI provider
-  if the first one fails -- is now shared with this new, standalone
-  text-generation capability too, instead of being rebuilt separately
-- Nothing about how your existing "ai ask" conversations, providers,
-  or settings work has changed
-
-Compatibility:
-
-Fully backward compatible with every prior release. No existing
-command, setting, or behavior changed. No breaking changes.
-
-Known limitations:
-
-- There is no new chat command or menu option to use this yet -- that
-  is planned for a future release (EP-087 or later) and is not part
-  of this one.
-- The independent review that checked this release found one small,
-  purely internal issue: a safety check written in a way that could,
-  in one unusual and never-actually-used mode of running the program,
-  fail silently instead of clearly. This has already been fixed and
-  re-tested; it never affected any normal use of Jarvis.
-- Three of the automated checks for an earlier, related release
-  (EP-069.2) could not be re-run in the environment used to verify
-  this release, because that environment was missing an unrelated
-  desktop-display component. This is a gap in how thoroughly this
-  specific environment could re-confirm old, already-shipped
-  behavior -- not a problem with this release's own new capability.
-
-Validation:
-
-EP082 : 69 passed / 0 failed / 0 skipped
-EP069  : 68 passed / 0 failed / 0 skipped (regression, unchanged)
-EP069_3 : 80 passed / 0 failed / 0 skipped (regression, unchanged)
-EP069_2 : 23 of 23 executable assertions passed / 0 failed
-(regression, unchanged; 12 of 15 sub-tests executed -- 3 could not
-run, see "Known limitations")
-
----
-
 # EP-092 — Personal Data Collection Framework
 
 Status: Released (STEP 3 independent audit PASS, after remediation --
@@ -3365,6 +3312,101 @@ Validation:
 EP092 : 820 passed / 0 failed / 0 skipped (stable across 3 independent
 runs during final review, including additional adversarial checks for
 the two issues above)
+
+---
+
+# EP-069.5 — Capability Discovery Engine
+
+Status: Released (STEP 3 independent audit PASS -- no follow-up review
+was needed)
+
+Highlights:
+
+- Like the previous release, this one is mostly invisible day-to-day
+  -- it doesn't add a new command, setting, or behavior you'll notice
+- This release adds the internal logic that will eventually let
+  Jarvis pick the best matching capability for a given task
+  automatically, instead of relying on fixed, hard-coded rules -- but
+  nothing currently calls this new logic yet, so it has no effect on
+  how Jarvis behaves today
+- Nothing about how Jarvis's existing built-in tools, installed
+  plugins, or the previous release's internal building block works
+  has changed
+- There is still no new way to add an external tool, script, or web
+  service to Jarvis -- that remains planned for future releases
+
+Compatibility:
+
+Fully backward compatible with every prior release. No existing
+command, setting, or behavior changed. No breaking changes.
+
+Known limitations:
+
+- The independent review that checked this release found no issues
+  requiring a fix. Two very minor, purely informational notes were
+  logged and required no changes at all -- see
+  `docs/architecture/audits/EP069_5_ARCHITECTURE_AUDIT.md` for detail.
+- As with the previous release, there is still no automatic way for
+  Jarvis to use external scripts, tools, or web services as
+  capabilities -- that groundwork continues to build toward future
+  releases.
+
+Validation:
+
+EP069_5 : 37 passed / 0 failed / 0 skipped
+
+---
+
+# EP-082 — Text Generation Provider Integration
+
+Status: Released (STEP 3 independent audit PASS WITH WARNINGS; the
+one issue found was fixed on the spot during the audit -- see "Known
+limitations" below)
+
+Highlights:
+
+- This release lays internal groundwork for Jarvis to generate
+  standalone written text (like an article, summary, or caption) on
+  request, separately from an ordinary chat conversation -- it does
+  not add a new command, setting, or chat behavior you'll notice
+  day-to-day yet
+- The same reliability feature your ordinary "ai ask" conversations
+  already have -- automatically trying another configured AI provider
+  if the first one fails -- is now shared with this new, standalone
+  text-generation capability too, instead of being rebuilt separately
+- Nothing about how your existing "ai ask" conversations, providers,
+  or settings work has changed
+
+Compatibility:
+
+Fully backward compatible with every prior release. No existing
+command, setting, or behavior changed. No breaking changes.
+
+Known limitations:
+
+- There is no new chat command or menu option to use this yet -- that
+  is planned for a future release (EP-087 or later) and is not part
+  of this one.
+- The independent review that checked this release found one small,
+  purely internal issue: a safety check written in a way that could,
+  in one unusual and never-actually-used mode of running the program,
+  fail silently instead of clearly. This has already been fixed and
+  re-tested; it never affected any normal use of Jarvis.
+- Three of the automated checks for an earlier, related release
+  (EP-069.2) could not be re-run in the environment used to verify
+  this release, because that environment was missing an unrelated
+  desktop-display component. This is a gap in how thoroughly this
+  specific environment could re-confirm old, already-shipped
+  behavior -- not a problem with this release's own new capability.
+
+Validation:
+
+EP082 : 69 passed / 0 failed / 0 skipped
+EP069  : 68 passed / 0 failed / 0 skipped (regression, unchanged)
+EP069_3 : 80 passed / 0 failed / 0 skipped (regression, unchanged)
+EP069_2 : 23 of 23 executable assertions passed / 0 failed
+(regression, unchanged; 12 of 15 sub-tests executed -- 3 could not
+run, see "Known limitations")
 
 ---
 

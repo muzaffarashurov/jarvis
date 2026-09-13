@@ -6,7 +6,7 @@ The format is inspired by Keep a Changelog.
 
 ---
 
-## v0.1.33-ep092
+## v0.1.34-ep092
 
 Released: 2026-09-13
 
@@ -85,7 +85,7 @@ unchanged from STEP 2/STEP 3.
 
 ---
 
-## v0.1.32-ep082
+## v0.1.33-ep082
 
 Released: 2026-09-12
 
@@ -158,6 +158,183 @@ execute in the STEP 2/3 sandbox for lack of `PySide6` (Qt), an
 unrelated, pre-existing desktop-UI test dependency, not an EP-082
 regression. No full-repository regression count was measured for this
 release.
+
+---
+
+## v0.1.32-ep069.5
+
+Released: 2026-09-12
+
+Status: EP-069.5 COMPLETE / STEP 3 PASS / READY FOR STEP 4 (STEP 1
+Architecture Discovery & Design, STEP 2 Implementation & Testing,
+STEP 3 Architecture Audit, and STEP 4 Documentation Synchronization
+all complete; no STEP 3.1 was required).
+
+**EP-069.5 -- Capability Discovery Engine.** STEP 1 found that
+Planning Engine (EP-029) maps a request's text to a `(subsystem,
+action)` pair using a fixed, in-source keyword table
+(`DefaultPlanningProvider._KEYWORD_RULES`), and Agent Framework
+(EP-028) performs no real dispatch at all (`DefaultAgentProvider`'s
+`execute()` always leaves `dispatched=False`). Neither subsystem could
+express "given this task, which of the capabilities Jarvis now knows
+about (via EP-069.4's `CapabilityRegistry`) actually fits, is
+trustworthy enough, and is affordable enough to use" -- because
+EP-069.4 explicitly defined what a capability is but deferred matching
+a task to one as "EP-069.5's entire subject."
+
+EP-069.5 therefore adds a new `src/core/capability_discovery/`
+package: `CapabilityMatch` (a single ranked candidate: capability, fit
+score, rank) and `CapabilityDiscoveryResult` (a whole discovery
+outcome: task, matches, match count, truncated flag) as plain data; a
+`CapabilityDiscoveryProvider` `ABC` with exactly one concrete,
+deterministic, non-AI implementation --
+`DefaultCapabilityDiscoveryProvider`, which scores fit via
+case-insensitive, token-oriented substring matching against
+`Capability.name`/`description`, excludes zero-fit candidates
+entirely, and sorts survivors by fit (descending), then trust
+(descending -- `TRUSTED_INTERNAL` > `TRUSTED_CONFIGURED` >
+`UNVERIFIED`), then an optional externally supplied `cost_hints` value
+(ascending, `0.0` when not supplied), then id (ascending) as a fully
+deterministic tie-break; and a `CapabilityDiscoveryEngine` that
+fetches a `CapabilityRegistry`'s `enabled` capabilities and delegates
+to its configured provider. A dedicated `CapabilityDiscoveryError`
+(root) / `CapabilityDiscoveryProviderError` hierarchy is included,
+correctly rooted from the start (unlike EP-069.4's own STEP 2, which
+initially shipped a flat hierarchy and required a STEP 3.1 fix).
+
+**Zero modification to `Capability`, `CapabilityRegistry`, or
+`CapabilityBackend` (EP-069.4, confirmed byte-for-byte unchanged).** No
+cost field was added to `Capability` -- `cost_hints` is a pure,
+externally supplied `discover()` parameter instead, per Owner Decision
+OD3. **No `CapabilityDiscoveryManager`, and no
+`src/bootstrap.py`/`config/config.yaml`/CLI wiring of any kind** (Owner
+Decision OD2) -- the engine is directly constructible and
+independently usable, mirroring EP-069.4's own immediate precedent.
+Registry population (bridging `Tool`/`Plugin` into real `Capability`
+entries) and actual Planning/Agent Framework integration both remain
+explicitly deferred to a future Engineering Package.
+
+STEP 3's independent architecture audit
+(`docs/architecture/audits/EP069_5_ARCHITECTURE_AUDIT.md`) returned
+**PASS**: zero CRITICAL/HIGH/MEDIUM findings. The audit did not accept
+the STEP 2 self-report's claims at face value -- it independently
+hand-traced the ranking algorithm against representative inputs and
+confirmed exact conformance to the approved design and all six Owner
+Decisions (OD1-OD6), with zero deviation. Two purely informational
+findings were recorded, both requiring no action: one test asserts a
+private attribute (`engine._provider`) to verify default-provider
+construction, since no public accessor exists by design
+(EP069.5-AUDIT-001); and the `cost_hints` unknown-key validation is
+scoped to the enabled candidates handed to the provider rather than
+the final, post-filtering match list, a self-consistent reading of the
+approved design text (EP069.5-AUDIT-002). Unlike EP-069.4's own STEP 3
+(which found a genuine MEDIUM gap requiring a STEP 3.1 fix), EP-069.5
+required no follow-up resolution pass.
+
+### Added
+
+- `docs/architecture/designs/EP069_5_DESIGN.md`: STEP 1 design
+  document -- architectural investigation confirming Planning
+  Engine/Agent Framework both hard-code "which tool for which task"
+  today, six Owner Decisions (OD1-OD6), and a full EP-069.4 boundary
+  analysis.
+- `docs/architecture/audits/EP069_5_ARCHITECTURE_AUDIT.md`: STEP 3
+  independent architecture audit, verdict PASS, two informational
+  findings.
+- `src/core/capability_discovery/__init__.py`: public API surface for
+  the new package.
+- `src/core/capability_discovery/capability_discovery_result.py`:
+  `CapabilityMatch`, `CapabilityDiscoveryResult`.
+- `src/core/capability_discovery/capability_discovery_provider.py`:
+  `CapabilityDiscoveryError`, `CapabilityDiscoveryProviderError`,
+  `CapabilityDiscoveryProvider` (ABC), `DefaultCapabilityDiscoveryProvider`.
+- `src/core/capability_discovery/capability_discovery_engine.py`:
+  `CapabilityDiscoveryEngine`.
+- `tests/EP069_5/test_capability_discovery_engine.py`: new,
+  self-contained EP-069.5 test suite (`NAME = "EP069_5"`), covering
+  basic discovery, fit ranking, deterministic ordering, trust
+  ordering, `UNVERIFIED` inclusion, disabled-capability exclusion,
+  `cost_hints` ordering/defaulting/unknown-key rejection, empty
+  registry, zero matches, `max_results` truncation and invalid-value
+  rejection, non-mutation guarantees, provider/engine delegation via a
+  recording fake provider, public API exports, and error-hierarchy
+  behavior.
+
+### Changed
+
+- `src/modules/test_module.py`: one added import line registering
+  `tests.EP069_5`.
+
+### Reliability
+
+- Jarvis now has a working, tested, deterministic engine that can rank
+  registered capabilities against a plain-text task by fit, trust, and
+  cost -- the exact "single decision point" `docs/BACKLOG.md`'s own
+  EP-069.5 bullet describes -- ready for a future EP to wire into
+  Planning/Agents once that integration is itself scoped.
+- No existing subsystem's behavior changed: `Capability`,
+  `CapabilityRegistry`, `CapabilityBackend`, `Tool`, `Plugin`,
+  `PlanningProvider`, and `AgentProvider` are all confirmed
+  byte-for-byte unmodified by this release.
+- **No concrete Planning/Agent integration exists yet (by design, not
+  a defect):** `CapabilityDiscoveryEngine` is not called from anywhere
+  in this release. It is fully tested and usable in isolation; wiring
+  it into a live decision path remains future work.
+- **The production `CapabilityRegistry` remains empty in this
+  release, unchanged from EP-069.4** -- this was a known, documented
+  condition carried forward from EP-069.4, not something this release
+  attempted or claims to fix.
+
+### Validation
+
+```
+EP069_5 : 37 passed / 0 failed / 0 skipped
+EP069_4 : 41 passed / 0 failed / 0 skipped
+EP069_3 : 80 passed / 0 failed / 0 skipped
+EP069_2 : 26 passed / 0 failed / 0 skipped
+EP069   : 68 passed / 0 failed / 0 skipped
+EP056   : 62 passed / 0 failed / 0 skipped
+Full regression (all registered suites):
+  7277 passed / 3 failed / 1 skipped
+```
+
+The 3 failures (`EP047` x2, `EP049` x1, voice TTS/STT) and 2
+environment-blocked suites (`EP046`, `EP048`, missing `sounddevice`/
+PortAudio runtime library) are identical in identity and count to the
+pre-EP-069.5 baseline measured earlier in this same working tree
+(7240 passed / 3 failed / 1 skipped) -- the `+37` delta exactly equals
+this release's own new assertion count. Zero new failures.
+
+### STEP 3 -- Independent Architecture Audit
+
+Verdict: **PASS**, zero CRITICAL, zero HIGH, zero MEDIUM. Two findings
+recorded, both INFORMATIONAL, requiring no action
+(EP069.5-AUDIT-001/002). Zero deviation from `EP069_5_DESIGN.md`'s six
+Owner Decisions. The EP-069.4 boundary was independently verified
+intact -- no file under `src/core/capability/` was touched, and no new
+field was added to `Capability`. See
+`docs/architecture/audits/EP069_5_ARCHITECTURE_AUDIT.md` for full
+detail.
+
+### STEP 4 -- Documentation Synchronization
+
+Release/project documentation (`CHANGELOG.md`, `docs/RELEASE_NOTES.md`,
+`docs/BACKLOG.md`, `docs/architecture/JARVIS_ROADMAP.md`) synchronized
+to mark EP-069.5 COMPLETE / STEP 3 PASS, READY FOR STEP 4. `VERSION`
+and `PROJECT_MANIFEST.md` were checked against this repository's own
+established convention (neither has ever been updated per-EP -- see
+this file's EP-043, EP-069.1 through EP-069.4 STEP 4 entries) and
+deliberately left unchanged. `docs/architecture/designs/
+EP069_5_DESIGN.md` and `docs/architecture/audits/
+EP069_5_ARCHITECTURE_AUDIT.md` were left completely unmodified, per
+this repository's own established convention that design and audit
+documents are finalized historical artifacts, never amended after
+creation. EP-069's remaining scope -- LLM function/tool calling,
+External Capability Security/Supply-Chain Trust (EP-069.6), Capability
+Lifecycle Management (EP-069.7), and expanded fallback eligibility --
+remains an unscoped, planning-only set of EP-069.x candidates, each
+requiring its own future, independent STEP 1; none is implemented by
+this release.
 
 ---
 

@@ -195,6 +195,63 @@ audit's own environment limitation (missing third-party dependencies
 required by `src/bootstrap.py`, unrelated to EP-092) is unchanged
 from STEP 2/STEP 3.
 
+EP-069.5 Capability Discovery Engine — **COMPLETE** (STEP 1
+Architecture Discovery & Design, STEP 2 Implementation & Testing,
+STEP 3 Architecture Audit, and STEP 4 Documentation Synchronization
+all complete -- see docs/architecture/designs/EP069_5_DESIGN.md and
+docs/architecture/audits/EP069_5_ARCHITECTURE_AUDIT.md). **Final
+Verdict: STEP 3 — PASS, ZERO CRITICAL, ZERO HIGH, ZERO MEDIUM** (two
+findings, both LOW/INFORMATIONAL, neither requiring resolution --
+EP069.5-AUDIT-001/002). **No STEP 3.1 was required.** STEP 1 found
+that Planning Engine (EP-029) and Agent Framework (EP-028) both
+hard-code "which subsystem for which task" via a fixed keyword table
+or no real dispatch at all, and that EP-069.4 explicitly deferred
+matching a task to a registered capability as "EP-069.5's entire
+subject."
+
+EP-069.5 therefore adds a new `src/core/capability_discovery/`
+package: `CapabilityMatch`/`CapabilityDiscoveryResult` (plain
+outcome data), a `CapabilityDiscoveryProvider` `ABC` with exactly one
+concrete, deterministic, non-AI implementation
+(`DefaultCapabilityDiscoveryProvider`, using token/substring text
+matching -- no semantic search, no embeddings, no LLM call), and a
+`CapabilityDiscoveryEngine` that fetches a `CapabilityRegistry`'s
+`enabled` capabilities and ranks them by fit, then trust
+(`CapabilityTrustLevel`, `UNVERIFIED` included but ranked lowest),
+then an optional externally supplied `cost_hints` signal, then id, as
+a fully deterministic tie-break chain. A dedicated
+`CapabilityDiscoveryError`/`CapabilityDiscoveryProviderError`
+hierarchy is included. **Zero modification to `Capability`,
+`CapabilityRegistry`, or `CapabilityBackend` (EP-069.4, confirmed
+byte-for-byte unchanged)** -- no cost field was added to `Capability`;
+`cost_hints` is a pure, externally supplied `discover()` parameter
+instead. **No `CapabilityDiscoveryManager`, and no
+`src/bootstrap.py`/`config/config.yaml`/CLI wiring of any kind** --
+the engine is directly constructible and independently usable, per
+Owner Decision OD2, mirroring EP-069.4's own precedent. Registry
+population (bridging `Tool`/`Plugin` into real `Capability` entries)
+and Planning/Agent Framework integration both remain explicitly
+deferred to a future EP.
+
+STEP 3's independent audit re-derived the ranking algorithm by hand
+against representative inputs (not merely trusting the passing test
+suite) and confirmed the implementation conforms to the approved
+design and all six Owner Decisions (OD1-OD6) exactly, with zero
+deviation. Two informational findings were recorded and require no
+action: one test asserts a private attribute to verify default-
+provider construction, since no public accessor exists by design
+(EP069.5-AUDIT-001); and the `cost_hints` unknown-key validation is
+scoped to enabled candidates rather than final post-filtering matches,
+a self-consistent reading of the approved design text
+(EP069.5-AUDIT-002). Unlike EP-069.4's own STEP 3 (which found a
+genuine MEDIUM gap requiring a STEP 3.1 fix), EP-069.5's
+implementation required no follow-up resolution pass. Tests: EP-069_5
+37/0/0 (new suite,
+`tests/EP069_5/test_capability_discovery_engine.py`). Full regression:
+7277 passed / 3 failed / 1 skipped, identical in identity and count to
+the pre-EP-069.5 baseline of 7240/3/1 -- the `+37` delta exactly
+equals this release's own new assertion count, zero new failures.
+
 EP-082 Text Generation Provider Integration — **COMPLETE**
 (STEP 1 Architecture Discovery & Design, STEP 2 Implementation &
 Testing, STEP 3 Architecture Audit, and STEP 4 Documentation
@@ -2583,26 +2640,28 @@ EP-060 Jarvis Operating System
 
 ---
 
-## Phase A — Core Safety & Autonomy (planning only, except EP-069.1/EP-069.2/EP-069.3/EP-069.4)
+## Phase A — Core Safety & Autonomy (planning only, except EP-069.1/EP-069.2/EP-069.3/EP-069.4/EP-069.5)
 
 EP-069–EP-074. Provider/tool registry, policy & human-approval engine,
 credential management, autonomous-execution safety boundaries,
 browser automation with human-in-the-loop, and an autonomous project/
 EP orchestrator. See `docs/BACKLOG.md`, "Long-Term Roadmap — Future
-Engineering Packages," for full detail. **EP-069's first four
+Engineering Packages," for full detail. **EP-069's first five
 sub-packages, EP-069.1 (Automatic AI Provider Fallback on Request
 Failure), EP-069.2 (Configured AI Provider Fallback Ordering),
-EP-069.3 (Cost-Aware AI Provider Selection), and EP-069.4 (Unified
-Capability Abstraction), are
+EP-069.3 (Cost-Aware AI Provider Selection), EP-069.4 (Unified
+Capability Abstraction), and EP-069.5 (Capability Discovery Engine),
+are
 COMPLETE** — see "## Current" above. The remainder of EP-069 and all
-of EP-070–EP-074 remain planning-only. EP-069 now also carries three
-remaining planning-only sub-packages (EP-069.5–EP-069.7) covering
-Capability Discovery, External Capability Security/Supply-Chain
-Trust, and Capability Lifecycle Management, building on EP-069.4's
-`Capability` model, needed for Jarvis to eventually use local GitHub
-projects/CLI tools, external APIs, external web services, and
-browser-only services as capabilities — see `docs/BACKLOG.md` and
-`docs/architecture/designs/ROADMAP_070_138_REBUILD_PROPOSAL.md` for
+of EP-070–EP-074 remain planning-only. EP-069 now also carries two
+remaining planning-only sub-packages (EP-069.6–EP-069.7) covering
+External Capability Security/Supply-Chain Trust and Capability
+Lifecycle Management, building on EP-069.4's `Capability` model and
+EP-069.5's discovery/ranking engine, needed for Jarvis to eventually
+use local GitHub projects/CLI tools, external APIs, external web
+services, and browser-only services as capabilities — see
+`docs/BACKLOG.md` and `docs/architecture/designs/
+ROADMAP_070_138_REBUILD_PROPOSAL.md` for
 the full architecture. EP-074 gains one new sub-package, EP-074.1
 (Dynamic Workflow & Unknown-Task Composition Engine), for tasks with
 no predefined workflow.
@@ -2689,15 +2748,19 @@ EP-140.
 **Phases A–N and EP-069–EP-140 are strategic planning only, with
 exceptions: EP-069.1 (Automatic AI Provider Fallback on Request
 Failure), EP-069.2 (Configured AI Provider Fallback Ordering),
-EP-069.3 (Cost-Aware AI Provider Selection), and EP-069.4 (Unified
-Capability Abstraction) are
-COMPLETE — see "## Current" above; and EP-092 (Personal Data
-Collection Framework, Phase E) is likewise COMPLETE — see "## Current"
-above and `docs/architecture/designs/EP092_DESIGN.md`.** Unlike
-Phases 1–10 above, none of the other EPs in Phases A–N has a design
-document, an audit, or an owner decision yet, and EP-069's own
-remaining scope (beyond EP-069.1/EP-069.2/EP-069.3/EP-069.4), and
-Phase E's own remaining scope (EP-093–EP-098), are likewise still
+EP-069.3 (Cost-Aware AI Provider Selection), EP-069.4 (Unified
+Capability Abstraction), and EP-069.5 (Capability Discovery Engine)
+are
+COMPLETE — see "## Current" above; EP-082 (Text Generation Provider
+Integration, Phase C) is likewise COMPLETE — see "## Current" above
+and `docs/architecture/designs/EP082_DESIGN.md`; and EP-092 (Personal
+Data Collection Framework, Phase E) is likewise COMPLETE — see
+"## Current" above and `docs/architecture/designs/EP092_DESIGN.md`.**
+Unlike Phases 1–10 above, none of the other EPs in Phases A–N has a
+design document, an audit, or an owner decision yet, and EP-069's own
+remaining scope (beyond EP-069.1/EP-069.2/EP-069.3/EP-069.4/EP-069.5),
+Phase C's own remaining scope (EP-083–EP-087), and Phase E's own
+remaining scope (EP-093–EP-098), are likewise still
 planning-only. The ordering into
 Phases A–N reflects the current
 strategic grouping only; it is not a guaranteed implementation
@@ -2708,6 +2771,7 @@ the full description of each item, the long-term vision, the
 knowledge trust model, and the security principles that should govern
 this work.
 
+---
 ---
 
 # Architecture Evolution

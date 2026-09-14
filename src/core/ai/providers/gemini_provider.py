@@ -29,12 +29,23 @@ immediately instead of only surfacing on the next
 `validate_configured_model()`) to decide `authenticated` from
 ListModels rather than from a generateContent call alone, so an
 invalid model no longer masquerades as a failed authentication.
+
+EP-084 note: `generate_speech()` uses this same `generateContent`
+endpoint with a TTS-capable model (`providers.gemini.audio_model`) and
+wraps Gemini's raw PCM response into a valid WAV container
+(`_pcm_to_wav()`, using only the standard-library `wave` module)
+before returning it, per Owner Decision D2
+(`EP084_DESIGN.md` Section 9/25).
 """
 
 from __future__ import annotations
 
 import difflib
+import re
 import time
+import wave
+from base64 import b64decode, b64encode
+from io import BytesIO
 from typing import Any
 
 import requests
@@ -42,6 +53,7 @@ from loguru import logger
 
 from src.core.ai.provider import (
     AIProvider,
+    GeneratedAudio,
     GeneratedImage,
     ImageGenerationRequest,
     ImageGenerationResult,
@@ -57,6 +69,8 @@ from src.core.ai.provider import (
     ProviderStatus,
     ProviderTimeoutError,
     ProviderUnavailableError,
+    SpeechGenerationRequest,
+    SpeechGenerationResult,
     validate_temperature,
 )
 
@@ -66,6 +80,22 @@ _API_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/models"
 _PROVIDER_NAME: str = "gemini"
 _GENERATE_CONTENT_METHOD: str = "generateContent"
 _MODEL_NAME_PREFIX: str = "models/"
+
+# EP-084: Gemini's TTS `generateContent` response returns raw,
+# headerless 16-bit linear PCM audio (mimeType e.g.
+# "audio/L16;codec=pcm;rate=24000") -- always mono, always 16-bit,
+# per Google's current, documented TTS output format (verified during
+# EP-084 STEP 1; `EP084_DESIGN.md` Section 9). Only the sample rate
+# varies and is carried in the mimeType string itself; these two are
+# therefore fixed constants, not configuration.
+_PCM_SAMPLE_WIDTH_BYTES: int = 2  # 16-bit
+_PCM_CHANNELS: int = 1  # mono
+# Gemini's own current default TTS sample rate, used only as a
+# fallback if a future response's mimeType cannot be parsed for its
+# own rate (`EP084_DESIGN.md` Section 15) -- never used to override a
+# rate that WAS successfully parsed.
+_PCM_DEFAULT_SAMPLE_RATE_HZ: int = 24000
+_PCM_RATE_PATTERN = re.compile(r"rate=(\d+)")
 
 
 class GeminiProvider(AIProvider):
@@ -80,6 +110,7 @@ class GeminiProvider(AIProvider):
         max_tokens: int,
         temperature: float,
         image_model: str | None = None,
+        audio_model: str | None = None,
     ) -> None:
         """Initialize the GeminiProvider.
 
@@ -98,6 +129,12 @@ class GeminiProvider(AIProvider):
                 `generate_image()` is never expected to be called.
                 Distinct from `model` above, which remains the text
                 model EP-082 already uses.
+            audio_model: Value of 'providers.gemini.audio_model'
+                (EP-084). None or empty means this provider instance
+                does not support speech generation --
+                `supports_speech_generation()` returns False and
+                `generate_speech()` is never expected to be called.
+                Distinct from `model`/`image_model` above.
         """
         self._enabled = enabled
         self._api_key = api_key
@@ -106,6 +143,7 @@ class GeminiProvider(AIProvider):
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._image_model = image_model or None
+        self._audio_model = audio_model or None
 
     # ---------- AIProvider: identity / configuration / health ----------
 
@@ -139,6 +177,7 @@ class GeminiProvider(AIProvider):
             "max_tokens": self._max_tokens,
             "temperature": self._temperature,
             "image_model": self._image_model,
+            "audio_model": self._audio_model,
         }
 
     def health(self) -> ProviderHealth:
@@ -323,6 +362,117 @@ class GeminiProvider(AIProvider):
         logger.info(
             f"AI image request finished (provider='gemini', model='{result.model}', "
             f"images={len(result.images)}, latency={latency_ms:.0f}ms)."
+        )
+        return result
+
+    # ---------- AIProvider: EP-084 speech generation ----------
+
+    def supports_speech_generation(self) -> bool:
+        """Return whether this provider instance is configured for speech generation.
+
+        True only when 'providers.gemini.audio_model' is set to a
+        non-empty value (EP-084) -- independent of `is_available()`,
+        which governs text generation via `enabled`/`api_key` only,
+        and independent of `supports_image_generation()`. A `True`
+        result here does not by itself mean a request will succeed
+        (the API key or model may still be invalid); it means this
+        provider instance is *configured* to attempt one.
+        """
+        return self._audio_model is not None
+
+    def generate_speech(self, request: SpeechGenerationRequest) -> SpeechGenerationResult:
+        """Generate spoken audio via the Google Gemini API and return the result.
+
+        Uses the same `generateContent` endpoint `ask()`/
+        `generate_image()` already call, per Google's documented
+        text-to-speech support: a TTS-capable model
+        (`providers.gemini.audio_model`, distinct from the text
+        `model` and the image `image_model`) is requested with
+        `generationConfig.responseModalities: ["AUDIO"]` and, when a
+        voice is requested, `speechConfig.voiceConfig.
+        prebuiltVoiceConfig.voiceName`. The response's candidate
+        `parts` are expected to contain one `inlineData` entry holding
+        raw, headerless 16-bit linear PCM audio (`EP084_DESIGN.md`
+        Section 7/9/15, verified against Google's current API
+        documentation during EP-084 STEP 1, not assumed).
+
+        Per Owner Decision D2 (`EP084_DESIGN.md` Section 9/25), the
+        raw PCM is wrapped into a valid, directly playable WAV
+        container (`_pcm_to_wav()`) before being returned -- the
+        result's `mime_type` is therefore always "audio/wav",
+        regardless of the raw `mimeType` Gemini itself reported.
+
+        `request.language` has no structured Gemini parameter to map
+        to (`EP084_DESIGN.md` Section 10) -- when supplied, it is
+        applied as a best-effort natural-language instruction
+        prepended to `request.text`, exactly as Google's own TTS
+        documentation demonstrates steering language/style through
+        prompt content rather than a discrete config field.
+
+        Args:
+            request: The provider-independent speech-generation
+                request.
+
+        Returns:
+            The provider's reply, containing one `GeneratedAudio`
+            entry.
+
+        Raises:
+            ProviderConfigurationError: If this provider is disabled,
+                missing its API key, not configured with an
+                'audio_model', or `request.text` is empty.
+            ProviderAuthenticationError: If the API key is rejected.
+            ProviderRateLimitError: If the API reports a rate limit.
+            ProviderTimeoutError: If the request exceeds the
+                configured timeout.
+            ProviderNetworkError: If the request cannot reach the API.
+            ProviderUnavailableError: If the API is unreachable, the
+                configured audio model is not found, or the response
+                contains no audio data.
+        """
+        if not self._enabled:
+            raise ProviderConfigurationError("Provider 'gemini' is disabled.")
+        if not self._api_key.strip():
+            raise ProviderConfigurationError("Provider 'gemini' is missing 'api_key'.")
+        audio_model = self._audio_model
+        if audio_model is None:
+            raise ProviderConfigurationError(
+                "Provider 'gemini' is not configured for speech generation "
+                "(set 'providers.gemini.audio_model')."
+            )
+        if not request.text.strip():
+            raise ProviderConfigurationError("'text' must not be empty.")
+
+        text = request.text
+        if request.language:
+            text = f"Speak the following in {request.language}: {text}"
+
+        url = f"{_API_BASE_URL}/{audio_model}:generateContent"
+        generation_config: dict[str, Any] = {"responseModalities": ["AUDIO"]}
+        if request.voice:
+            generation_config["speechConfig"] = {
+                "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": request.voice}}
+            }
+        if request.seed is not None:
+            generation_config["seed"] = request.seed
+        payload: dict[str, Any] = {
+            "contents": [{"role": "user", "parts": [{"text": text}]}],
+            "generationConfig": generation_config,
+        }
+        headers = {
+            "x-goog-api-key": self._api_key,
+            "content-type": "application/json",
+        }
+
+        logger.info(f"AI speech request started (provider='gemini', model='{self._audio_model}').")
+        started = time.monotonic()
+        response = self._send_request("POST", url, headers, "speech request", json=payload)
+
+        latency_ms = (time.monotonic() - started) * 1000
+        result = self._parse_speech_response(response, latency_ms)
+        logger.info(
+            f"AI speech request finished (provider='gemini', model='{result.model}', "
+            f"latency={latency_ms:.0f}ms)."
         )
         return result
 
@@ -679,6 +829,125 @@ class GeminiProvider(AIProvider):
             if isinstance(encoded, str) and isinstance(mime_type, str) and encoded:
                 images.append(GeneratedImage(data_base64=encoded, mime_type=mime_type))
         return images
+
+    def _parse_speech_response(
+        self, response: requests.Response, latency_ms: float
+    ) -> SpeechGenerationResult:
+        """Translate a raw `requests.Response` from a speech `generateContent` call (EP-084).
+
+        A 404 here means the configured 'audio_model' was not found --
+        reported directly (mirroring `_parse_image_response()`'s own
+        404 handling) so the error names the correct configuration
+        key. Every other non-2xx status is shared with `ask()`/
+        `generate_image()` via `_raise_for_transport_status()`.
+        """
+        if response.status_code == 404:
+            raise ProviderUnavailableError(
+                f"Gemini audio model '{self._audio_model}' was not found for this API key "
+                "(HTTP 404). Check 'providers.gemini.audio_model' in config.yaml."
+            )
+        self._raise_for_transport_status(response, "speech request")
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ProviderUnavailableError("Gemini returned an invalid response body.") from exc
+
+        raw_audio = self._extract_audio(data)
+        if raw_audio is None:
+            raise ProviderUnavailableError(
+                "Gemini speech request succeeded but the response contained no audio data."
+            )
+        raw_data_base64, raw_mime_type = raw_audio
+        try:
+            wav_data_base64 = self._pcm_to_wav(raw_data_base64, raw_mime_type)
+        except (ValueError, wave.Error) as exc:
+            # EP-084 STEP 3 audit (Audit 6/8): `_pcm_to_wav()` decodes
+            # base64 and writes a WAV container -- either step can
+            # fail on a malformed/corrupt response (invalid base64
+            # padding raises `binascii.Error`, a `ValueError`
+            # subclass; an internal `wave` failure raises
+            # `wave.Error`, which is not). Both must be normalized
+            # into a `ProviderError` here -- otherwise they propagate
+            # past `ProviderRequestExecutor._run()`'s
+            # `except ProviderError` clause uncaught, crashing the
+            # whole request path instead of producing a clean failure
+            # result, exactly the same normalization
+            # `except ValueError` already gives `response.json()`
+            # failures a few lines above.
+            raise ProviderUnavailableError(
+                "Gemini speech request succeeded but its audio data could not be decoded."
+            ) from exc
+        audio = GeneratedAudio(data_base64=wav_data_base64, mime_type="audio/wav")
+        return SpeechGenerationResult(
+            audio=audio, model=str(self._audio_model), latency_ms=latency_ms
+        )
+
+    @staticmethod
+    def _extract_audio(data: dict[str, Any]) -> tuple[str, str] | None:
+        """Extract the first `inlineData` audio part of a generateContent response.
+
+        Returns (data_base64, mime_type), or None if no usable audio
+        part is present. Mirrors `_extract_images()`'s structure,
+        returning a single optional pair rather than a list -- the
+        Gemini TTS response in scope for EP-084 carries exactly one
+        audio part per candidate (`EP084_DESIGN.md` Section 11).
+        """
+        try:
+            parts = data["candidates"][0]["content"]["parts"]
+        except (KeyError, IndexError, TypeError):
+            return None
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            inline_data = part.get("inlineData")
+            if not isinstance(inline_data, dict):
+                continue
+            encoded = inline_data.get("data")
+            mime_type = inline_data.get("mimeType")
+            if isinstance(encoded, str) and isinstance(mime_type, str) and encoded:
+                return encoded, mime_type
+        return None
+
+    @staticmethod
+    def _pcm_to_wav(pcm_data_base64: str, source_mime_type: str) -> str:
+        """Wrap base64-encoded raw PCM audio into a base64-encoded WAV container (EP-084).
+
+        Implements Owner Decision D2 (`EP084_DESIGN.md` Section 9/25):
+        Gemini's TTS response is raw, headerless 16-bit linear PCM
+        (mono) -- not directly playable -- so it is wrapped into a
+        valid WAV container here, using only Python's standard-library
+        `wave` module (no new dependency), before ever reaching a
+        caller. Sample rate is parsed from `source_mime_type` (e.g.
+        "audio/L16;codec=pcm;rate=24000"); sample width (16-bit) and
+        channel count (mono) are fixed constants, per Google's current,
+        documented TTS output format -- never guessed from the mime
+        type. If the rate cannot be parsed (an unexpected/future
+        `mimeType` shape), `_PCM_DEFAULT_SAMPLE_RATE_HZ` (Gemini's own
+        current default) is used rather than discarding an otherwise-
+        successful response.
+
+        Args:
+            pcm_data_base64: The raw PCM audio, base64-encoded, exactly
+                as Gemini returned it.
+            source_mime_type: The raw `mimeType` Gemini reported for
+                `pcm_data_base64` (used only to parse the sample rate).
+
+        Returns:
+            The resulting WAV file's bytes, base64-encoded.
+        """
+        pcm_bytes = b64decode(pcm_data_base64)
+        rate_match = _PCM_RATE_PATTERN.search(source_mime_type)
+        sample_rate = int(rate_match.group(1)) if rate_match else _PCM_DEFAULT_SAMPLE_RATE_HZ
+
+        buffer = BytesIO()
+        with wave.open(buffer, "wb") as wav_file:
+            wav_file.setnchannels(_PCM_CHANNELS)
+            wav_file.setsampwidth(_PCM_SAMPLE_WIDTH_BYTES)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(pcm_bytes)
+
+        return b64encode(buffer.getvalue()).decode("ascii")
 
     @staticmethod
     def _extract_error_message(response: requests.Response) -> str:

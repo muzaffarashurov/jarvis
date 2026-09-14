@@ -121,6 +121,7 @@ from src.modules.telegram_module import TelegramModule
 from src.modules.runtime_module import RuntimeModule
 from src.services.agent_service import AgentService
 from src.services.ai_service import AIService
+from src.services.audio_generation_service import AudioGenerationService
 from src.services.image_generation_service import ImageGenerationService
 from src.services.text_generation_service import TextGenerationService
 from src.services.collaboration_service import CollaborationService
@@ -837,6 +838,24 @@ class Bootstrap:
             request_executor=ai_request_executor,
             enabled=bool(config.get("image_generation.enabled", False)),
             fallback_enabled=bool(config.get("image_generation.fallback_enabled", False)),
+        )
+
+        # EP-084 Audio & Speech Generation Integration. Standalone,
+        # non-conversational content-generation entry point mirroring
+        # `text_generation_service`/`image_generation_service` exactly
+        # -- same shared `ai_request_executor` (so there remains
+        # exactly one fallback/retry implementation in the repository,
+        # EP084_DESIGN.md Section 13), no ConversationManager/
+        # ContextManager/PromptManager dependency, no CommandRouter
+        # registration (CLI exposure deferred to EP-087 or a later EP,
+        # EP084_DESIGN.md Section 20). Stored for a future in-process
+        # consumer, exactly like `text_generation_service`/
+        # `image_generation_service` above.
+        self._audio_generation_service = AudioGenerationService(
+            provider_manager=ai_provider_manager,
+            request_executor=ai_request_executor,
+            enabled=bool(config.get("audio_generation.enabled", False)),
+            fallback_enabled=bool(config.get("audio_generation.fallback_enabled", False)),
         )
 
         # EP-054 Self Reflection. On-demand session/conversation

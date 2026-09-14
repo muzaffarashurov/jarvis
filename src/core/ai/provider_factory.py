@@ -214,6 +214,12 @@ class ProviderFactory:
         image_model = self._config.get("providers.gemini.image_model", None)
         if not isinstance(image_model, str):
             image_model = None
+        # EP-084 Audio & Speech Generation Integration (additive).
+        # None/empty means this GeminiProvider instance does not
+        # support speech generation.
+        audio_model = self._config.get("providers.gemini.audio_model", None)
+        if not isinstance(audio_model, str):
+            audio_model = None
 
         return GeminiProvider(
             enabled=enabled,
@@ -223,4 +229,5 @@ class ProviderFactory:
             max_tokens=int(max_tokens) if isinstance(max_tokens, (int, float)) else 4096,
             temperature=float(temperature) if isinstance(temperature, (int, float)) else 0.2,
             image_model=image_model,
+            audio_model=audio_model,
         )

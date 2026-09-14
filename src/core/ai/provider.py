@@ -32,6 +32,19 @@ single, shared validation rule every concrete provider applies to a
 non-`None` `temperature` override, so no provider is free to
 interpret an invalid value differently (`EP082_DESIGN.md` Section
 12.1).
+
+EP-083 (Image Generation Provider Integration) additively extends
+this contract with `supports_image_generation()`/`generate_image()`,
+for standalone image-generation callers (see
+`src/services/image_generation_service.py`). EP-084 (Audio & Speech
+Generation Integration) additively extends it again with
+`supports_speech_generation()`/`generate_speech()`, for standalone
+speech-generation callers (see
+`src/services/audio_generation_service.py`). Both pairs default to
+"unsupported"/"always raises" respectively, so every existing
+provider (including EP-014's placeholder providers) remains a valid
+`AIProvider` implementation without any changes other than the one
+concrete implementation each EP adds (GeminiProvider, in both cases).
 """
 
 from __future__ import annotations
@@ -158,6 +171,88 @@ class ImageGenerationResult:
     """
 
     images: tuple[GeneratedImage, ...]
+    model: str
+    latency_ms: float
+
+
+@dataclass(frozen=True)
+class SpeechGenerationRequest:
+    """A provider-independent request to generate spoken audio from text (EP-084).
+
+    Only fields with a plausible, common meaning across text-to-speech
+    APIs in general are included here -- provider-specific options
+    belong in that provider's own `providers.<n>.*` configuration, not
+    in this common contract (`EP084_DESIGN.md` Section 10), mirroring
+    `ImageGenerationRequest`'s own restraint (EP-083).
+
+    This dataclass performs no validation itself beyond the
+    immutability a frozen dataclass gives for free. Each concrete
+    `AIProvider.generate_speech()` implementation validates the fields
+    it can actually honor and raises `ProviderConfigurationError` for
+    anything it cannot -- the same layering `validate_temperature()`
+    and `generate_image()` already established.
+
+    Attributes:
+        text: The text to speak. Required, non-empty.
+        voice: A provider-defined voice name (e.g. "Kore"), or None to
+            use the provider's own default voice.
+        language: A best-effort language hint. Not every provider
+            exposes a structured language parameter for speech
+            generation (`EP084_DESIGN.md` Section 10) -- a provider
+            without one may instead steer language via a natural-
+            language instruction prepended to `text`. None means no
+            hint is supplied.
+        seed: Optional deterministic seed. None means no seed
+            requested (provider default randomness).
+    """
+
+    text: str
+    voice: str | None = None
+    language: str | None = None
+    seed: int | None = None
+
+
+@dataclass(frozen=True)
+class GeneratedAudio:
+    """One generated audio clip (EP-084).
+
+    In-memory only -- EP-084 introduces no file persistence
+    (`EP084_DESIGN.md` Section 9/11), mirroring `GeneratedImage`
+    (EP-083).
+
+    Attributes:
+        data_base64: The audio's bytes, base64-encoded. Per
+            `EP084_DESIGN.md` Section 9 (Owner Decision D2), these
+            bytes are a complete, directly playable WAV container --
+            never raw/headerless PCM -- regardless of the raw format a
+            provider's API itself returns.
+        mime_type: The audio's MIME type. Always "audio/wav" per
+            Owner Decision D2, independent of whatever MIME type the
+            originating provider response reported.
+    """
+
+    data_base64: str
+    mime_type: str
+
+
+@dataclass(frozen=True)
+class SpeechGenerationResult:
+    """Result of a successful `AIProvider.generate_speech()` call (EP-084).
+
+    Mirrors `ImageGenerationResult`'s shape, replacing the plural
+    `images: tuple[GeneratedImage, ...]` with a singular
+    `audio: GeneratedAudio` -- the provider API in scope for EP-084
+    produces exactly one audio output per request, with no
+    `number_of_images`-equivalent "how many outputs" request
+    parameter (`EP084_DESIGN.md` Section 11).
+
+    Attributes:
+        audio: The generated audio.
+        model: The model identifier that produced `audio`.
+        latency_ms: Wall-clock time the request took, in milliseconds.
+    """
+
+    audio: GeneratedAudio
     model: str
     latency_ms: float
 
@@ -404,6 +499,45 @@ class AIProvider(ABC):
         """
         raise ProviderUnavailableError(
             f"Provider '{self.name()}' does not support image generation."
+        )
+
+    def supports_speech_generation(self) -> bool:
+        """Return whether this provider instance can generate speech (EP-084).
+
+        Base implementation always returns False. This is a narrow,
+        provider-level capability flag -- distinct from, and not a
+        replacement for, EP-069.4's Unified Capability Abstraction
+        (`src/core/capability/`), which catalogs external/internal
+        tools and services, not AI-provider content modalities
+        (`EP084_DESIGN.md` Section 3, mirroring `EP083_DESIGN.md`
+        Section 6's own distinction for `supports_image_generation()`).
+
+        Returns:
+            True if `generate_speech()` is meaningfully implemented by
+            this provider (and configured), False otherwise.
+        """
+        return False
+
+    def generate_speech(self, request: SpeechGenerationRequest) -> SpeechGenerationResult:
+        """Generate spoken audio from `request.text` (EP-084).
+
+        Base implementation always raises: this provider does not
+        implement speech generation. Providers that do (e.g.
+        GeminiProvider, when configured with a TTS-capable model) must
+        override this method and `supports_speech_generation()`.
+
+        Args:
+            request: The provider-independent speech-generation
+                request.
+
+        Returns:
+            The provider's reply.
+
+        Raises:
+            ProviderError: Always, unless overridden.
+        """
+        raise ProviderUnavailableError(
+            f"Provider '{self.name()}' does not support speech generation."
         )
 
     def ping(self) -> PingResult:

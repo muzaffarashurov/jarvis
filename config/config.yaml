@@ -663,6 +663,26 @@ image_generation:
   # requests are a distinct calling context.
   fallback_enabled: false
 
+audio_generation:
+  # EP-084 Audio & Speech Generation Integration. Additive namespace
+  # for Phase C (AI Content Platform); does not alter 'ai:',
+  # 'providers:', 'content_generation:', or 'image_generation:'
+  # semantics above. Governs standalone (non-conversational)
+  # speech-generation requests only -- see
+  # src/services/audio_generation_service.py and
+  # docs/architecture/designs/EP084_DESIGN.md. Disabled by default,
+  # matching 'image_generation.enabled''s own off-by-default
+  # precedent.
+  enabled: false
+  # Whether AudioGenerationService requests may retry a fallback-
+  # eligible provider failure against another speech-capable
+  # candidate, reusing the same EP-069.1/.2/.3 fallback/cost-aware
+  # ordering 'ai:' uses. Independent of 'ai.fallback_enabled'/
+  # 'content_generation.fallback_enabled'/
+  # 'image_generation.fallback_enabled' above, since speech-generation
+  # requests are a distinct calling context.
+  fallback_enabled: false
+
 conversation:
   # EP-016 Conversation Engine. Provider-independent chat session
   # storage shared by the CLI, Voice Assistant, Telegram, Desktop UI,
@@ -885,6 +905,12 @@ providers:
     # returns False). Distinct from 'model' above, which remains the
     # text model EP-082 already uses.
     # image_model: "gemini-3.1-flash-image"
+    # EP-084 Audio & Speech Generation Integration. The TTS-capable
+    # Gemini model identifier. Absent/empty means this provider does
+    # not support speech generation (supports_speech_generation()
+    # returns False). Distinct from 'model' (text) and 'image_model'
+    # (EP-083) above.
+    # audio_model: "gemini-2.5-flash-preview-tts"
   ollama:
     enabled: false
     endpoint: "http://localhost:11434"

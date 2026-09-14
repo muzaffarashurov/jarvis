@@ -73,6 +73,7 @@ import tests.EP069_3.test_cost_aware_provider_selection
 import tests.EP069_4.test_unified_capability_abstraction
 import tests.EP069_5.test_capability_discovery_engine
 import tests.EP069_6.test_capability_security_engine
+import tests.EP069_7.test_capability_lifecycle_registry
 import tests.EP082.test_text_generation_provider_integration
 import tests.EP083.test_image_generation_provider_integration
 import tests.EP092.test_personal_data_collection_framework

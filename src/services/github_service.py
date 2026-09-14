@@ -126,7 +126,7 @@ class GitHubService:
             GitHubAPIError: If GitHub returns any other non-2xx status,
                 or an unparseable response body.
         """
-        path = f"/repos/{quote(owner)}/{quote(repo)}"
+        path = f"/repos/{quote(owner, safe='')}/{quote(repo, safe='')}"
         return self._get("get_repository", path)
 
     def list_repositories(self) -> GitHubResult:
@@ -179,7 +179,7 @@ class GitHubService:
             GitHubAPIError: If GitHub returns any other non-2xx status,
                 or an unparseable response body.
         """
-        path = f"/repos/{quote(owner)}/{quote(repo)}/issues"
+        path = f"/repos/{quote(owner, safe='')}/{quote(repo, safe='')}/issues"
         return self._get("list_issues", path)
 
     def get_issue(self, owner: str, repo: str, number: int) -> GitHubResult:
@@ -205,7 +205,7 @@ class GitHubService:
             GitHubAPIError: If GitHub returns any other non-2xx status,
                 or an unparseable response body.
         """
-        path = f"/repos/{quote(owner)}/{quote(repo)}/issues/{quote(str(number))}"
+        path = f"/repos/{quote(owner, safe='')}/{quote(repo, safe='')}/issues/{quote(str(number), safe='')}"
         return self._get("get_issue", path)
 
     def list_pull_requests(self, owner: str, repo: str) -> GitHubResult:
@@ -231,7 +231,7 @@ class GitHubService:
             GitHubAPIError: If GitHub returns any other non-2xx status,
                 or an unparseable response body.
         """
-        path = f"/repos/{quote(owner)}/{quote(repo)}/pulls"
+        path = f"/repos/{quote(owner, safe='')}/{quote(repo, safe='')}/pulls"
         return self._get("list_pull_requests", path)
 
     def get_pull_request(self, owner: str, repo: str, number: int) -> GitHubResult:
@@ -258,7 +258,7 @@ class GitHubService:
             GitHubAPIError: If GitHub returns any other non-2xx status,
                 or an unparseable response body.
         """
-        path = f"/repos/{quote(owner)}/{quote(repo)}/pulls/{quote(str(number))}"
+        path = f"/repos/{quote(owner, safe='')}/{quote(repo, safe='')}/pulls/{quote(str(number), safe='')}"
         return self._get("get_pull_request", path)
 
     def list_commits(self, owner: str, repo: str) -> GitHubResult:
@@ -284,7 +284,7 @@ class GitHubService:
             GitHubAPIError: If GitHub returns any other non-2xx status,
                 or an unparseable response body.
         """
-        path = f"/repos/{quote(owner)}/{quote(repo)}/commits"
+        path = f"/repos/{quote(owner, safe='')}/{quote(repo, safe='')}/commits"
         return self._get("list_commits", path)
 
     def get_commit(self, owner: str, repo: str, sha: str) -> GitHubResult:
@@ -310,7 +310,7 @@ class GitHubService:
             GitHubAPIError: If GitHub returns any other non-2xx status,
                 or an unparseable response body.
         """
-        path = f"/repos/{quote(owner)}/{quote(repo)}/commits/{quote(sha)}"
+        path = f"/repos/{quote(owner, safe='')}/{quote(repo, safe='')}/commits/{quote(sha, safe='')}"
         return self._get("get_commit", path)
 
     # ---------- Internal helpers ----------

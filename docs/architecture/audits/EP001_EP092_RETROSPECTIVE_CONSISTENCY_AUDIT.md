@@ -499,3 +499,77 @@ During **this specific documentation-export task**:
 - **Only this new retrospective audit report — `docs/architecture/audits/EP001_EP092_RETROSPECTIVE_CONSISTENCY_AUDIT.md` — was created.**
 
 No bug identified in this document (EP039, EP041, or otherwise) was fixed, worked around, or otherwise altered in the course of producing this report.
+
+---
+
+## Verification Re-Audit — Material Drift Closure
+
+> **Added after the original audit above, as a separate, clearly-dated follow-on pass.** This section does not alter, retract, or soften anything recorded above. The sequence for all three findings is: **Original Audit → Material Drift Found → Repair (performed in separate, later tasks) → this Verification Re-Audit → Resolved.** This section is itself a **verification-only** pass: no source file, test file, or configuration file was modified while producing it — only this document was edited, to append this section.
+
+**Re-audit date:** 2026-09-14 (same day as the original audit; repairs were applied in three intervening, separately-scoped tasks between the original audit and this verification pass).
+
+**Re-audit scope:** Narrowly limited to the three MATERIAL DRIFT / infrastructure findings recorded above (EP039, EP041, TestRegistry collision) and their regression protection. This was **not** a repeat of the full EP-001–EP-092 audit.
+
+### EP039 — GitHub Service URL Path-Segment Quoting
+
+- **Original defect (as recorded above, §6.1):** `src/services/github_service.py` called `urllib.parse.quote()` on single URL path segments (`owner`, `repo`, issue/PR `number`, commit `sha`) without `safe=''`, so `/` inside a value was left unencoded instead of becoming `%2F`. The audit document itself incorrectly claimed this was handled correctly. `tests/EP039/test_github_service.py::_test_path_segments_are_url_quoted` failed on isolated execution (43 passed / 1 failed).
+- **Verification performed:** Every `quote(` call site in `src/services/github_service.py` was enumerated directly (`grep -n "quote("`) — all 7 call sites, across `get_repository`, `list_issues`, `get_issue`, `list_pull_requests`, `get_pull_request`, `list_commits`, and `get_commit`, were inspected individually. The file was also checked for any alternate/bypass path-construction that skips `quote()` entirely, and for any risk of double-encoding (a value being passed through `quote()` twice) — neither was found.
+- **Current implementation status:** All 7 call sites now read `quote(value, safe='')`. No remaining call site uses the pre-fix default (`safe='/'`). No bypass exists. No double-encoding risk was found — each identifier is quoted exactly once, at the point it is interpolated into the path.
+- **Exact test results:**
+  - Isolated `test_github_module.py`: **36 passed / 0 failed / 0 skipped** (unchanged from pre-repair baseline — confirms no collateral regression to unrelated module-level behavior)
+  - Isolated `test_github_service.py`: **44 passed / 0 failed / 0 skipped** (up from 43 passed / 1 failed pre-repair — the previously-failing `_test_path_segments_are_url_quoted` now passes)
+  - Aggregate `TestRunner.run("EP039")` (exercising the now-repaired `TestRegistry`, so both suites are genuinely included, not just one): **80 passed / 0 failed / 0 skipped** — exactly equal to 36 + 44, confirming both registered suites were actually executed, not just one.
+- **Final verdict: `RESOLVED`**
+
+### EP041 — Discord Service URL Path-Segment Quoting
+
+- **Original defect (as recorded above, §6.2):** `src/services/discord_service.py` had the identical defect class in `quote()` calls for `guild_id`, `channel_id`, `user_id`, `message_id`. The audit document explicitly (and incorrectly) claimed its own regression test "confirm[ed] ... %2F encoding." `tests/EP041/test_discord_service.py::_test_path_segments_are_url_quoted` failed on isolated execution (40 passed / 1 failed).
+- **Verification performed:** Every `quote(` call site in `src/services/discord_service.py` was enumerated directly — all 5 call sites, across `get_guild`, `list_guild_channels`, `get_channel`, `get_guild_member`, and `get_message`, were inspected individually. Checked for bypass path-construction and double-encoding risk — neither was found. No query-parameter `quote()` usage exists anywhere in this file, so the fix correctly did not need to distinguish path segments from query parameters (there are no query-parameter call sites to distinguish from).
+- **Current implementation status:** All 5 call sites now read `quote(str(value), safe='')`. No remaining call site uses the pre-fix default. No bypass. No double-encoding.
+- **Exact test results:**
+  - Isolated `test_discord_module.py`: **39 passed / 0 failed / 0 skipped** (unchanged from pre-repair baseline)
+  - Isolated `test_discord_service.py`: **41 passed / 0 failed / 0 skipped** (up from 40 passed / 1 failed pre-repair — `_test_path_segments_are_url_quoted` now passes)
+  - Aggregate `TestRunner.run("EP041")` (via the repaired `TestRegistry`): **80 passed / 0 failed / 0 skipped** — exactly equal to 39 + 41, confirming both registered suites were actually executed.
+- **Final verdict: `RESOLVED`**
+
+### TestRegistry Collision — EP038–EP042
+
+- **Original defect (as recorded above, §7):** `TestRegistry.register()` keyed `_tests` by `NAME.upper()` and stored exactly one class per key; a second class registered under an already-used name silently overwrote the first. This affected EP038, EP039, EP040, EP041, and EP042 (each split across a `_module.py`/`_service.py` file pair sharing one bare `NAME`), and was the direct mechanism by which the EP039 and EP041 defects above went undetected through every historical audit and regression run.
+- **Current registry behavior, verified directly against the source:**
+  - `src/testing/registry.py`: `_tests` is now `Dict[str, List[Type[BaseTest]]]`. `register()` appends to the list at a given key (guarding against appending the exact same class object twice) instead of overwriting — confirmed by direct inspection of the current source.
+  - `get(name)` remains backward compatible: still returns a single class (the first registered under that name), preserving every existing identity check elsewhere (e.g. `tests/EP036/test_background_worker_module.py`'s `TestRegistry.get("EP036") is BackgroundWorkerPoolTest`) and every single-registrant name's prior behavior.
+  - `get_all(name)` is a new method returning every class registered under a name (verified to return `[]`, never `None`, for an unregistered name).
+  - `all()` is now flattened across every name's full list (previously it silently dropped collided suites from `run_all()` too, in exactly the same way `get()` did for single-name lookups — this was an additional consequence of the original defect not called out by name in the original audit, discovered and fixed as part of the same repair).
+  - `src/testing/runner.py`: `TestRunner.run(name)` now calls `get_all()` and executes **every** returned class, printing each suite's own report individually plus an explicit "Combined total" block when more than one suite shares a name, and returns an aggregate `TestResult` summing passed/failed/skipped/errors across all of them. For a name with exactly one registrant (the large majority of names), the loop runs once and behaves identically to the pre-repair implementation.
+  - `src/modules/test_module.py`: one import line added, registering the new `tests/testing/test_registry_multi_suite.py` regression suite so it is discoverable through the normal `test` command like every other suite. No other change to this file.
+- **Regression test genuinely detects the original bug — verified, not assumed.** `tests/testing/test_registry_multi_suite.py` was inspected line-by-line and confirmed to cover: duplicate-`NAME` registration (via two synthetic throwaway classes), preservation of both, `get()` backward compatibility, `get_all()` correctness, aggregate execution via `TestRunner`, EP038–EP042 multi-suite discovery (`get_all(ep)` returns exactly 2 for each), EP039/EP041 aggregate-equals-sum-of-isolated checks, and a single-suite-EP (EP037) non-regression check. **This claim was independently proven, not just asserted:** the regression suite was run against a disposable, `/tmp`-only reconstruction of the pre-repair `TestRegistry` (everything else, including the already-fixed `github_service.py`/`discord_service.py`, left untouched) — the real repository was never modified for this proof. Against that reconstructed old registry, **11 of the suite's assertions failed immediately** (collision-retention, `get()`-identity, `get_all()`-correctness, aggregate-summation, and all five EP038–EP042 multi-suite-registration checks), demonstrating the regression suite is not a suite that would trivially pass regardless of implementation — it specifically and directly detects the original collision defect.
+- **Regression suite result (against the current, repaired registry): 24 passed / 0 failed / 0 skipped.**
+- **EP038–EP042 aggregate verification (via `TestRunner.run(ep)`, current repaired registry):**
+
+  | EP | Suites registered | Individual results | Sum of individual | Aggregate via `TestRunner.run()` | Match |
+  |---|---|---|---|---|---|
+  | EP038 | 2 (`GitModuleTest`, `GitServiceTest`) | 30/0/0, 25/0/0 | 55/0/0 | 55/0/0 | Yes |
+  | EP039 | 2 (`GitHubModuleTest`, `GitHubServiceTest`) | 36/0/0, 44/0/0 | 80/0/0 | 80/0/0 | Yes |
+  | EP040 | 2 (`TelegramInfoModuleTest`, `TelegramInfoServiceTest`) | 25/0/0, 30/0/0 | 55/0/0 | 55/0/0 | Yes |
+  | EP041 | 2 (`DiscordModuleTest`, `DiscordServiceTest`) | 39/0/0, 41/0/0 | 80/0/0 | 80/0/0 | Yes |
+  | EP042 | 2 (`EmailModuleTest`, `EmailServiceTest`) | 28/0/0, 55/0/0 | 83/0/0 | 83/0/0 | Yes |
+
+  Every aggregate exactly equals the sum of its individual suites — no suite is being silently dropped by the normal `test EPxxx` path any longer.
+- **Single-suite / distinct-name sanity checks (non-regression confirmation):** EP037 (single suite): 87/0/0, unchanged. EP036 (three genuinely distinct names, never a collision): `EP036` 101/0/0, `EP036-STEP2` 48/0/0, `EP036-STEP3` 53/0/0 — all exact matches to the pre-repair baseline recorded in the original audit above.
+- **Final verdict: `RESOLVED`**
+
+### Overall Verification Verdict
+
+## MATERIAL DRIFT CLOSED
+
+All three previously identified MATERIAL DRIFT / infrastructure findings — EP039, EP041, and the TestRegistry multi-suite collision that had concealed both — were independently re-verified directly against the current repository state (not merely trusted from the prior repair reports) and are confirmed resolved:
+
+- EP039: 7/7 relevant call sites corrected, isolated and aggregate tests green, regression assertion specifically re-checked and passing.
+- EP041: 5/5 relevant call sites corrected, isolated and aggregate tests green, regression assertion specifically re-checked and passing.
+- TestRegistry: collision mechanism structurally fixed at its root (list-per-name storage, non-overwriting registration, `get_all()`, `TestRunner` executing every registered suite), proven — not assumed — to actually detect the original bug via a disposable old-registry reconstruction, and confirmed to introduce no regression for any single-suite or distinct-name EP.
+
+No new defect was discovered during this verification pass that would keep any of the three findings open, and no scope beyond these three findings and their direct regression protection was audited in this pass.
+
+### Verification Scope Note
+
+This verification re-audit modified **only** this document (`EP001_EP092_RETROSPECTIVE_CONSISTENCY_AUDIT.md`, to append this section). No source file, test file, configuration file, or other documentation file was created, modified, or deleted while producing this section. The one disposable registry reconstruction used to prove the regression suite's detection power (see "TestRegistry Collision" above) was created and destroyed entirely under `/tmp`, outside the repository working tree, and never touched any tracked file. No `git commit`, `git push`, branch creation, or Git history modification was performed.

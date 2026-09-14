@@ -122,7 +122,7 @@ class DiscordService:
             DiscordAPIError: If Discord returns any other non-2xx
                 status, or an unparseable response body.
         """
-        path = f"/guilds/{quote(str(guild_id))}"
+        path = f"/guilds/{quote(str(guild_id), safe='')}"
         return self._get("get_guild", path)
 
     def list_guild_channels(self, guild_id: str) -> DiscordResult:
@@ -148,7 +148,7 @@ class DiscordService:
             DiscordAPIError: If Discord returns any other non-2xx
                 status, or an unparseable response body.
         """
-        path = f"/guilds/{quote(str(guild_id))}/channels"
+        path = f"/guilds/{quote(str(guild_id), safe='')}/channels"
         return self._get("list_guild_channels", path)
 
     def get_channel(self, channel_id: str) -> DiscordResult:
@@ -173,7 +173,7 @@ class DiscordService:
             DiscordAPIError: If Discord returns any other non-2xx
                 status, or an unparseable response body.
         """
-        path = f"/channels/{quote(str(channel_id))}"
+        path = f"/channels/{quote(str(channel_id), safe='')}"
         return self._get("get_channel", path)
 
     def get_guild_member(self, guild_id: str, user_id: str) -> DiscordResult:
@@ -200,7 +200,7 @@ class DiscordService:
             DiscordAPIError: If Discord returns any other non-2xx
                 status, or an unparseable response body.
         """
-        path = f"/guilds/{quote(str(guild_id))}/members/{quote(str(user_id))}"
+        path = f"/guilds/{quote(str(guild_id), safe='')}/members/{quote(str(user_id), safe='')}"
         return self._get("get_guild_member", path)
 
     def get_message(self, channel_id: str, message_id: str) -> DiscordResult:
@@ -226,7 +226,7 @@ class DiscordService:
             DiscordAPIError: If Discord returns any other non-2xx
                 status, or an unparseable response body.
         """
-        path = f"/channels/{quote(str(channel_id))}/messages/{quote(str(message_id))}"
+        path = f"/channels/{quote(str(channel_id), safe='')}/messages/{quote(str(message_id), safe='')}"
         return self._get("get_message", path)
 
     # ---------- Internal helpers ----------

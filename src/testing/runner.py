@@ -19,24 +19,49 @@ class TestRunner:
 
     def run(self, suite_name: str) -> TestResult:
 
-        suite_class = TestRegistry.get(suite_name)
+        suite_classes = TestRegistry.get_all(suite_name)
 
-        if suite_class is None:
+        if not suite_classes:
             raise ValueError(f"Unknown test suite: {suite_name}")
 
-        logger.info(f"Running test suite: {suite_name}")
+        logger.info(
+            f"Running test suite: {suite_name} "
+            f"({len(suite_classes)} suite class(es) registered under this name)"
+        )
 
-        suite = suite_class()
+        aggregate = TestResult(suite=suite_name)
 
-        started = time.perf_counter()
+        for suite_class in suite_classes:
 
-        result = suite.run()
+            logger.info(
+                f"  -> executing {suite_class.__module__}.{suite_class.__qualname__} "
+                f"(registered as {suite_name})"
+            )
 
-        result.duration = time.perf_counter() - started
+            suite = suite_class()
 
-        TestReport.print(result)
+            started = time.perf_counter()
 
-        return result
+            result = suite.run()
+
+            result.duration = time.perf_counter() - started
+
+            TestReport.print(result)
+
+            aggregate.passed += result.passed
+            aggregate.failed += result.failed
+            aggregate.skipped += result.skipped
+            aggregate.duration += result.duration
+            aggregate.errors.extend(result.errors)
+
+        if len(suite_classes) > 1:
+            # More than one suite shares this name: print an explicit
+            # combined total in addition to each suite's own report
+            # above, so it is visible that every one of them ran.
+            print(f"Combined total for {suite_name} ({len(suite_classes)} suites):")
+            TestReport.print(aggregate)
+
+        return aggregate
 
     def run_all(self) -> list[TestResult]:
 

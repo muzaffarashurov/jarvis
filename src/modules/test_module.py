@@ -78,6 +78,7 @@ import tests.EP082.test_text_generation_provider_integration
 import tests.EP083.test_image_generation_provider_integration
 import tests.EP084.test_audio_generation_provider_integration
 import tests.EP092.test_personal_data_collection_framework
+import tests.EP093.test_electricity_gas_monitoring
 import tests.testing.test_registry_multi_suite
 
 class TestModule(CommandModule):

@@ -112,6 +112,7 @@ from src.modules.invoice_module import InvoiceModule
 from src.modules.knowledge_module import KnowledgeModule
 from src.modules.long_term_memory_module import LongTermMemoryModule
 from src.modules.memory_module import MemoryModule
+from src.modules.personal_data_module import PersonalDataModule
 from src.modules.plugin_module import PluginModule
 from src.modules.process_module import ProcessModule
 from src.modules.rag_module import RagModule
@@ -133,6 +134,9 @@ from src.services.invoice_service import InvoiceService
 from src.services.knowledge_service import KnowledgeService
 from src.services.long_term_memory_service import LongTermMemoryService
 from src.services.memory_service import MemoryService
+from src.services.personal_data_service import PersonalDataService
+from src.core.personal_data.sources.electricity_source import ElectricityCsvSource
+from src.core.personal_data.sources.gas_source import GasCsvSource
 from src.services.planning_service import PlanningService
 from src.services.plan_execution_service import PlanExecutionService
 from src.services.tool_service import ToolService
@@ -424,6 +428,7 @@ class Bootstrap:
         self._memory_service: MemoryService | None = None
         self._knowledge_service: KnowledgeService | None = None
         self._long_term_memory_service: LongTermMemoryService | None = None
+        self._personal_data_service: PersonalDataService | None = None
         self._index_service: IndexService | None = None
         self._embedding_service: EmbeddingService | None = None
         self._rag_service: RagService | None = None
@@ -671,6 +676,40 @@ class Bootstrap:
                     "config/config.yaml and restart to re-enable it."
                 )
                 self._long_term_memory_service = None
+
+        # EP-092: Personal Data Collection Framework. Depends only on
+        # Config -- no dependency on Knowledge Base, Memory,
+        # Embedding, Retrieval, RAG, or Semantic Search (see
+        # EP092_DESIGN.md §15). PersonalDataService builds its own
+        # default PersonalDataManager/JsonlPersonalDataProvider
+        # internally; construction cannot fail under normal
+        # circumstances (unlike Memory/Knowledge/Long-Term Memory
+        # above), so no try/except is needed here, matching the
+        # unconditional wiring used for ProjectIndexer/
+        # ConversationManager below.
+        #
+        # EP-093: Electricity & Gas Monitoring is the first concrete
+        # PersonalDataSource consumer (EP093_DESIGN.md). Registering
+        # ElectricityCsvSource/GasCsvSource is gated on
+        # 'personal_data_electricity_gas.enabled' (EP-093's own
+        # opt-in, independent of 'personal_data.enabled_categories',
+        # EP-092's own consent gate) -- the PersonalDataModule/
+        # PersonalDataService themselves are always available so
+        # 'personal_data status'/'query' work regardless.
+        personal_data_service = PersonalDataService(config=config)
+        self._personal_data_service = personal_data_service
+        electricity_gas_enabled = bool(config.get("personal_data_electricity_gas.enabled", False))
+        if electricity_gas_enabled:
+            for source in (ElectricityCsvSource(), GasCsvSource()):
+                register_result = personal_data_service.register_source(source)
+                if not register_result.success:
+                    logger.error(
+                        f"Electricity & Gas Monitoring: failed to register "
+                        f"'{source.source_id}': {register_result.message}"
+                    )
+        router.register(
+            PersonalDataModule(personal_data_service, electricity_gas_enabled=electricity_gas_enabled)
+        )
 
         # EP-019: Project Index Engine integration. Depends only on
         # Config (to resolve 'indexing.*') and ProjectIndexer itself
@@ -2775,6 +2814,16 @@ class Bootstrap:
             wiring).
         """
         return self._long_term_memory_service
+
+    @property
+    def personal_data_service(self) -> PersonalDataService | None:
+        """Return the PersonalDataService built for EP-092/EP-093, if available.
+
+        Returns:
+            The PersonalDataService instance, or None if `run()` has
+            not completed yet.
+        """
+        return self._personal_data_service
 
     @property
     def index_service(self) -> IndexService | None:

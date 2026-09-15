@@ -75,6 +75,27 @@ personal_data:
   enabled_categories: []
   storage_root: "data/database/personal_data"
 
+personal_data_electricity_gas:
+  # EP-093 Electricity & Gas Monitoring. Configures which concrete
+  # PersonalDataSource(s) this EP registers with EP-092's
+  # PersonalDataManager (see src/core/personal_data/sources/). Does
+  # not affect whether personal_data.* itself is enabled, or which
+  # categories are allowed -- those remain governed exclusively by
+  # the personal_data: block above ('enabled_categories' must
+  # separately include "electricity_consumption" / "gas_consumption"
+  # for anything collected here to actually be stored -- EP-092's
+  # consent gate, unchanged).
+  enabled: false          # off by default; the operator opts in explicitly
+  acquisition: "manual"   # V1 (EP-093 STEP 1 design §6.2/§6.4): manual/CSV
+                          # import via "personal_data record-reading"/
+                          # "import-csv". A future named vendor value may be
+                          # added once the Owner supplies one (§6.6); no
+                          # such value exists or is guessed today.
+  csv_import_path: ""     # optional: a default CSV file path (currently
+                          # unused by STEP 2 -- "personal_data import-csv"
+                          # takes its path as a command argument instead;
+                          # reserved for a future default-path convenience).
+
 orchestrator:
   skills_enabled: []
 

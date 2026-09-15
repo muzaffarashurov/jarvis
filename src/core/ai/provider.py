@@ -40,11 +40,20 @@ for standalone image-generation callers (see
 Generation Integration) additively extends it again with
 `supports_speech_generation()`/`generate_speech()`, for standalone
 speech-generation callers (see
-`src/services/audio_generation_service.py`). Both pairs default to
+`src/services/audio_generation_service.py`). EP-085 (Video Generation
+Provider Integration) additively extends it again with
+`supports_video_generation()`/`generate_video()`, for standalone
+video-generation callers (see
+`src/services/video_generation_service.py`) -- unlike the prior three,
+`generate_video()`'s concrete implementation is expected to be a
+long-running, multi-HTTP-call operation internally, though its method
+signature remains a single, synchronous call (`EP085_DESIGN.md`
+Section 6/22, Owner Decision D1). All extension pairs default to
 "unsupported"/"always raises" respectively, so every existing
 provider (including EP-014's placeholder providers) remains a valid
 `AIProvider` implementation without any changes other than the one
-concrete implementation each EP adds (GeminiProvider, in both cases).
+concrete implementation each EP adds (GeminiProvider, in every case
+so far).
 """
 
 from __future__ import annotations
@@ -253,6 +262,103 @@ class SpeechGenerationResult:
     """
 
     audio: GeneratedAudio
+    model: str
+    latency_ms: float
+
+
+@dataclass(frozen=True)
+class VideoGenerationRequest:
+    """A provider-independent request to generate video from a text prompt (EP-085).
+
+    Fields are restricted to parameters independently confirmed, via
+    multiple current, authoritative sources during EP-085 STEP 1/2
+    research, to be real and stable across Veo's Developer-API
+    `predictLongRunning` request shape (`aspectRatio`,
+    `negativePrompt`, `seed`, `durationSeconds`) -- not invented
+    (`EP085_DESIGN.md` Section 9). Richer, less-universal controls
+    (reference images, first/last-frame interpolation, video
+    extension, multi-sample output, resolution, person-generation
+    policy) are deliberately excluded from this v1 contract, mirroring
+    `SpeechGenerationRequest`/`ImageGenerationRequest`'s own restraint
+    (`EP085_DESIGN.md` Section 9, DEFERRED).
+
+    This dataclass performs no validation itself beyond the
+    immutability a frozen dataclass gives for free -- the same
+    layering every other `*GenerationRequest` in this module already
+    established.
+
+    Attributes:
+        prompt: The text description of the video to generate.
+            Required, non-empty.
+        aspect_ratio: A provider-defined aspect ratio (e.g. "16:9",
+            "9:16"), or None to use the provider's own default.
+        duration_seconds: Requested clip duration in seconds, or None
+            to use the provider's own default.
+        negative_prompt: Content to steer the model away from, or
+            None.
+        seed: Optional deterministic seed. None means no seed
+            requested (provider default randomness).
+    """
+
+    prompt: str
+    aspect_ratio: str | None = None
+    duration_seconds: int | None = None
+    negative_prompt: str | None = None
+    seed: int | None = None
+
+
+@dataclass(frozen=True)
+class GeneratedVideo:
+    """A reference to one generated video (EP-085).
+
+    Deliberately reference-only -- Owner Decision D2
+    (`EP085_DESIGN.md` Section 11/22): unlike `GeneratedImage`/
+    `GeneratedAudio`, this never carries the video's bytes. Veo's
+    completed-operation response hands back a downloadable `uri`, not
+    inline base64 data, and video files are large enough (potentially
+    tens to hundreds of megabytes) that holding them in memory here
+    would be a materially different resource commitment than every
+    other `Generated*` type in this module makes. No file is ever
+    written to disk by this codebase to satisfy this type -- fetching
+    `uri`'s bytes, if ever needed, is entirely a future consumer's
+    responsibility, not this EP's.
+
+    Attributes:
+        uri: A URI that can be used to download the generated video.
+            Per Google's documented behavior, fetching it requires the
+            same 'providers.gemini.api_key' credential used to
+            generate it (an `x-goog-api-key` header) -- it is not a
+            plain, unauthenticated public URL. No expiry window for
+            this URI is documented by Google as of this EP's research;
+            treat it as potentially time-limited and do not assume it
+            remains valid indefinitely.
+        mime_type: The generated video's MIME type (e.g.
+            "video/mp4"), as reported by the provider.
+    """
+
+    uri: str
+    mime_type: str
+
+
+@dataclass(frozen=True)
+class VideoGenerationResult:
+    """Result of a successful `AIProvider.generate_video()` call (EP-085).
+
+    Mirrors `SpeechGenerationResult`'s shape, replacing `audio:
+    GeneratedAudio` with `video: GeneratedVideo`.
+
+    Attributes:
+        video: A reference to the generated video.
+        model: The model identifier that produced `video`.
+        latency_ms: Wall-clock time the request took, in milliseconds
+            -- for this EP, this spans the *entire* initiate-poll-
+            complete cycle (potentially minutes), not a single fast
+            HTTP call as every other `*GenerationResult.latency_ms` in
+            this module measures (`EP085_DESIGN.md` Section 9). Callers
+            must not assume this field is small.
+    """
+
+    video: GeneratedVideo
     model: str
     latency_ms: float
 
@@ -538,6 +644,52 @@ class AIProvider(ABC):
         """
         raise ProviderUnavailableError(
             f"Provider '{self.name()}' does not support speech generation."
+        )
+
+    def supports_video_generation(self) -> bool:
+        """Return whether this provider instance can generate video (EP-085).
+
+        Base implementation always returns False. Same narrow,
+        provider-level capability-flag pattern as
+        `supports_image_generation()`/`supports_speech_generation()`
+        -- distinct from, and not a replacement for, EP-069.4's
+        Unified Capability Abstraction (`src/core/capability/`).
+
+        Returns:
+            True if `generate_video()` is meaningfully implemented by
+            this provider (and configured), False otherwise.
+        """
+        return False
+
+    def generate_video(self, request: VideoGenerationRequest) -> VideoGenerationResult:
+        """Generate a video from `request.prompt` (EP-085).
+
+        Base implementation always raises: this provider does not
+        implement video generation. Providers that do (e.g.
+        GeminiProvider, when configured with a video-capable model)
+        must override this method and `supports_video_generation()`.
+
+        Unlike `ask()`/`generate_image()`/`generate_speech()`, a
+        concrete implementation of this method is expected to be a
+        long-running, multi-HTTP-call operation (initiate, then poll
+        until complete) that may block its caller for minutes rather
+        than seconds -- Owner Decision D1 (`EP085_DESIGN.md` Section
+        22) keeps this hidden behind a single, still-synchronous
+        method call rather than exposing a separate start/poll
+        contract.
+
+        Args:
+            request: The provider-independent video-generation
+                request.
+
+        Returns:
+            The provider's reply.
+
+        Raises:
+            ProviderError: Always, unless overridden.
+        """
+        raise ProviderUnavailableError(
+            f"Provider '{self.name()}' does not support video generation."
         )
 
     def ping(self) -> PingResult:

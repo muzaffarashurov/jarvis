@@ -220,6 +220,24 @@ class ProviderFactory:
         audio_model = self._config.get("providers.gemini.audio_model", None)
         if not isinstance(audio_model, str):
             audio_model = None
+        # EP-085 Video Generation Provider Integration (additive).
+        # None/empty means this GeminiProvider instance does not
+        # support video generation.
+        video_model = self._config.get("providers.gemini.video_model", None)
+        if not isinstance(video_model, str):
+            video_model = None
+        # EP-085: polling behavior lives under the top-level
+        # 'video_generation:' namespace (a service-wide generation
+        # policy), not 'providers.gemini.*' (a per-provider
+        # credential/model setting) -- EP085_DESIGN.md Section 15.
+        # This is the first time this factory reads outside a single
+        # provider's own config subtree; deliberate, per that design.
+        poll_interval_seconds = self._config.get("video_generation.poll_interval_seconds", 10)
+        if not isinstance(poll_interval_seconds, (int, float)):
+            poll_interval_seconds = 10
+        max_wait_seconds = self._config.get("video_generation.max_wait_seconds", 600)
+        if not isinstance(max_wait_seconds, (int, float)):
+            max_wait_seconds = 600
 
         return GeminiProvider(
             enabled=enabled,
@@ -230,4 +248,7 @@ class ProviderFactory:
             temperature=float(temperature) if isinstance(temperature, (int, float)) else 0.2,
             image_model=image_model,
             audio_model=audio_model,
+            video_model=video_model,
+            video_poll_interval_seconds=float(poll_interval_seconds),
+            video_max_wait_seconds=float(max_wait_seconds),
         )

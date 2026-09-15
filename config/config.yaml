@@ -704,6 +704,39 @@ audio_generation:
   # requests are a distinct calling context.
   fallback_enabled: false
 
+video_generation:
+  # EP-085 Video Generation Provider Integration. Additive namespace
+  # for Phase C (AI Content Platform); does not alter 'ai:',
+  # 'providers:', 'content_generation:', 'image_generation:', or
+  # 'audio_generation:' semantics above. Governs standalone
+  # (non-conversational) video-generation requests only -- see
+  # src/services/video_generation_service.py and
+  # docs/architecture/designs/EP085_DESIGN.md. Disabled by default,
+  # matching every prior modality's own off-by-default precedent.
+  enabled: false
+  # Whether VideoGenerationService requests may retry a fallback-
+  # eligible provider failure against another video-capable
+  # candidate. Defaults to false more firmly than for any prior
+  # modality: a video request may already have run for several
+  # minutes (initiate + poll) before failing, so retrying it against
+  # a fallback candidate pays that full multi-minute cost again.
+  # Independent of 'ai.fallback_enabled'/every other modality's own
+  # fallback flag.
+  fallback_enabled: false
+  # How long to wait, in seconds, between polling an in-progress
+  # video-generation operation for completion. 10 seconds matches
+  # Google's own current Veo documentation/examples. Must be
+  # positive -- GeminiProvider.generate_video() raises
+  # ProviderConfigurationError otherwise (a non-positive interval
+  # could otherwise spin in a tight loop).
+  poll_interval_seconds: 10
+  # The maximum total time, in seconds, to wait for a video-
+  # generation operation to complete before giving up
+  # (ProviderTimeoutError). Distinct from providers.gemini.timeout,
+  # which bounds a single HTTP call (the initiate call or one poll),
+  # not the overall multi-minute operation. Must be positive.
+  max_wait_seconds: 600
+
 conversation:
   # EP-016 Conversation Engine. Provider-independent chat session
   # storage shared by the CLI, Voice Assistant, Telegram, Desktop UI,
@@ -932,6 +965,15 @@ providers:
     # returns False). Distinct from 'model' (text) and 'image_model'
     # (EP-083) above.
     # audio_model: "gemini-2.5-flash-preview-tts"
+    # EP-085 Video Generation Provider Integration. The Veo-capable
+    # Gemini model identifier. Absent/empty means this provider does
+    # not support video generation (supports_video_generation()
+    # returns False). Distinct from 'model'/'image_model'/
+    # 'audio_model' above. See the top-level 'video_generation:'
+    # namespace for polling configuration (poll_interval_seconds/
+    # max_wait_seconds), which is a service-wide generation policy,
+    # not a per-provider setting.
+    # video_model: "veo-3.1-generate-preview"
   ollama:
     enabled: false
     endpoint: "http://localhost:11434"

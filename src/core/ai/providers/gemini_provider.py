@@ -55,6 +55,7 @@ from src.core.ai.provider import (
     AIProvider,
     GeneratedAudio,
     GeneratedImage,
+    GeneratedVideo,
     ImageGenerationRequest,
     ImageGenerationResult,
     ModelValidationResult,
@@ -71,6 +72,8 @@ from src.core.ai.provider import (
     ProviderUnavailableError,
     SpeechGenerationRequest,
     SpeechGenerationResult,
+    VideoGenerationRequest,
+    VideoGenerationResult,
     validate_temperature,
 )
 
@@ -97,6 +100,24 @@ _PCM_CHANNELS: int = 1  # mono
 _PCM_DEFAULT_SAMPLE_RATE_HZ: int = 24000
 _PCM_RATE_PATTERN = re.compile(r"rate=(\d+)")
 
+# EP-085: Veo's long-running-operation endpoints are NOT under
+# '.../v1beta/models' the way generateContent is -- 'predictLongRunning'
+# is (mirrors generateContent's own '{model}:method' shape), but the
+# operation-polling endpoint is 'v1beta/{operation_name}', where
+# 'operation_name' (e.g. "operations/generate_12345") is used exactly
+# as the API returned it, never reconstructed -- confirmed against
+# Google's own current, official Veo guide (ai.google.dev/gemini-api/
+# docs/veo) during EP-085 STEP 1/2 research, not assumed from the
+# generateContent pattern.
+_OPERATIONS_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
+_PREDICT_LONG_RUNNING_METHOD: str = "predictLongRunning"
+# Confirmed, current, documented Veo response MIME type across every
+# real-world example found during research; used only as a fallback
+# when a completed operation's video object does not itself report a
+# mimeType (no evidence one is ever absent, but never assumed
+# mandatory either).
+_DEFAULT_VIDEO_MIME_TYPE: str = "video/mp4"
+
 
 class GeminiProvider(AIProvider):
     """AIProvider implementation backed by the official Google Gemini API."""
@@ -111,6 +132,9 @@ class GeminiProvider(AIProvider):
         temperature: float,
         image_model: str | None = None,
         audio_model: str | None = None,
+        video_model: str | None = None,
+        video_poll_interval_seconds: float = 10.0,
+        video_max_wait_seconds: float = 600.0,
     ) -> None:
         """Initialize the GeminiProvider.
 
@@ -135,6 +159,26 @@ class GeminiProvider(AIProvider):
                 `supports_speech_generation()` returns False and
                 `generate_speech()` is never expected to be called.
                 Distinct from `model`/`image_model` above.
+            video_model: Value of 'providers.gemini.video_model'
+                (EP-085). None or empty means this provider instance
+                does not support video generation --
+                `supports_video_generation()` returns False and
+                `generate_video()` is never expected to be called.
+                Distinct from `model`/`image_model`/`audio_model`
+                above.
+            video_poll_interval_seconds: Value of
+                'video_generation.poll_interval_seconds' (EP-085) --
+                deliberately read from the top-level
+                'video_generation:' namespace, not
+                'providers.gemini.*', since this governs
+                `generate_video()`'s own polling policy rather than a
+                per-provider credential/model setting
+                (`EP085_DESIGN.md` Section 15). Must be positive; see
+                `generate_video()`.
+            video_max_wait_seconds: Value of
+                'video_generation.max_wait_seconds' (EP-085). Same
+                namespace note as `video_poll_interval_seconds`. Must
+                be positive; see `generate_video()`.
         """
         self._enabled = enabled
         self._api_key = api_key
@@ -144,6 +188,9 @@ class GeminiProvider(AIProvider):
         self._temperature = temperature
         self._image_model = image_model or None
         self._audio_model = audio_model or None
+        self._video_model = video_model or None
+        self._video_poll_interval_seconds = video_poll_interval_seconds
+        self._video_max_wait_seconds = video_max_wait_seconds
 
     # ---------- AIProvider: identity / configuration / health ----------
 
@@ -178,6 +225,7 @@ class GeminiProvider(AIProvider):
             "temperature": self._temperature,
             "image_model": self._image_model,
             "audio_model": self._audio_model,
+            "video_model": self._video_model,
         }
 
     def health(self) -> ProviderHealth:
@@ -475,6 +523,313 @@ class GeminiProvider(AIProvider):
             f"latency={latency_ms:.0f}ms)."
         )
         return result
+
+    # ---------- AIProvider: EP-085 video generation ----------
+
+    def supports_video_generation(self) -> bool:
+        """Return whether this provider instance is configured for video generation.
+
+        True only when 'providers.gemini.video_model' is set to a
+        non-empty value (EP-085) -- independent of `is_available()`
+        and of `supports_image_generation()`/`supports_speech_
+        generation()`. As with those, `True` here means this provider
+        instance is *configured* to attempt video generation, not
+        that a request is guaranteed to succeed.
+        """
+        return self._video_model is not None
+
+    def generate_video(self, request: VideoGenerationRequest) -> VideoGenerationResult:
+        """Generate a video via the Google Veo API and return a reference to it.
+
+        Implements Veo's documented long-running-operation lifecycle
+        (`EP085_DESIGN.md` Section 6, independently verified against
+        Google's current, official Veo guide during EP-085 STEP 1/2
+        research, not assumed from the image/speech pattern):
+
+            1. POST .../models/{video_model}:predictLongRunning with
+               {"instances": [{"prompt": ...}], "parameters": {...}}
+               -- returns an operation name, not a result.
+            2. Poll GET .../{operation_name} repeatedly (sleeping
+               `self._video_poll_interval_seconds` between attempts)
+               until the operation's "done" field is true, or until
+               `self._video_max_wait_seconds` has elapsed.
+            3. On completion, extract the generated video's `uri` from
+               `response.generateVideoResponse.generatedSamples[0].
+               video.uri`.
+
+        Per Owner Decision D2 (`EP085_DESIGN.md` Section 11/22,
+        approved), the returned `GeneratedVideo` carries only this
+        `uri` reference -- this method never downloads the video's
+        bytes, never base64-encodes anything, and writes nothing to
+        disk. `latency_ms` in the returned result spans this entire
+        multi-minute cycle, not a single HTTP call.
+
+        `request.aspect_ratio`/`negative_prompt`/`seed`/
+        `duration_seconds` map to Veo's own documented `parameters`
+        fields (`aspectRatio`/`negativePrompt`/`seed`/
+        `durationSeconds` respectively) and are included only when
+        actually requested, mirroring `generate_image()`/
+        `generate_speech()`'s "don't send what wasn't asked for"
+        convention.
+
+        Args:
+            request: The provider-independent video-generation
+                request.
+
+        Returns:
+            The provider's reply, containing a `GeneratedVideo`
+            reference.
+
+        Raises:
+            ProviderConfigurationError: If this provider is disabled,
+                missing its API key, not configured with a
+                'video_model', `request.prompt` is empty, or
+                `video_poll_interval_seconds`/`video_max_wait_seconds`
+                is not a positive number (Phase 4 hardening -- a
+                non-positive interval could otherwise spin in a tight
+                loop, and a non-positive max-wait could otherwise
+                never poll at all while still appearing to "try").
+            ProviderAuthenticationError: If the API key is rejected.
+            ProviderRateLimitError: If the API reports a rate limit.
+            ProviderTimeoutError: If a single HTTP call exceeds the
+                configured `timeout`, OR if the operation itself does
+                not complete within `video_max_wait_seconds` (a
+                distinct, EP-085-specific timeout dimension no prior
+                modality needed -- `EP085_DESIGN.md` Section 12).
+            ProviderNetworkError: If a request cannot reach the API.
+            ProviderUnavailableError: If the API is unreachable, the
+                configured video model is not found, the operation
+                completes with an error, or the completed operation's
+                response contains no usable video reference.
+        """
+        if not self._enabled:
+            raise ProviderConfigurationError("Provider 'gemini' is disabled.")
+        if not self._api_key.strip():
+            raise ProviderConfigurationError("Provider 'gemini' is missing 'api_key'.")
+        video_model = self._video_model
+        if video_model is None:
+            raise ProviderConfigurationError(
+                "Provider 'gemini' is not configured for video generation "
+                "(set 'providers.gemini.video_model')."
+            )
+        if not request.prompt.strip():
+            raise ProviderConfigurationError("'prompt' must not be empty.")
+        if self._video_poll_interval_seconds <= 0:
+            raise ProviderConfigurationError(
+                "'video_generation.poll_interval_seconds' must be positive "
+                f"(got {self._video_poll_interval_seconds!r})."
+            )
+        if self._video_max_wait_seconds <= 0:
+            raise ProviderConfigurationError(
+                "'video_generation.max_wait_seconds' must be positive "
+                f"(got {self._video_max_wait_seconds!r})."
+            )
+
+        parameters: dict[str, Any] = {}
+        if request.aspect_ratio:
+            parameters["aspectRatio"] = request.aspect_ratio
+        if request.duration_seconds is not None:
+            parameters["durationSeconds"] = request.duration_seconds
+        if request.negative_prompt:
+            parameters["negativePrompt"] = request.negative_prompt
+        if request.seed is not None:
+            parameters["seed"] = request.seed
+        payload: dict[str, Any] = {"instances": [{"prompt": request.prompt}]}
+        if parameters:
+            payload["parameters"] = parameters
+
+        headers = {
+            "x-goog-api-key": self._api_key,
+            "content-type": "application/json",
+        }
+        started = time.monotonic()
+        logger.info(f"AI video request started (provider='gemini', model='{video_model}').")
+
+        operation_name = self._start_video_operation(video_model, headers, payload)
+        operation_response = self._poll_video_operation(operation_name, headers)
+
+        latency_ms = (time.monotonic() - started) * 1000
+        result = self._parse_video_operation_response(operation_response, video_model, latency_ms)
+        logger.info(
+            f"AI video request finished (provider='gemini', model='{result.model}', "
+            f"latency={latency_ms:.0f}ms)."
+        )
+        return result
+
+    def _start_video_operation(
+        self, video_model: str, headers: dict[str, str], payload: dict[str, Any]
+    ) -> str:
+        """Issue Veo's initiate call and return the resulting operation name.
+
+        A 404 here means the configured 'video_model' was not found --
+        reported directly (mirrors `_parse_image_response()`'s/
+        `_parse_speech_response()`'s own 404 handling) so the error
+        names the correct configuration key.
+        """
+        url = f"{_API_BASE_URL}/{video_model}:{_PREDICT_LONG_RUNNING_METHOD}"
+        response = self._send_request("POST", url, headers, "video request", json=payload)
+        if response.status_code == 404:
+            raise ProviderUnavailableError(
+                f"Gemini video model '{video_model}' was not found for this API key "
+                "(HTTP 404). Check 'providers.gemini.video_model' in config.yaml."
+            )
+        self._raise_for_transport_status(response, "video request")
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ProviderUnavailableError("Gemini returned an invalid response body.") from exc
+
+        operation_name = data.get("name")
+        if not isinstance(operation_name, str) or not operation_name:
+            raise ProviderUnavailableError(
+                "Gemini video request did not return an operation name to poll."
+            )
+        return operation_name
+
+    def _poll_video_operation(
+        self, operation_name: str, headers: dict[str, str]
+    ) -> dict[str, Any]:
+        """Poll a Veo operation until it completes or `video_max_wait_seconds` elapses.
+
+        Phase 4 hardening: this loop has a hard maximum wait
+        (`self._video_max_wait_seconds`), sleeps a fixed, explicit
+        interval (`self._video_poll_interval_seconds`) between
+        attempts rather than busy-looping, and always terminates --
+        either by returning a completed operation or by raising
+        `ProviderTimeoutError`. `time.sleep`/`time.monotonic` are
+        called via the `time` module attribute (not imported by
+        name), so tests can deterministically patch
+        `src.core.ai.providers.gemini_provider.time.sleep` without
+        waiting for real wall-clock time.
+
+        STEP 3 audit hardening (F1): a single *transient* failure on
+        one poll attempt (`ProviderNetworkError`/`ProviderRateLimit
+        Error`/`ProviderTimeoutError`/`ProviderUnavailableError` --
+        the same fallback-eligible set `ProviderRequestExecutor._run()`
+        already recognizes) is treated exactly like an ordinary
+        "not done yet" response: logged, checked against the same
+        deadline, and retried after the same poll interval -- rather
+        than immediately discarding a Veo operation that may well
+        still be running successfully on Google's servers. Over a
+        multi-minute polling window with potentially dozens of poll
+        attempts, treating every transient blip as fatal would make
+        video generation far less reliable than a single fast text/
+        image/speech call, where one HTTP failure is a much rarer,
+        proportionally costlier event. This reuses the existing
+        deadline/sleep mechanism unchanged (no new retry counter, no
+        second retry framework, no change to `_run()` or to how
+        `execute_video()`'s own fallback works) -- a persistent
+        failure of this kind still surfaces, deterministically, as
+        `ProviderTimeoutError` once `video_max_wait_seconds` elapses.
+        A non-transient failure (`ProviderAuthenticationError`,
+        `ProviderConfigurationError`, or any other `ProviderError` not
+        in this set) still propagates immediately, unchanged --
+        retrying an invalid API key or bad configuration for minutes
+        before failing would be strictly worse, not more resilient.
+        Malformed JSON or an unexpected response shape also still
+        raises immediately, unchanged: those indicate a genuine
+        parsing/contract problem that retrying is not expected to
+        resolve, and silently retrying past one could mask a real
+        implementation defect.
+        """
+        deadline = time.monotonic() + self._video_max_wait_seconds
+        while True:
+            url = f"{_OPERATIONS_BASE_URL}/{operation_name}"
+            try:
+                response = self._send_request("GET", url, headers, "video operation poll")
+                self._raise_for_transport_status(response, "video operation poll")
+            except (
+                ProviderNetworkError,
+                ProviderRateLimitError,
+                ProviderTimeoutError,
+                ProviderUnavailableError,
+            ) as exc:
+                logger.error(
+                    f"Transient failure polling Gemini video operation, will retry: {exc}"
+                )
+            else:
+                try:
+                    data = response.json()
+                except ValueError as exc:
+                    raise ProviderUnavailableError(
+                        "Gemini returned an invalid response body while polling a video operation."
+                    ) from exc
+
+                if not isinstance(data, dict):
+                    raise ProviderUnavailableError(
+                        "Gemini returned a malformed response while polling a video operation."
+                    )
+                if data.get("done") is True:
+                    return data
+
+            if time.monotonic() >= deadline:
+                raise ProviderTimeoutError(
+                    "Video generation did not complete within "
+                    f"'video_generation.max_wait_seconds' ({self._video_max_wait_seconds}s)."
+                )
+            time.sleep(self._video_poll_interval_seconds)
+
+    def _parse_video_operation_response(
+        self, data: dict[str, Any], video_model: str, latency_ms: float
+    ) -> VideoGenerationResult:
+        """Translate a completed (`done: true`) Veo operation into a `VideoGenerationResult`.
+
+        A completed `google.longrunning.Operation` reports either a
+        successful `response` or an `error` -- never neither. An
+        `error` is a provider-generated status message (not user
+        prompt content or credentials), safe to include in the raised
+        exception, mirroring how every other provider-reported error
+        message in this file is already surfaced.
+        """
+        error = data.get("error")
+        if isinstance(error, dict) and error:
+            message = error.get("message", "unknown error")
+            raise ProviderUnavailableError(f"Gemini video generation failed: {message}")
+
+        video_ref = self._extract_video(data)
+        if video_ref is None:
+            # Covers both a malformed response and a "successfully
+            # done, but zero usable samples" outcome (e.g. every
+            # sample filtered by the provider's own content policy) --
+            # neither is a bug in this implementation to distinguish
+            # further; both are "no usable video came back".
+            raise ProviderUnavailableError(
+                "Gemini video request completed but the response contained no usable video."
+            )
+        uri, mime_type = video_ref
+        video = GeneratedVideo(uri=uri, mime_type=mime_type or _DEFAULT_VIDEO_MIME_TYPE)
+        return VideoGenerationResult(video=video, model=video_model, latency_ms=latency_ms)
+
+    @staticmethod
+    def _extract_video(data: dict[str, Any]) -> tuple[str, str | None] | None:
+        """Extract `(uri, mime_type)` from a completed Veo operation's response.
+
+        Returns None if no usable video is present -- mirrors
+        `_extract_images()`/`_extract_audio()`'s "return None on
+        anything unexpected, let the caller decide the error" shape.
+        `mime_type` is None when the provider's `video` object does
+        not itself report one (no evidence found during EP-085
+        research that it is ever absent, but never assumed
+        mandatory).
+        """
+        try:
+            samples = data["response"]["generateVideoResponse"]["generatedSamples"]
+        except (KeyError, TypeError):
+            return None
+        if not isinstance(samples, list):
+            return None
+        for sample in samples:
+            if not isinstance(sample, dict):
+                continue
+            video = sample.get("video")
+            if not isinstance(video, dict):
+                continue
+            uri = video.get("uri")
+            if isinstance(uri, str) and uri:
+                mime_type = video.get("mimeType")
+                return uri, (mime_type if isinstance(mime_type, str) and mime_type else None)
+        return None
 
     def ping(self) -> PingResult:
         """Check reachability, latency, model and authentication for this provider.

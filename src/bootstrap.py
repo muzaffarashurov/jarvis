@@ -125,6 +125,7 @@ from src.services.ai_service import AIService
 from src.services.audio_generation_service import AudioGenerationService
 from src.services.image_generation_service import ImageGenerationService
 from src.services.text_generation_service import TextGenerationService
+from src.services.video_generation_service import VideoGenerationService
 from src.services.collaboration_service import CollaborationService
 from src.services.context_compression_service import CompressionService
 from src.services.embedding_service import EmbeddingService
@@ -895,6 +896,26 @@ class Bootstrap:
             request_executor=ai_request_executor,
             enabled=bool(config.get("audio_generation.enabled", False)),
             fallback_enabled=bool(config.get("audio_generation.fallback_enabled", False)),
+        )
+
+        # EP-085 Video Generation Provider Integration. Standalone,
+        # non-conversational content-generation entry point mirroring
+        # `audio_generation_service` exactly -- same shared
+        # `ai_request_executor` (so there remains exactly one
+        # fallback/retry implementation in the repository,
+        # EP085_DESIGN.md Section 7), no ConversationManager/
+        # ContextManager/PromptManager dependency, no CommandRouter
+        # registration (CLI exposure deferred to EP-087 or a later EP,
+        # EP085_DESIGN.md Section 3). `fallback_enabled` defaults to
+        # False, deliberately more firmly than for any prior modality
+        # given the multi-minute cost of retrying a video request
+        # (EP085_DESIGN.md Section 13). Stored for a future in-process
+        # consumer, exactly like every other generation service above.
+        self._video_generation_service = VideoGenerationService(
+            provider_manager=ai_provider_manager,
+            request_executor=ai_request_executor,
+            enabled=bool(config.get("video_generation.enabled", False)),
+            fallback_enabled=bool(config.get("video_generation.fallback_enabled", False)),
         )
 
         # EP-054 Self Reflection. On-demand session/conversation

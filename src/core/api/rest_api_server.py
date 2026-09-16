@@ -47,7 +47,11 @@ with ``415 Unsupported Media Type``. This is deliberately simple --
 no content negotiation, no support for alternate media types -- while
 still catching the unambiguous case of a client explicitly declaring
 an incompatible payload (see EP043_STEP3_REPORT.md, "Content-Type
-Handling").
+Handling"). The request body is always drained from the socket
+*before* this (or any other) validation runs, even when the request
+will be rejected -- see ``_ApiRequestHandler._read_request_body``'s
+docstring for why this ordering is required to avoid a Windows
+``WinError 10054`` connection-reset race.
 
 Static File Serving (EP-045, optional): if constructed with a
 ``static_dir``, ``RestApiServer`` additionally serves plain static
@@ -160,16 +164,46 @@ class _ApiRequestHandler(BaseHTTPRequestHandler):
                 f"Unsupported Content-Type: {content_type!r}. Expected 'application/json'."
             )
 
-    def _read_json_body(self) -> dict[str, Any]:
+    def _read_request_body(self) -> bytes:
+        """Drain the request body off the socket and return the raw bytes.
+
+        This MUST be called -- and MUST complete -- for every POST to
+        ``/api/v1/commands`` before *any* response is sent for that
+        request, including a rejection response (e.g. 415). Sending a
+        response and letting the handler return (which closes the
+        connection, since ``protocol_version`` is not HTTP/1.1) while
+        the client's request body is still unread leaves unread bytes
+        in the socket's receive buffer; closing a socket in that state
+        causes the OS to abort the connection with a TCP RST instead
+        of a normal FIN. On Windows that RST surfaces to the client as
+        ``ConnectionResetError: [WinError 10054]`` -- either while
+        still reading the response, or later while reading the
+        response body -- depending on exactly when the RST arrives.
+        See EP-043 ROOT CAUSE report ("HTTP 415 / WinError 10054") for
+        the full analysis. Draining unconditionally, before any
+        validation can short-circuit the response, is what prevents
+        this for every rejection path, not just Content-Type 415.
+        """
         try:
             length = int(self.headers.get("Content-Length", 0) or 0)
         except ValueError as exc:
             raise ApiValidationError("Invalid Content-Length header.") from exc
 
         if length == 0:
-            return {}
+            return b""
 
-        raw = self.rfile.read(length)
+        return self.rfile.read(length)
+
+    def _parse_json_body(self, raw: bytes) -> dict[str, Any]:
+        """Parse already-drained request-body bytes as a JSON object.
+
+        Takes the bytes returned by ``_read_request_body`` rather than
+        reading the socket itself, so body draining and JSON
+        validation are two independent steps -- the former must
+        always run first (see ``_read_request_body``), the latter only
+        matters once we know the request is otherwise going to be
+        processed.
+        """
         if not raw.strip():
             return {}
 
@@ -256,8 +290,17 @@ class _ApiRequestHandler(BaseHTTPRequestHandler):
                 return
 
             if self.path == "/api/v1/commands":
+                # Drain the request body off the socket FIRST, before any
+                # validation can short-circuit the response (see
+                # `_read_request_body`'s docstring and the EP-043 ROOT
+                # CAUSE report). This must happen unconditionally --
+                # including on the 415 rejection path -- so the
+                # connection is never closed with unread body bytes
+                # still buffered, which is what causes the Windows
+                # WinError 10054 / ConnectionResetError race.
+                raw_body = self._read_request_body()
                 self._check_content_type()
-                body = self._read_json_body()
+                body = self._parse_json_body(raw_body)
                 try:
                     command_request = CommandRequest.from_dict(body)
                 except ValueError as exc:

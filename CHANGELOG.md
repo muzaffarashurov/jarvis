@@ -6,6 +6,82 @@ The format is inspired by Keep a Changelog.
 
 ---
 
+## v0.1.36-ep043
+
+Released: 2026-09-15
+
+Status: EP-043 follow-up defect fix (post-STEP-4). Independently
+investigated, implemented, audited, and findings-resolved as its own
+STEP 2 / STEP 3 / STEP 3.1 sequence, distinct from the STEP 1-4
+process `v0.1.10-ep043` (2026-08-20) already completed and archived
+below.
+
+### Fixed
+
+- src/core/api/rest_api_server.py: `_ApiRequestHandler._dispatch()`'s
+  `POST /api/v1/commands` handling previously validated `Content-Type`
+  before reading the request body off the socket. A request with an
+  unsupported `Content-Type` therefore got its `415` response -- and
+  the connection closed -- while the client's body bytes were still
+  unread. Closing a socket with unread inbound data causes the OS to
+  abort the connection with a TCP RST instead of a clean FIN; on
+  Windows this surfaced to callers as `ConnectionResetError: [WinError
+  10054]`, intermittently, either while reading the response itself or
+  while reading the error body, depending on timing. Root cause
+  independently confirmed via direct socket instrumentation (zero
+  `rfile.read()` calls occurred on the unfixed code's 415 path).
+  `_read_json_body()` was split into `_read_request_body() -> bytes`
+  and `_parse_json_body(raw) -> dict`; `/api/v1/commands` now always
+  calls `_read_request_body()` first, so the full declared body is
+  drained before `_check_content_type()` (or any later validation) can
+  produce a rejection response. `_send_json`/`_send_error` response
+  framing, `protocol_version`, and `CommandRouter` are all unchanged.
+
+### Findings resolution (STEP 3 independent audit -- PASS WITH
+WARNINGS; STEP 3.1 -- PASS)
+
+- MEDIUM, accepted as residual/out-of-scope: `_check_route()` (404 for
+  an unknown path, 405 for a disallowed method) still runs before the
+  `/api/v1/commands`-specific body drain, so the same unread-body
+  hazard remains latent for a POST-with-body that hits 404/405 rather
+  than this endpoint's 415. Not part of the confirmed/reported defect,
+  untested in either direction, and deliberately not fixed here --
+  fixing it would require unconditional body-draining ahead of route
+  validation, an explicitly out-of-scope architectural expansion for
+  this fix.
+- LOW, resolved with a regression test: the new read-body-first
+  ordering means a request with both an invalid `Content-Length` and
+  an unsupported `Content-Type` now returns `400` (bad framing) rather
+  than the previous `415` -- framing must be validated as part of
+  draining the body, before Content-Type is even checked. No test or
+  design document specified precedence for this untested combination
+  before; `tests/EP043/test_rest_api.py` gained
+  `_test_commands_endpoint_invalid_content_length_beats_wrong_content_type`
+  (and its `_http_post_with_invalid_content_length` helper) to make
+  this the explicit, stable, regression-tested contract.
+- INFORMATIONAL, no action: a malformed/unparseable `Content-Length`
+  header itself is pre-existing, unchanged behavior -- the server has
+  no safe way to know how many bytes to drain without valid framing.
+
+### Validation
+
+```
+EP043 : 85 passed / 0 failed / 0 skipped (83 STEP 3/4 assertions + 2
+        new assertions for the Finding-2 regression test)
+EP042 : 83 passed / 0 failed / 0 skipped (unaffected)
+EP044 : 52 passed / 0 failed / 0 skipped (unaffected)
+```
+
+`tests/EP043` repeated 5+ consecutive full-suite runs: 85/0/0 every
+run. Zero `ConnectionResetError`, zero `WinError 10054`, in any run.
+No HTTP protocol version, `CommandRouter`, or unrelated endpoint
+behavior changed. Changed files: `src/core/api/rest_api_server.py`
+and `tests/EP043/test_rest_api.py` only.
+
+**EP-043's follow-up defect fix is COMPLETE.**
+
+---
+
 ## v0.1.35-ep083
 
 Released: 2026-09-13

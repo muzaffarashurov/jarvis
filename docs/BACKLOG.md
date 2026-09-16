@@ -3245,6 +3245,26 @@ uncaught exception during `Bootstrap.initialize()` instead of
 degrading safely to "REST API disabled." No endpoint, status-code
 policy, or configuration default changed.
 
+Follow-up (post-STEP-4, released 2026-09-15, v0.1.36-ep043 in
+CHANGELOG.md): a defect was found and fixed in
+`POST /api/v1/commands`'s request handling. `_check_content_type()`
+previously ran before the request body was read off the socket, so a
+request with an unsupported `Content-Type` got its `415` response --
+and the connection closed -- while the body was still unread,
+intermittently causing `ConnectionResetError: [WinError 10054]` on
+Windows. Fix: the body is now always fully read before Content-Type
+(or any later validation) can respond. Independently audited (STEP 3,
+PASS WITH WARNINGS) and findings-resolved (STEP 3.1, PASS): one
+MEDIUM finding was accepted as residual/out-of-scope (the same
+unread-body hazard remains latent for a POST-with-body that hits 404
+or 405 instead, since `_check_route()` runs before this endpoint's
+body drain -- deliberately not fixed here, not a regression); one LOW
+finding was resolved with a dedicated regression test locking in that
+a request with both an invalid `Content-Length` and an unsupported
+`Content-Type` now returns `400` rather than `415`. No endpoint, HTTP
+protocol version, or `CommandRouter` behavior changed. `EP043 : 85
+passed / 0 failed / 0 skipped` (83 prior + 2 new).
+
 Note: EP-042 — Email Integration is now fully complete through
 STEP 4 (see CHANGELOG.md / docs/RELEASE_NOTES.md), and is now marked
 complete in docs/architecture/JARVIS_ROADMAP.md. It is a new,

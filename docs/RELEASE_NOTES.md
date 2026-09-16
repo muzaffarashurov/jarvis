@@ -1925,6 +1925,13 @@ findings). Compile check (`py_compile`) across the full `src/` +
 - No code-level guard prevents an operator from setting `api.host` to
   a non-loopback address without also configuring authentication --
   documented as an operator responsibility, not enforced
+- Draining the request body before responding is guaranteed for
+  `POST /api/v1/commands` specifically -- its validation always reads
+  the declared body first (see "Follow-up defect fix" below). A POST
+  with a body to an unregistered path (404) or a disallowed method on
+  a known path (405) is not covered by this guarantee, since route
+  validation runs before that endpoint-specific logic -- an accepted,
+  out-of-scope residual case, not a regression
 
 ## Known technical debt
 
@@ -1955,6 +1962,36 @@ Final archive: `jarvis-ep043-complete.zip` (the STEP 3 archive,
 recovery point). Full detail: `EP043_STEP4_REPORT.md`.
 
 **EP-043 is COMPLETE.**
+
+## Follow-up defect fix -- Windows connection-reset (post-STEP-4)
+
+Independently investigated, implemented, and audited as its own STEP
+2 / STEP 3 (independent audit, PASS WITH WARNINGS) / STEP 3.1
+(findings resolution, PASS) sequence, released 2026-09-15 -- see
+`CHANGELOG.md`'s `v0.1.36-ep043` entry for full detail.
+
+`POST /api/v1/commands`'s `Content-Type` validation previously ran
+before the request body was read off the socket, so a request with an
+unsupported `Content-Type` got its `415` response -- and the
+connection closed -- while the client's body was still unread. This
+caused an intermittent `ConnectionResetError: [WinError 10054]` on
+Windows. Fix: the request body is now always fully read before
+`Content-Type` (or any later validation) can produce a response for
+this endpoint. No endpoint, HTTP protocol version, or `CommandRouter`
+behavior changed. One intentional, now regression-tested consequence:
+a request with both an invalid `Content-Length` and an unsupported
+`Content-Type` now returns `400` rather than `415`, since the body's
+framing must be validated as part of draining it, before Content-Type
+is even checked.
+
+```
+EP043 : 85 passed / 0 failed / 0 skipped (83 prior assertions + 2 new
+        assertions locking in the 400-over-415 precedence above)
+```
+
+No `ConnectionResetError`/`WinError 10054` occurs in any EP-043 test,
+confirmed across 5+ consecutive full-suite runs; EP-042 (83/0/0) and
+EP-044 (52/0/0) confirmed unaffected.
 
 ---
 

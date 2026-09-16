@@ -298,6 +298,36 @@ def _http_post_without_content_type(host: str, port: int, path: str, body: bytes
         connection.close()
 
 
+def _http_post_with_invalid_content_length(
+    host: str, port: int, path: str, body: bytes, content_type: str
+) -> tuple[int, dict]:
+    """POST with a syntactically invalid ('not-a-number') Content-Length.
+
+    `urllib.request`/`http.client`'s normal `putheader`-from-body
+    helpers always compute a correct Content-Length automatically, so
+    exercising a malformed value requires the same direct-`http.client`
+    technique `_http_post_without_content_type` uses above. This lets
+    a test combine an invalid Content-Length with an arbitrary
+    Content-Type to exercise `_ApiRequestHandler`'s request-framing
+    validation order (see rest_api_server.py, EP-043 STEP 3 audit
+    Finding 2 / STEP 3.1 resolution): the body's declared length is
+    validated -- as part of draining the body off the socket -- before
+    Content-Type is checked, so an invalid Content-Length always wins
+    with 400 over a 415 the Content-Type alone would otherwise cause.
+    """
+    connection = http.client.HTTPConnection(host, port, timeout=5)
+    try:
+        connection.putrequest("POST", path, skip_accept_encoding=True)
+        connection.putheader("Content-Type", content_type)
+        connection.putheader("Content-Length", "not-a-number")
+        connection.endheaders()
+        connection.send(body)
+        response = connection.getresponse()
+        return response.status, json.loads(response.read().decode("utf-8"))
+    finally:
+        connection.close()
+
+
 @TestRegistry.register
 class RestApiTest(BaseTest):
     NAME = "EP043"
@@ -319,6 +349,7 @@ class RestApiTest(BaseTest):
 
         # --- STEP 3: contract hardening ---
         self._test_commands_endpoint_wrong_content_type_returns_415()
+        self._test_commands_endpoint_invalid_content_length_beats_wrong_content_type()
         self._test_commands_endpoint_json_content_type_with_charset_ok()
         self._test_commands_endpoint_missing_content_type_is_lenient()
         self._test_commands_endpoint_empty_body_treated_as_empty_object()
@@ -451,6 +482,29 @@ class RestApiTest(BaseTest):
             status, payload = _http_post(base_url, "/api/v1/commands", body, content_type="text/plain")
             self.assert_equal(status, 415)
             self.assert_equal(payload.get("error", {}).get("code"), "unsupported_media_type")
+        finally:
+            server.stop()
+
+    def _test_commands_endpoint_invalid_content_length_beats_wrong_content_type(self) -> None:
+        """STEP 3 audit Finding 2 (LOW) regression coverage.
+
+        Locks in the intentional precedence introduced by the STEP 2
+        root-cause fix: the request body's declared length is
+        validated as part of draining the body off the socket, before
+        Content-Type is checked (see rest_api_server.py's
+        `_read_request_body` docstring). So a request with BOTH an
+        invalid Content-Length AND an unsupported Content-Type must
+        get 400 (validation_error), not 415 -- the reverse of the
+        pre-STEP-2 ordering, and now the documented, stable contract.
+        """
+        server, _base_url = self._start_test_server()
+        try:
+            body = json.dumps({"module": "echo", "action": "say", "arguments": ["hi"]}).encode("utf-8")
+            status, payload = _http_post_with_invalid_content_length(
+                "127.0.0.1", server.port, "/api/v1/commands", body, content_type="text/plain"
+            )
+            self.assert_equal(status, 400)
+            self.assert_equal(payload.get("error", {}).get("code"), "validation_error")
         finally:
             server.stop()
 

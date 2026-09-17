@@ -139,6 +139,7 @@ from src.services.memory_service import MemoryService
 from src.services.personal_data_service import PersonalDataService
 from src.core.personal_data.sources.electricity_source import ElectricityCsvSource
 from src.core.personal_data.sources.gas_source import GasCsvSource
+from src.core.personal_data.sources.solar_source import SolarCsvSource
 from src.services.planning_service import PlanningService
 from src.services.plan_execution_service import PlanExecutionService
 from src.services.tool_service import ToolService
@@ -691,26 +692,42 @@ class Bootstrap:
         # ConversationManager below.
         #
         # EP-093: Electricity & Gas Monitoring is the first concrete
-        # PersonalDataSource consumer (EP093_DESIGN.md). Registering
-        # ElectricityCsvSource/GasCsvSource is gated on
-        # 'personal_data_electricity_gas.enabled' (EP-093's own
-        # opt-in, independent of 'personal_data.enabled_categories',
-        # EP-092's own consent gate) -- the PersonalDataModule/
-        # PersonalDataService themselves are always available so
-        # 'personal_data status'/'query' work regardless.
+        # PersonalDataSource consumer (EP093_DESIGN.md).
+        # EP-094: Solar Generation Analytics is the second, following
+        # the identical pattern (EP094_DESIGN.md §5/§9/§11) --
+        # extending, not duplicating, this wiring. Each domain group's
+        # sources are registered only when that domain group's own
+        # config flag is enabled ('personal_data_electricity_gas.enabled',
+        # 'personal_data_solar.enabled'), independent of
+        # 'personal_data.enabled_categories' (EP-092's own consent
+        # gate) -- the PersonalDataModule/PersonalDataService
+        # themselves are always available so 'personal_data status'/
+        # 'query' work regardless of which domain groups are enabled.
         personal_data_service = PersonalDataService(config=config)
         self._personal_data_service = personal_data_service
-        electricity_gas_enabled = bool(config.get("personal_data_electricity_gas.enabled", False))
-        if electricity_gas_enabled:
-            for source in (ElectricityCsvSource(), GasCsvSource()):
+        personal_data_domain_groups = (
+            ("Electricity & Gas Monitoring", "personal_data_electricity_gas.enabled",
+             (ElectricityCsvSource(), GasCsvSource())),
+            ("Solar Generation Analytics", "personal_data_solar.enabled",
+             (SolarCsvSource(),)),
+        )
+        personal_data_enabled_categories: set[str] = set()
+        for domain_label, config_key, sources in personal_data_domain_groups:
+            if not bool(config.get(config_key, False)):
+                continue
+            for source in sources:
+                personal_data_enabled_categories.add(source.category)
                 register_result = personal_data_service.register_source(source)
                 if not register_result.success:
                     logger.error(
-                        f"Electricity & Gas Monitoring: failed to register "
+                        f"{domain_label}: failed to register "
                         f"'{source.source_id}': {register_result.message}"
                     )
         router.register(
-            PersonalDataModule(personal_data_service, electricity_gas_enabled=electricity_gas_enabled)
+            PersonalDataModule(
+                personal_data_service,
+                enabled_categories=frozenset(personal_data_enabled_categories),
+            )
         )
 
         # EP-019: Project Index Engine integration. Depends only on

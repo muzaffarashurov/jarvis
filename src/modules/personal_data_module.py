@@ -1,29 +1,37 @@
-"""Personal data module: CLI command surface for EP-092/EP-093.
+"""Personal data module: CLI command surface for EP-092/EP-093/EP-094.
 
 Exposes the "personal_data" command namespace (status, collect, query,
 record-reading, import-csv, help) as thin CommandModule handlers,
 following the same pattern as LongTermMemoryModule/MemoryModule/
 KnowledgeModule. All framework logic (registration, collection,
 dedup, persistence, consent) lives in EP-092's `PersonalDataService`/
-`PersonalDataManager`; all electricity/gas-specific validation and
-local-log I/O lives in EP-093's `src/core/personal_data/sources/`
-modules. This module only parses CLI arguments and formats
+`PersonalDataManager`; all domain-specific validation and local-log
+I/O lives in each acquisition EP's own
+`src/core/personal_data/sources/` module (EP-093's electricity/gas,
+EP-094's solar). This module only parses CLI arguments and formats
 CommandResult objects for the shell -- it never becomes a second
-orchestration/service layer (STEP 1 design §9.1).
+orchestration/service layer (EP093_DESIGN.md §9.1).
 
-Per STEP 1 design §11's layering rule, this module imports only
-`PersonalDataService`, `CommandResult`, and a small set of plain,
-EP-093-owned symbols (`SOURCE_ID` constants and the
-`append_*_reading()`/`import_*_csv()` module-level functions and their
-error classes) from `src/core/personal_data/sources/` -- never
-`PersonalDataManager`, `PersonalDataProvider`,
-`PersonalDataPersistence`, `PersonalDataRegistry`, or either
-`ElectricityCsvSource`/`GasCsvSource` class itself. `record-reading`/
-`import-csv` call those plain functions (not the source classes) to
-write to the local log, then delegate to
-`PersonalDataService.collect(source_id)` for the actual EP-092
-persistence step -- see those functions' own docstrings for why they
-are free functions rather than source-class methods.
+This is a shared CLI namespace, not any one acquisition EP's exclusive
+property (EP093_DESIGN.md §9.1 explicitly anticipated EP-094/EP-097
+extending it the same way EP-093 built it after EP-092 left it
+unbuilt): each acquisition EP adds one entry to `_CATEGORY_HANDLERS`
+for its own category/categories, without introducing a new verb or
+namespace.
+
+Per the established layering rule (EP093_DESIGN.md §11), this module
+imports only `PersonalDataService`, `CommandResult`, and a small set
+of plain, per-acquisition-EP-owned symbols (`SOURCE_ID` constants and
+the `append_*_reading()`/`import_*_csv()` module-level functions and
+their error classes) from each `src/core/personal_data/sources/*`
+module -- never `PersonalDataManager`, `PersonalDataProvider`,
+`PersonalDataPersistence`, `PersonalDataRegistry`, or any concrete
+`PersonalDataSource` subclass itself. `record-reading`/`import-csv`
+call those plain functions (not the source classes) to write to the
+local log, then delegate to `PersonalDataService.collect(source_id)`
+for the actual EP-092 persistence step -- see those functions' own
+docstrings for why they are free functions rather than source-class
+methods.
 """
 
 from __future__ import annotations
@@ -46,6 +54,12 @@ from src.core.personal_data.sources.gas_source import (
     append_gas_reading,
     import_gas_csv,
 )
+from src.core.personal_data.sources.solar_source import SOURCE_ID as SOLAR_SOURCE_ID
+from src.core.personal_data.sources.solar_source import (
+    SolarMeterReadingError,
+    append_solar_reading,
+    import_solar_csv,
+)
 from src.services.personal_data_service import PersonalDataService, PersonalDataStatus
 
 HELP_TEXT: str = (
@@ -60,38 +74,55 @@ HELP_TEXT: str = (
 
 # category -> (source_id, append_reading fn, import_csv fn), so record-reading/
 # import-csv stay generic across category rather than hard-coding per-domain verbs
-# (STEP 1 design §9.1).
+# (EP093_DESIGN.md §9.1). Each acquisition EP (EP-093 electricity/gas, EP-094 solar,
+# future EP-097 weather) adds its own entry/entries here -- this dict is the one,
+# already-disclosed coupling point (EP093-AUDIT-004; EP094_DESIGN.md §6C explicitly
+# does not remediate it, only extends it).
 _ELECTRICITY_CATEGORY = "electricity_consumption"
 _GAS_CATEGORY = "gas_consumption"
+_SOLAR_CATEGORY = "solar_generation"
 _CATEGORY_HANDLERS: dict[str, tuple[str, Callable, Callable]] = {
     _ELECTRICITY_CATEGORY: (ELECTRICITY_SOURCE_ID, append_electricity_reading, import_electricity_csv),
     _GAS_CATEGORY: (GAS_SOURCE_ID, append_gas_reading, import_gas_csv),
+    _SOLAR_CATEGORY: (SOLAR_SOURCE_ID, append_solar_reading, import_solar_csv),
 }
+
+# Every error class any registered category's import_*_csv() may raise for an
+# unrecoverable (whole-file) failure -- extended by each acquisition EP.
+_CSV_IMPORT_ERRORS = (ElectricityMeterReadingError, GasMeterReadingError, SolarMeterReadingError)
 
 ActionHandler = Callable[[list[str]], CommandResult]
 
 
 class PersonalDataModule:
-    """Built-in "personal_data" command namespace for EP-092/EP-093."""
+    """Built-in "personal_data" command namespace for EP-092/EP-093/EP-094."""
 
     def __init__(
-        self, personal_data_service: PersonalDataService, electricity_gas_enabled: bool = False
+        self,
+        personal_data_service: PersonalDataService,
+        enabled_categories: frozenset[str] | None = None,
     ) -> None:
         """Initialize the PersonalDataModule.
 
         Args:
             personal_data_service: The EP-092 service used for
                 collect/query/status.
-            electricity_gas_enabled: The resolved
-                'personal_data_electricity_gas.enabled' setting
-                (EP-093's own opt-in, independent of EP-092's
-                'personal_data.enabled'/'enabled_categories'). Gates
-                `record-reading`/`import-csv` only -- `status`/
-                `collect`/`query` remain generic EP-092 pass-throughs
-                (STEP 1 design §9's "Enable/disable behavior").
+            enabled_categories: The set of categories whose
+                `record-reading`/`import-csv` actions are currently
+                allowed -- resolved by the caller (`Bootstrap`) from
+                each acquisition EP's own opt-in flag (e.g.
+                'personal_data_electricity_gas.enabled',
+                'personal_data_solar.enabled'), independent of EP-092's
+                own 'personal_data.enabled'/'enabled_categories'
+                consent gate. Defaults to an empty set (nothing
+                enabled) when omitted. `status`/`collect`/`query`
+                remain generic EP-092 pass-throughs, ungated by this
+                value (EP093_DESIGN.md §9's "Enable/disable behavior",
+                generalized from a single electricity/gas boolean to a
+                per-category set per EP094_DESIGN.md §4/§11).
         """
         self._service = personal_data_service
-        self._electricity_gas_enabled = electricity_gas_enabled
+        self._enabled_categories = enabled_categories if enabled_categories is not None else frozenset()
         self._actions: dict[str, ActionHandler] = {
             "status": self._status,
             "collect": self._collect,
@@ -138,8 +169,7 @@ class PersonalDataModule:
             f"Registered Sources : {', '.join(status.registered_sources) or 'none'}",
             f"Categories With Data : {status.category_count}",
             f"Total Points : {status.point_count}",
-            f"Electricity & Gas Monitoring (EP-093) : "
-            f"{self._mark(self._electricity_gas_enabled)}",
+            f"Acquisition Enabled For : {', '.join(sorted(self._enabled_categories)) or 'none'}",
         ]
         return CommandResult(success=True, message="\n\n".join(lines))
 
@@ -172,9 +202,6 @@ class PersonalDataModule:
 
     def _record_reading(self, arguments: list[str]) -> CommandResult:
         """Record one manually-entered reading for a category."""
-        disabled = self._ensure_electricity_gas_enabled()
-        if disabled is not None:
-            return disabled
         if len(arguments) < 3:
             return CommandResult(
                 success=False,
@@ -191,6 +218,9 @@ class PersonalDataModule:
                     f"{', '.join(_CATEGORY_HANDLERS)}."
                 ),
             )
+        disabled = self._ensure_category_enabled(category)
+        if disabled is not None:
+            return disabled
         source_id, append_reading, _import_csv = handlers
         try:
             append_reading(value=value, unit=unit, timestamp=timestamp)
@@ -200,9 +230,6 @@ class PersonalDataModule:
 
     def _import_csv(self, arguments: list[str]) -> CommandResult:
         """Import every valid row of a CSV file for a category."""
-        disabled = self._ensure_electricity_gas_enabled()
-        if disabled is not None:
-            return disabled
         if len(arguments) < 2:
             return CommandResult(
                 success=False, message="Usage: personal_data import-csv <category> <path>"
@@ -217,10 +244,13 @@ class PersonalDataModule:
                     f"{', '.join(_CATEGORY_HANDLERS)}."
                 ),
             )
+        disabled = self._ensure_category_enabled(category)
+        if disabled is not None:
+            return disabled
         source_id, _append_reading, import_csv = handlers
         try:
             imported, skipped = import_csv(path)
-        except (ElectricityMeterReadingError, GasMeterReadingError) as exc:
+        except _CSV_IMPORT_ERRORS as exc:
             return CommandResult(success=False, message=str(exc))
         summary = f"Imported {imported} row(s) from '{path}'."
         if skipped:
@@ -242,14 +272,14 @@ class PersonalDataModule:
     def _collect_after_append(self, source_id: str, category: str) -> CommandResult:
         """Trigger EP-092 collection after writing to the local log.
 
-        Writing a reading to EP-093's own local log (via
+        Writing a reading to an acquisition EP's own local log (via
         `append_*_reading()`/`import_*_csv()`) does not by itself
         reach EP-092's actual persisted storage -- this calls
         `PersonalDataService.collect(source_id)` so the newly-written
-        entries are picked up by `ElectricityCsvSource`/`GasCsvSource
-        .collect()` and go through EP-092's consent gate + dedup +
-        persistence, exactly as `personal_data collect <source_id>`
-        would.
+        entries are picked up by the matching `PersonalDataSource`
+        subclass's `collect()` and go through EP-092's consent gate +
+        dedup + persistence, exactly as `personal_data collect
+        <source_id>` would.
         """
         result = self._service.collect(source_id)
         if not result.success:
@@ -262,16 +292,16 @@ class PersonalDataModule:
             )
         return result
 
-    def _ensure_electricity_gas_enabled(self) -> CommandResult | None:
-        """Return a failing CommandResult if EP-093 is disabled, else None."""
-        if self._electricity_gas_enabled:
+    def _ensure_category_enabled(self, category: str) -> CommandResult | None:
+        """Return a failing CommandResult if `category`'s acquisition is disabled, else None."""
+        if category in self._enabled_categories:
             return None
         return CommandResult(
             success=False,
             message=(
-                "Electricity & Gas Monitoring (EP-093) is disabled. Set "
-                "'personal_data_electricity_gas.enabled: true' in config/config.yaml "
-                "to use this command."
+                f"Acquisition for category '{category}' is disabled. Enable the matching "
+                "domain-group config block (e.g. 'personal_data_electricity_gas.enabled' or "
+                "'personal_data_solar.enabled') in config/config.yaml to use this command."
             ),
         )
 

@@ -372,20 +372,22 @@ class ElectricityGasMonitoringTest(BaseTest):
         self.assert_false(unknown_result.success)
 
     def _test_cli_status(self) -> None:
-        module = PersonalDataModule(self._build_service(), electricity_gas_enabled=True)
+        module = PersonalDataModule(self._build_service(), enabled_categories=frozenset({ELECTRICITY_CATEGORY, GAS_CATEGORY}))
         result = module.execute("status", [])
         self.assert_true(result.success)
-        self.assert_true("Electricity & Gas Monitoring" in result.message)
+        self.assert_true("Acquisition Enabled For" in result.message)
+        self.assert_true(ELECTRICITY_CATEGORY in result.message)
+        self.assert_true(GAS_CATEGORY in result.message)
 
     def _test_cli_record_reading_disabled_by_default(self) -> None:
-        module = PersonalDataModule(self._build_service())  # electricity_gas_enabled defaults False
+        module = PersonalDataModule(self._build_service())  # enabled_categories defaults empty
         result = module.execute("record-reading", [ELECTRICITY_CATEGORY, "1.0", "kWh"])
         self.assert_false(result.success)
         self.assert_true("disabled" in result.message.lower())
 
     def _test_cli_record_reading_end_to_end(self) -> None:
         service = self._build_service()
-        module = PersonalDataModule(service, electricity_gas_enabled=True)
+        module = PersonalDataModule(service, enabled_categories=frozenset({ELECTRICITY_CATEGORY, GAS_CATEGORY}))
         # Point the source's default log path at a temp file for this test by
         # registering our own source instance against the service's manager.
         log_path = self._electricity_log_path()
@@ -401,19 +403,19 @@ class ElectricityGasMonitoringTest(BaseTest):
         self.assert_equal(len(points), 1)
 
     def _test_cli_record_reading_unknown_category(self) -> None:
-        module = PersonalDataModule(self._build_service(), electricity_gas_enabled=True)
+        module = PersonalDataModule(self._build_service(), enabled_categories=frozenset({ELECTRICITY_CATEGORY, GAS_CATEGORY}))
         result = module.execute("record-reading", ["not_a_real_category", "1.0", "kWh"])
         self.assert_false(result.success)
 
     def _test_cli_record_reading_missing_args(self) -> None:
-        module = PersonalDataModule(self._build_service(), electricity_gas_enabled=True)
+        module = PersonalDataModule(self._build_service(), enabled_categories=frozenset({ELECTRICITY_CATEGORY, GAS_CATEGORY}))
         result = module.execute("record-reading", [ELECTRICITY_CATEGORY, "1.0"])
         self.assert_false(result.success)
         self.assert_true("Usage" in result.message)
 
     def _test_cli_import_csv_end_to_end(self) -> None:
         service = self._build_service()
-        module = PersonalDataModule(service, electricity_gas_enabled=True)
+        module = PersonalDataModule(service, enabled_categories=frozenset({ELECTRICITY_CATEGORY, GAS_CATEGORY}))
         csv_path = self._write_csv(["2026-01-01,412.5,kWh,", "2026-01-02,418.2,kWh,"])
         electricity_log_path = self._electricity_log_path()
         original_default = electricity_source_module.DEFAULT_LOG_PATH
@@ -491,7 +493,7 @@ class ElectricityGasMonitoringTest(BaseTest):
 
     def _test_import_csv_all_invalid_reports_failure(self) -> None:
         service = self._build_service()
-        module = PersonalDataModule(service, electricity_gas_enabled=True)
+        module = PersonalDataModule(service, enabled_categories=frozenset({ELECTRICITY_CATEGORY, GAS_CATEGORY}))
         csv_path = self._write_csv(["not-a-date,not-a-number,kWh,"])
         log_path = self._electricity_log_path()
         original_default = electricity_source_module.DEFAULT_LOG_PATH
@@ -507,7 +509,7 @@ class ElectricityGasMonitoringTest(BaseTest):
 
     def _test_import_csv_mixed_valid_invalid_reports_success(self) -> None:
         service = self._build_service()
-        module = PersonalDataModule(service, electricity_gas_enabled=True)
+        module = PersonalDataModule(service, enabled_categories=frozenset({ELECTRICITY_CATEGORY, GAS_CATEGORY}))
         csv_path = self._write_csv(["2026-01-01,412.5,kWh,", "not-a-date,bad,kWh,"])
         log_path = self._electricity_log_path()
         original_default = electricity_source_module.DEFAULT_LOG_PATH

@@ -123,6 +123,7 @@ from src.modules.runtime_module import RuntimeModule
 from src.services.agent_service import AgentService
 from src.services.ai_service import AIService
 from src.services.audio_generation_service import AudioGenerationService
+from src.services.content_production_pipeline_service import ContentProductionPipelineService
 from src.services.image_generation_service import ImageGenerationService
 from src.services.presentation_generation_service import PresentationGenerationService
 from src.services.text_generation_service import TextGenerationService
@@ -954,6 +955,26 @@ class Bootstrap:
             request_executor=ai_request_executor,
             enabled=bool(config.get("presentation_generation.enabled", False)),
             fallback_enabled=bool(config.get("presentation_generation.fallback_enabled", False)),
+        )
+
+        # EP-087 Content Production Pipeline. Standalone orchestration
+        # layer composing the five existing content-generation
+        # services above into a single production request
+        # (EP087_DESIGN.md Section 9/22) -- depends on the five
+        # *services* directly, never on `ai_provider_manager`/
+        # `ai_request_executor`/`ProviderManager`/
+        # `ProviderRequestExecutor` (Section 9), so there remains
+        # exactly one place per modality that performs provider
+        # selection, capability checking, and fallback. No
+        # CommandRouter registration (Section 7/22) and no new
+        # configuration (Section 21) -- stored for a future in-process
+        # consumer, exactly like every one of the five services above.
+        self._content_production_pipeline_service = ContentProductionPipelineService(
+            text_generation_service=self._text_generation_service,
+            image_generation_service=self._image_generation_service,
+            audio_generation_service=self._audio_generation_service,
+            video_generation_service=self._video_generation_service,
+            presentation_generation_service=self._presentation_generation_service,
         )
 
         # EP-054 Self Reflection. On-demand session/conversation

@@ -80,6 +80,7 @@ import tests.EP083.test_image_generation_provider_integration
 import tests.EP084.test_audio_generation_provider_integration
 import tests.EP085.test_video_generation_provider_integration
 import tests.EP086.test_presentation_generation_provider_integration
+import tests.EP087.test_content_production_pipeline
 import tests.EP092.test_personal_data_collection_framework
 import tests.EP093.test_electricity_gas_monitoring
 import tests.EP094.test_solar_generation_analytics

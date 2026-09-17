@@ -48,7 +48,14 @@ video-generation callers (see
 `generate_video()`'s concrete implementation is expected to be a
 long-running, multi-HTTP-call operation internally, though its method
 signature remains a single, synchronous call (`EP085_DESIGN.md`
-Section 6/22, Owner Decision D1). All extension pairs default to
+Section 6/22, Owner Decision D1). EP-086 (Presentation Generation
+Integration) additively extends it once more with
+`supports_presentation_generation()`/`generate_presentation()`, for
+standalone presentation-content callers (see
+`src/services/presentation_generation_service.py`) -- this one is a
+single, fast, synchronous call again, like `ask()`/`generate_image()`/
+`generate_speech()`, not like `generate_video()`
+(`EP086_DESIGN.md` Section 6/12). All extension pairs default to
 "unsupported"/"always raises" respectively, so every existing
 provider (including EP-014's placeholder providers) remains a valid
 `AIProvider` implementation without any changes other than the one
@@ -359,6 +366,137 @@ class VideoGenerationResult:
     """
 
     video: GeneratedVideo
+    model: str
+    latency_ms: float
+
+
+@dataclass(frozen=True)
+class PresentationSlide:
+    """One slide of structured presentation content (EP-086).
+
+    Deliberately holds only text -- no images, no layout, no theming,
+    no rendering information of any kind (`EP086_DESIGN.md` Section
+    4/9). This is content, not a rendered artifact.
+
+    Attributes:
+        title: The slide's title.
+        bullet_points: The slide's bullet points, in order. May be
+            empty (a title-only slide, e.g. a section divider, is a
+            legitimate presentation structure).
+        speaker_notes: Optional speaker notes for this slide. None
+            means the provider did not supply any -- not every
+            provider response is expected to include them
+            (`EP086_DESIGN.md` Section 9).
+    """
+
+    title: str
+    bullet_points: tuple[str, ...]
+    speaker_notes: str | None = None
+
+
+@dataclass(frozen=True)
+class PresentationGenerationRequest:
+    """A provider-independent request to generate presentation content (EP-086).
+
+    Unlike `ImageGenerationRequest`/`SpeechGenerationRequest`/
+    `VideoGenerationRequest`, this request describes a *content*
+    generation task, not a binary-media one -- it is answered by a
+    single, synchronous, schema-constrained text response, the same
+    underlying mechanism `ask()` already uses (`EP086_DESIGN.md`
+    Section 6). This dataclass performs no validation itself beyond
+    the immutability a frozen dataclass gives for free; `slide_count`'s
+    bound (Owner Decision D2, `EP086_DESIGN.md` Section 22) is
+    enforced by the caller (`AIProvider.generate_presentation()`
+    implementations), not here.
+
+    Attributes:
+        topic: The subject/topic to build presentation content about.
+            Required, non-empty.
+        slide_count: A requested number of slides, or None to let the
+            provider choose a reasonable count on its own. When
+            provided, must be a positive integer no greater than 30
+            (Owner Decision D2) -- a best-effort request, not a
+            guarantee the provider honors exactly
+            (`EP086_DESIGN.md` Section 10/23).
+        audience: An optional natural-language audience/style hint
+            (e.g. "engineers", "executives"), applied as a prompt-
+            steering hint -- Gemini has no dedicated structured field
+            for this, mirroring `SpeechGenerationRequest.language`'s
+            own prompt-steering precedent (EP-084).
+        temperature: Optional sampling temperature, reusing the same
+            `validate_temperature()` concept `ask()` already
+            established. None means the provider's own default.
+    """
+
+    topic: str
+    slide_count: int | None = None
+    audience: str | None = None
+    temperature: float | None = None
+
+
+@dataclass(frozen=True)
+class GeneratedPresentation:
+    """Generated presentation content (EP-086).
+
+    Unlike `GeneratedImage`/`GeneratedAudio`/`GeneratedVideo`, this
+    type carries NO bytes, NO base64 data, and NO URI/reference of any
+    kind -- it is ordinary, in-memory structured text content, held as
+    plain Python objects (`EP086_DESIGN.md` Section 6/11). The
+    `Generated<X>` naming is kept only for naming-pattern consistency
+    with the three binary-media types; it does not imply this type
+    behaves like them. There is nothing to download, nothing to
+    persist, and nothing with a MIME type or expiry here -- EP-086 is
+    a content-generation capability, not a file/artifact-producing one
+    (`EP086_DESIGN.md` Section 4 explicitly excludes `.pptx`/file
+    rendering).
+
+    Attributes:
+        title: The overall presentation's title.
+        slides: The presentation's slides, in order. Bounded to at
+            most 30 entries by Owner Decision D2. This maximum is
+            enforced on both sides of a generation call: on the
+            outgoing request (`PresentationGenerationRequest.
+            slide_count`, when given, must itself be between 1 and
+            30) and, independently, on the returned, parsed result --
+            since `responseSchema` is a strong constraint on Gemini's
+            side, not an absolute guarantee it always honors exactly.
+            A provider response reporting MORE than 30 slides is
+            REJECTED outright (the whole result is discarded and a
+            `ProviderUnavailableError` is raised) -- it is never
+            silently truncated/capped to fit. Truncating would mean a
+            caller receives content different from what the provider
+            actually generated, with no indication that happened;
+            treating an out-of-contract response as untrustworthy and
+            rejecting it, rather than reinterpreting it, is consistent
+            with how every other defensive parser in `GeminiProvider`
+            (`_extract_images()`/`_extract_audio()`/`_extract_video()`)
+            already handles a response that violates its own
+            constraint. See `GeminiProvider._extract_presentation()`
+            for the exact enforcement.
+    """
+
+    title: str
+    slides: tuple[PresentationSlide, ...]
+
+
+@dataclass(frozen=True)
+class PresentationGenerationResult:
+    """Result of a successful `AIProvider.generate_presentation()` call (EP-086).
+
+    Mirrors `SpeechGenerationResult`'s/`VideoGenerationResult`'s shape,
+    replacing their media-reference field with
+    `presentation: GeneratedPresentation`.
+
+    Attributes:
+        presentation: The generated presentation content.
+        model: The model identifier that produced `presentation`.
+        latency_ms: Wall-clock time the request took, in milliseconds
+            -- a single, fast `generateContent` call, like `ask()`/
+            `generate_image()`/`generate_speech()`, NOT a long-running
+            operation like `generate_video()`.
+    """
+
+    presentation: GeneratedPresentation
     model: str
     latency_ms: float
 
@@ -690,6 +828,54 @@ class AIProvider(ABC):
         """
         raise ProviderUnavailableError(
             f"Provider '{self.name()}' does not support video generation."
+        )
+
+    def supports_presentation_generation(self) -> bool:
+        """Return whether this provider instance can generate presentation content (EP-086).
+
+        Base implementation always returns False. Same narrow,
+        provider-level capability-flag pattern as
+        `supports_image_generation()`/`supports_speech_generation()`/
+        `supports_video_generation()` -- distinct from, and not a
+        replacement for, EP-069.4's Unified Capability Abstraction
+        (`src/core/capability/`).
+
+        Returns:
+            True if `generate_presentation()` is meaningfully
+            implemented by this provider (and configured), False
+            otherwise.
+        """
+        return False
+
+    def generate_presentation(
+        self, request: PresentationGenerationRequest
+    ) -> PresentationGenerationResult:
+        """Generate structured presentation content from `request.topic` (EP-086).
+
+        Base implementation always raises: this provider does not
+        implement presentation generation. Providers that do (e.g.
+        GeminiProvider, when configured with a presentation-capable
+        model) must override this method and
+        `supports_presentation_generation()`.
+
+        Unlike `generate_video()`, a concrete implementation of this
+        method is expected to be a single, synchronous call -- the
+        same fast request/response shape `ask()`/`generate_image()`/
+        `generate_speech()` already use, not a long-running operation
+        (`EP086_DESIGN.md` Section 6/12).
+
+        Args:
+            request: The provider-independent presentation-generation
+                request.
+
+        Returns:
+            The provider's reply.
+
+        Raises:
+            ProviderError: Always, unless overridden.
+        """
+        raise ProviderUnavailableError(
+            f"Provider '{self.name()}' does not support presentation generation."
         )
 
     def ping(self) -> PingResult:

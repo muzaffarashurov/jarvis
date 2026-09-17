@@ -737,6 +737,25 @@ video_generation:
   # not the overall multi-minute operation. Must be positive.
   max_wait_seconds: 600
 
+presentation_generation:
+  # EP-086 Presentation Generation Integration. Additive namespace for
+  # Phase C (AI Content Platform); does not alter 'ai:', 'providers:',
+  # 'content_generation:', 'image_generation:', 'audio_generation:',
+  # or 'video_generation:' semantics above. Governs standalone
+  # (non-conversational) presentation-CONTENT-generation requests only
+  # -- see src/services/presentation_generation_service.py and
+  # docs/architecture/designs/EP086_DESIGN.md. This generates
+  # structured content (a title and slides), never a rendered .pptx
+  # file. Disabled by default, matching every prior modality's own
+  # off-by-default precedent.
+  enabled: false
+  # Whether PresentationGenerationService requests may retry a
+  # fallback-eligible provider failure against another presentation-
+  # capable candidate. Defaults to false, the same baseline every
+  # modality defaults to. Independent of 'ai.fallback_enabled'/every
+  # other modality's own fallback flag.
+  fallback_enabled: false
+
 conversation:
   # EP-016 Conversation Engine. Provider-independent chat session
   # storage shared by the CLI, Voice Assistant, Telegram, Desktop UI,
@@ -974,6 +993,17 @@ providers:
     # max_wait_seconds), which is a service-wide generation policy,
     # not a per-provider setting.
     # video_model: "veo-3.1-generate-preview"
+    # EP-086 Presentation Generation Integration. The Gemini model
+    # identifier used for structured presentation-content generation.
+    # Absent/empty means this provider does not support presentation
+    # generation (supports_presentation_generation() returns False).
+    # Distinct from 'model'/'image_model'/'audio_model'/'video_model'
+    # above. Unlike those, Gemini does not architecturally require a
+    # distinct model family for structured JSON output (any current
+    # Gemini text model supports it, per EP086_DESIGN.md Section 6) --
+    # this field exists for operational flexibility (Owner Decision
+    # D1), not because a different model is mandatory.
+    # presentation_model: "gemini-3.1-flash"
   ollama:
     enabled: false
     endpoint: "http://localhost:11434"

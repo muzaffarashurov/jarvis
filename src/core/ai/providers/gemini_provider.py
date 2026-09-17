@@ -41,6 +41,7 @@ before returning it, per Owner Decision D2
 from __future__ import annotations
 
 import difflib
+import json
 import re
 import time
 import wave
@@ -55,11 +56,15 @@ from src.core.ai.provider import (
     AIProvider,
     GeneratedAudio,
     GeneratedImage,
+    GeneratedPresentation,
     GeneratedVideo,
     ImageGenerationRequest,
     ImageGenerationResult,
     ModelValidationResult,
     PingResult,
+    PresentationGenerationRequest,
+    PresentationGenerationResult,
+    PresentationSlide,
     ProviderAuthenticationError,
     ProviderConfigurationError,
     ProviderError,
@@ -118,6 +123,14 @@ _PREDICT_LONG_RUNNING_METHOD: str = "predictLongRunning"
 # mandatory either).
 _DEFAULT_VIDEO_MIME_TYPE: str = "video/mp4"
 
+# EP-086 Owner Decision D2: the approved upper bound on
+# PresentationGenerationRequest.slide_count. Enforced defensively at
+# TWO points, per EP086_DESIGN.md Section 11/18: on the outgoing
+# request (before any HTTP call) and again on the returned, parsed
+# result (since Gemini's responseSchema is a strong constraint, not a
+# guarantee it always honors exactly).
+_MAX_PRESENTATION_SLIDES: int = 30
+
 
 class GeminiProvider(AIProvider):
     """AIProvider implementation backed by the official Google Gemini API."""
@@ -135,6 +148,7 @@ class GeminiProvider(AIProvider):
         video_model: str | None = None,
         video_poll_interval_seconds: float = 10.0,
         video_max_wait_seconds: float = 600.0,
+        presentation_model: str | None = None,
     ) -> None:
         """Initialize the GeminiProvider.
 
@@ -179,6 +193,19 @@ class GeminiProvider(AIProvider):
                 'video_generation.max_wait_seconds' (EP-085). Same
                 namespace note as `video_poll_interval_seconds`. Must
                 be positive; see `generate_video()`.
+            presentation_model: Value of
+                'providers.gemini.presentation_model' (EP-086, Owner
+                Decision D1). None or empty means this provider
+                instance does not support presentation generation --
+                `supports_presentation_generation()` returns False and
+                `generate_presentation()` is never expected to be
+                called. Distinct from `model`/`image_model`/
+                `audio_model`/`video_model` above -- unlike those,
+                Gemini does not architecturally *require* a distinct
+                model family for structured JSON output (any current
+                Gemini text model supports it); this dedicated field
+                exists for operational flexibility, per Owner Decision
+                D1 (`EP086_DESIGN.md` Section 22).
         """
         self._enabled = enabled
         self._api_key = api_key
@@ -191,6 +218,7 @@ class GeminiProvider(AIProvider):
         self._video_model = video_model or None
         self._video_poll_interval_seconds = video_poll_interval_seconds
         self._video_max_wait_seconds = video_max_wait_seconds
+        self._presentation_model = presentation_model or None
 
     # ---------- AIProvider: identity / configuration / health ----------
 
@@ -226,6 +254,7 @@ class GeminiProvider(AIProvider):
             "image_model": self._image_model,
             "audio_model": self._audio_model,
             "video_model": self._video_model,
+            "presentation_model": self._presentation_model,
         }
 
     def health(self) -> ProviderHealth:
@@ -830,6 +859,271 @@ class GeminiProvider(AIProvider):
                 mime_type = video.get("mimeType")
                 return uri, (mime_type if isinstance(mime_type, str) and mime_type else None)
         return None
+
+    # ---------- AIProvider: EP-086 presentation generation ----------
+
+    def supports_presentation_generation(self) -> bool:
+        """Return whether this provider instance is configured for presentation generation.
+
+        True only when 'providers.gemini.presentation_model' is set
+        to a non-empty value (EP-086, Owner Decision D1) --
+        independent of `is_available()` and of every other
+        `supports_*_generation()` method.
+        """
+        return self._presentation_model is not None
+
+    def generate_presentation(
+        self, request: PresentationGenerationRequest
+    ) -> PresentationGenerationResult:
+        """Generate structured presentation content via the Google Gemini API.
+
+        Implements `EP086_DESIGN.md` Section 6/10: a single,
+        synchronous `generateContent` call -- the same endpoint
+        `ask()`/`generate_image()`/`generate_speech()` already call --
+        using `generationConfig.responseMimeType: "application/json"`
+        plus a `responseSchema` describing the expected presentation
+        shape (an object with a `title` string and a `slides` array of
+        `{title, bullet_points, speaker_notes}` objects). This is
+        explicitly NOT a long-running operation like `generate_
+        video()`; there is no polling here.
+
+        `request.slide_count`, when given, is both forwarded as a
+        natural-language instruction in the prompt AND used to bound
+        the schema's `slides` array via `maxItems` -- confirmed,
+        during EP-086 STEP 1/2 research, to be a real, documented
+        `responseSchema` constraint keyword on this exact API surface,
+        not invented. Per Owner Decision D2, the request-level bound
+        (`_MAX_PRESENTATION_SLIDES`, 30) is enforced here before any
+        HTTP call regardless of whether `slide_count` was supplied;
+        the *returned* result is bounded again defensively in
+        `_parse_presentation_response()`, since `responseSchema` is a
+        strong constraint on Gemini's side, not an absolute guarantee
+        it always honors exactly.
+
+        `request.audience` has no dedicated structured Gemini field
+        (none was found documented for this endpoint); it is applied
+        as a best-effort natural-language instruction, mirroring
+        `SpeechGenerationRequest.language`'s own prompt-steering
+        precedent (EP-084).
+
+        Args:
+            request: The provider-independent presentation-generation
+                request.
+
+        Returns:
+            The provider's reply, containing a `GeneratedPresentation`.
+
+        Raises:
+            ProviderConfigurationError: If this provider is disabled,
+                missing its API key, not configured with a
+                'presentation_model', `request.topic` is empty,
+                `request.slide_count` is outside 1-
+                `_MAX_PRESENTATION_SLIDES`, or `request.temperature` is
+                invalid (via the shared `validate_temperature()`).
+            ProviderAuthenticationError: If the API key is rejected.
+            ProviderRateLimitError: If the API reports a rate limit.
+            ProviderTimeoutError: If the request exceeds the
+                configured timeout.
+            ProviderNetworkError: If the request cannot reach the API.
+            ProviderUnavailableError: If the API is unreachable, the
+                configured presentation model is not found, or the
+                response does not contain usable, schema-conformant
+                presentation content.
+        """
+        if not self._enabled:
+            raise ProviderConfigurationError("Provider 'gemini' is disabled.")
+        if not self._api_key.strip():
+            raise ProviderConfigurationError("Provider 'gemini' is missing 'api_key'.")
+        presentation_model = self._presentation_model
+        if presentation_model is None:
+            raise ProviderConfigurationError(
+                "Provider 'gemini' is not configured for presentation generation "
+                "(set 'providers.gemini.presentation_model')."
+            )
+        if not request.topic.strip():
+            raise ProviderConfigurationError("'topic' must not be empty.")
+        if request.slide_count is not None and not (
+            1 <= request.slide_count <= _MAX_PRESENTATION_SLIDES
+        ):
+            raise ProviderConfigurationError(
+                f"'slide_count' must be between 1 and {_MAX_PRESENTATION_SLIDES} "
+                f"(got {request.slide_count!r})."
+            )
+        validate_temperature(request.temperature)
+
+        prompt = f"Generate presentation content about the following topic: {request.topic}."
+        if request.audience:
+            prompt += f" The intended audience is: {request.audience}."
+        max_slides = request.slide_count or _MAX_PRESENTATION_SLIDES
+        if request.slide_count is not None:
+            prompt += f" Produce exactly {request.slide_count} slides."
+
+        generation_config: dict[str, Any] = {
+            "responseMimeType": "application/json",
+            "responseSchema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "slides": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": max_slides,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "bullet_points": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "speaker_notes": {"type": "string"},
+                            },
+                            "required": ["title", "bullet_points"],
+                        },
+                    },
+                },
+                "required": ["title", "slides"],
+            },
+        }
+        if request.temperature is not None:
+            generation_config["temperature"] = request.temperature
+        payload: dict[str, Any] = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": generation_config,
+        }
+        headers = {
+            "x-goog-api-key": self._api_key,
+            "content-type": "application/json",
+        }
+
+        url = f"{_API_BASE_URL}/{presentation_model}:{_GENERATE_CONTENT_METHOD}"
+        logger.info(
+            f"AI presentation request started (provider='gemini', model='{presentation_model}')."
+        )
+        started = time.monotonic()
+        response = self._send_request("POST", url, headers, "presentation request", json=payload)
+        if response.status_code == 404:
+            raise ProviderUnavailableError(
+                f"Gemini presentation model '{presentation_model}' was not found for this API "
+                "key (HTTP 404). Check 'providers.gemini.presentation_model' in config.yaml."
+            )
+        self._raise_for_transport_status(response, "presentation request")
+
+        latency_ms = (time.monotonic() - started) * 1000
+        result = self._parse_presentation_response(response, presentation_model, latency_ms)
+        logger.info(
+            f"AI presentation request finished (provider='gemini', model='{result.model}', "
+            f"slides={len(result.presentation.slides)}, latency={latency_ms:.0f}ms)."
+        )
+        return result
+
+    def _parse_presentation_response(
+        self, response: requests.Response, presentation_model: str, latency_ms: float
+    ) -> PresentationGenerationResult:
+        """Translate a raw `requests.Response` from a presentation `generateContent` call.
+
+        Treats the provider's output as untrusted input throughout
+        (EP-086 STEP 2 Phase 10): the outer `generateContent` envelope
+        is parsed via the same `_extract_text()` helper `ask()`
+        already uses (no duplicate extraction logic), and the *inner*
+        JSON text (the actual presentation content) is parsed and
+        validated again, independently, since `responseSchema`
+        constrains but does not guarantee Gemini's output.
+        """
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ProviderUnavailableError("Gemini returned an invalid response body.") from exc
+
+        text = self._extract_text(data)
+        if not text:
+            raise ProviderUnavailableError(
+                "Gemini presentation request succeeded but the response contained no text."
+            )
+
+        try:
+            parsed = json.loads(text)
+        except ValueError as exc:
+            raise ProviderUnavailableError(
+                "Gemini presentation response was not valid JSON."
+            ) from exc
+
+        presentation = self._extract_presentation(parsed)
+        if presentation is None:
+            raise ProviderUnavailableError(
+                "Gemini presentation response did not contain usable presentation content."
+            )
+        return PresentationGenerationResult(
+            presentation=presentation, model=presentation_model, latency_ms=latency_ms
+        )
+
+    @staticmethod
+    def _extract_presentation(parsed: Any) -> GeneratedPresentation | None:
+        """Validate and convert parsed JSON into a `GeneratedPresentation`.
+
+        Fully defensive (EP-086 STEP 2 Phase 10/18): every field is
+        type- and shape-checked independently of `responseSchema`
+        having been requested -- a schema request is not proof the
+        model's output conforms. Returns None (never raises) for any
+        of: a non-dict top level; a missing/non-string/empty `title`;
+        a missing/non-list `slides`; an empty `slides` list; any slide
+        that is not a dict, has a missing/non-string/empty `title`, or
+        a non-list `bullet_points`; any bullet point that is not a
+        non-empty string; or a `speaker_notes` value present but not a
+        string (silently treated as absent rather than rejecting the
+        whole slide, since it is an optional field).
+
+        STEP 2 correction: a response containing MORE than
+        `_MAX_PRESENTATION_SLIDES` slides is REJECTED outright
+        (returns None, which the caller turns into
+        `ProviderUnavailableError`) rather than silently truncated.
+        `EP086_DESIGN.md` documents the 30-slide bound as a
+        request-side constraint (Owner Decision D2, Section 10/18) and
+        nowhere approves truncating already-generated content to fit
+        it -- silently dropping slides the model actually produced
+        would mean the caller receives content different from what
+        was generated, without any indication that happened. A
+        provider response that violates the very constraint it was
+        asked to honor is treated as a malformed/untrustworthy
+        response, consistent with how every other defensive parser in
+        this file (`_extract_images()`/`_extract_audio()`/
+        `_extract_video()`) treats an out-of-contract response: reject
+        it, do not guess a "reasonable" reinterpretation of it.
+        """
+        if not isinstance(parsed, dict):
+            return None
+        title = parsed.get("title")
+        if not isinstance(title, str) or not title:
+            return None
+        raw_slides = parsed.get("slides")
+        if not isinstance(raw_slides, list) or not raw_slides:
+            return None
+        if len(raw_slides) > _MAX_PRESENTATION_SLIDES:
+            return None
+
+        slides: list[PresentationSlide] = []
+        for raw_slide in raw_slides:
+            if not isinstance(raw_slide, dict):
+                continue
+            slide_title = raw_slide.get("title")
+            if not isinstance(slide_title, str) or not slide_title:
+                continue
+            raw_bullets = raw_slide.get("bullet_points")
+            if not isinstance(raw_bullets, list):
+                continue
+            bullet_points = tuple(b for b in raw_bullets if isinstance(b, str) and b)
+            speaker_notes = raw_slide.get("speaker_notes")
+            if not isinstance(speaker_notes, str) or not speaker_notes:
+                speaker_notes = None
+            slides.append(
+                PresentationSlide(
+                    title=slide_title, bullet_points=bullet_points, speaker_notes=speaker_notes
+                )
+            )
+
+        if not slides:
+            return None
+        return GeneratedPresentation(title=title, slides=tuple(slides))
 
     def ping(self) -> PingResult:
         """Check reachability, latency, model and authentication for this provider.

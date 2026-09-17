@@ -124,6 +124,7 @@ from src.services.agent_service import AgentService
 from src.services.ai_service import AIService
 from src.services.audio_generation_service import AudioGenerationService
 from src.services.image_generation_service import ImageGenerationService
+from src.services.presentation_generation_service import PresentationGenerationService
 from src.services.text_generation_service import TextGenerationService
 from src.services.video_generation_service import VideoGenerationService
 from src.services.collaboration_service import CollaborationService
@@ -916,6 +917,26 @@ class Bootstrap:
             request_executor=ai_request_executor,
             enabled=bool(config.get("video_generation.enabled", False)),
             fallback_enabled=bool(config.get("video_generation.fallback_enabled", False)),
+        )
+
+        # EP-086 Presentation Generation Integration. Standalone,
+        # non-conversational content-generation entry point mirroring
+        # `video_generation_service` exactly -- same shared
+        # `ai_request_executor` (so there remains exactly one
+        # fallback/retry implementation in the repository,
+        # EP086_DESIGN.md Section 7), no ConversationManager/
+        # ContextManager/PromptManager dependency, no CommandRouter
+        # registration (CLI exposure deferred to EP-087 or a later EP,
+        # EP086_DESIGN.md Section 4). Generates structured presentation
+        # CONTENT only -- no .pptx file, no bytes, no URI
+        # (EP086_DESIGN.md Section 6/11). Stored for a future
+        # in-process consumer, exactly like every other generation
+        # service above.
+        self._presentation_generation_service = PresentationGenerationService(
+            provider_manager=ai_provider_manager,
+            request_executor=ai_request_executor,
+            enabled=bool(config.get("presentation_generation.enabled", False)),
+            fallback_enabled=bool(config.get("presentation_generation.fallback_enabled", False)),
         )
 
         # EP-054 Self Reflection. On-demand session/conversation

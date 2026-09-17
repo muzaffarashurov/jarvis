@@ -238,6 +238,11 @@ class ProviderFactory:
         max_wait_seconds = self._config.get("video_generation.max_wait_seconds", 600)
         if not isinstance(max_wait_seconds, (int, float)):
             max_wait_seconds = 600
+        # EP-086 Owner Decision D1 (additive): a dedicated model field,
+        # threaded the same way as image_model/audio_model/video_model.
+        presentation_model = self._config.get("providers.gemini.presentation_model", None)
+        if not isinstance(presentation_model, str):
+            presentation_model = None
 
         return GeminiProvider(
             enabled=enabled,
@@ -251,4 +256,5 @@ class ProviderFactory:
             video_model=video_model,
             video_poll_interval_seconds=float(poll_interval_seconds),
             video_max_wait_seconds=float(max_wait_seconds),
+            presentation_model=presentation_model,
         )

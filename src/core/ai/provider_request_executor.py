@@ -1,23 +1,24 @@
 """Shared provider-request execution for EP-082 Text Generation Provider
 Integration, EP-083 Image Generation Provider Integration, EP-084
-Audio & Speech Generation Integration, and EP-085 Video Generation
-Provider Integration.
+Audio & Speech Generation Integration, EP-085 Video Generation
+Provider Integration, and EP-086 Presentation Generation Integration.
 
 `ProviderRequestExecutor` extracts the fallback/retry loop that
 `AIService.ask()` (EP-018) previously owned inline, so `AIService`,
 `TextGenerationService` (EP-082), `ImageGenerationService` (EP-083),
-`AudioGenerationService` (EP-084), and now `VideoGenerationService`
-(EP-085) can all execute a provider request with EP-069.1/.2/.3
-fallback and cost-aware provider ordering, without any of them owning
-a second implementation of that loop
+`AudioGenerationService` (EP-084), `VideoGenerationService` (EP-085),
+and now `PresentationGenerationService` (EP-086) can all execute a
+provider request with EP-069.1/.2/.3 fallback and cost-aware provider
+ordering, without any of them owning a second implementation of that
+loop
 (`EP082_DESIGN.md` Section 6, 11.2; `EP083_DESIGN.md` Section 8.2,
 Owner Decision 1; `EP084_DESIGN.md` Section 13; `EP085_DESIGN.md`
-Section 7 -- Rule 3/Rule 4: never introduce a second implementation
-of existing functionality).
+Section 7; `EP086_DESIGN.md` Section 7 -- Rule 3/Rule 4: never
+introduce a second implementation of existing functionality).
 
 Responsibility boundaries (`EP082_DESIGN.md` Section 6, Owner Decision
-1; unchanged by EP-083/EP-084/EP-085) are deliberately narrow and do
-not change `ProviderManager`:
+1; unchanged by EP-083/EP-084/EP-085/EP-086) are deliberately narrow
+and do not change `ProviderManager`:
 
     - `ProviderManager` remains the sole owner of provider
       registry/current-provider access, fallback candidate discovery,
@@ -48,25 +49,36 @@ not change `ProviderManager`:
       internal initiate-then-poll cycle (`EP085_DESIGN.md` Section
       6). `_run()` itself required no change to accommodate this: it
       already treats `request_fn` as an opaque, blocking call.
+    - `PresentationGenerationService` (EP-086) calls the additive
+      `execute_presentation()`, with the same non-conversational
+      shape -- back to a single, fast, synchronous call like
+      `execute()`/`execute_image()`/`execute_speech()`, NOT
+      `execute_video()`'s long-running shape
+      (`EP086_DESIGN.md` Section 6/12).
 
 EP-083 added `execute_image()` alongside the existing `execute()`
 WITHOUT changing `execute()`'s public signature, behavior, or any log
 line (`EP083_DESIGN.md` Section 8.2, Owner Decision 1, Option A).
 EP-084 added `execute_speech()` the same way, changing neither
 `execute()` nor `execute_image()` (`EP084_DESIGN.md` Section 13).
-EP-085 adds `execute_video()` the same way again, changing none of
-the three prior methods (`EP085_DESIGN.md` Section 7). All four
-methods delegate to a single private `_run()` helper that is generic
-over which provider method is invoked (`.ask()` for text,
+EP-085 added `execute_video()` the same way again, changing none of
+the three prior methods (`EP085_DESIGN.md` Section 7). EP-086 adds
+`execute_presentation()` the same way once more, changing none of the
+four prior methods (`EP086_DESIGN.md` Section 7). All five methods
+delegate to a single private `_run()` helper that is generic over
+which provider method is invoked (`.ask()` for text,
 `.generate_image()` for images, `.generate_speech()` for speech,
-`.generate_video()` for video) and optionally filters fallback
-candidates by capability (used by
-`execute_image()`/`execute_speech()`/`execute_video()`, via
+`.generate_video()` for video, `.generate_presentation()` for
+presentations) and optionally filters fallback candidates by
+capability (used by
+`execute_image()`/`execute_speech()`/`execute_video()`/
+`execute_presentation()`, via
 `AIProvider.
 supports_image_generation()`/`supports_speech_generation()`/
-`supports_video_generation()` -- `execute()` passes no filter,
-reproducing its pre-EP-083 behavior exactly). There remains exactly
-ONE retry/fallback implementation in this module.
+`supports_video_generation()`/`supports_presentation_generation()` --
+`execute()` passes no filter, reproducing its pre-EP-083 behavior
+exactly). There remains exactly ONE retry/fallback implementation in
+this module.
 
 Fallback eligibility and ordering exactly reproduce EP-069.1/.2/.3's
 existing, already-shipped semantics (`EP069_DESIGN.md`,
@@ -91,6 +103,8 @@ from src.core.ai.provider import (
     AIProvider,
     ImageGenerationRequest,
     ImageGenerationResult,
+    PresentationGenerationRequest,
+    PresentationGenerationResult,
     ProviderError,
     ProviderNetworkError,
     ProviderRateLimitError,
@@ -106,6 +120,7 @@ from src.core.ai.provider_manager import ProviderManager
 
 __all__ = [
     "ImageProviderRequestOutcome",
+    "PresentationProviderRequestOutcome",
     "ProviderRequestExecutor",
     "ProviderRequestOutcome",
     "SpeechProviderRequestOutcome",
@@ -245,6 +260,34 @@ class VideoProviderRequestOutcome:
     initial_provider: str
     final_provider: str
     result: VideoGenerationResult | None
+    error: str
+
+
+@dataclass(frozen=True)
+class PresentationProviderRequestOutcome:
+    """Result of `ProviderRequestExecutor.execute_presentation()` (EP-086).
+
+    Mirrors `SpeechProviderRequestOutcome`'s/`VideoProviderRequestOutcome`'s
+    shape exactly.
+
+    Attributes:
+        success: Whether some capable provider in the attempt chain
+            produced a result.
+        initial_provider: Name of the provider `execute_presentation()`
+            was asked to start with, regardless of whether fallback
+            occurred.
+        final_provider: Name of the provider that actually produced
+            `result` (may differ from `initial_provider` when
+            fallback occurred), or "" on failure.
+        result: The successful `PresentationGenerationResult`, or None
+            on failure.
+        error: A user-friendly error message, or "" on success.
+    """
+
+    success: bool
+    initial_provider: str
+    final_provider: str
+    result: PresentationGenerationResult | None
     error: str
 
 
@@ -539,6 +582,58 @@ class ProviderRequestExecutor:
             error=run_result.error,
         )
 
+    def execute_presentation(
+        self,
+        provider: AIProvider,
+        request: PresentationGenerationRequest,
+        *,
+        fallback_enabled: bool,
+    ) -> PresentationProviderRequestOutcome:
+        """Send `request` to `provider`, retrying eligible failures via fallback (EP-086).
+
+        Identical retry/fallback semantics and mechanical shape to
+        `execute()`/`execute_image()`/`execute_speech()` (same `_run()`
+        helper, same fallback-eligible exception set, same
+        `ProviderManager.list_fallback_candidates()` ordering, single
+        fast synchronous call) -- explicitly NOT `execute_video()`'s
+        long-running shape, since `generate_presentation()` is a
+        single `generateContent` call (`EP086_DESIGN.md` Section 6/12).
+        Every fallback candidate is filtered through `AIProvider.
+        supports_presentation_generation()` before being attempted.
+        The *initial* `provider` argument is never capability-checked
+        here -- that is `PresentationGenerationService`'s
+        responsibility, mirroring every prior modality's precedent.
+
+        Args:
+            provider: The provider to attempt first.
+            request: The provider-independent presentation-generation
+                request.
+            fallback_enabled: Whether a fallback-eligible failure may
+                be retried against another presentation-capable
+                candidate.
+
+        Returns:
+            A PresentationProviderRequestOutcome describing the final
+            result.
+        """
+
+        def request_fn(candidate: AIProvider) -> PresentationGenerationResult:
+            return candidate.generate_presentation(request)
+
+        run_result = self._run(
+            provider,
+            request_fn,
+            fallback_enabled=fallback_enabled,
+            capability_filter=lambda candidate: candidate.supports_presentation_generation(),
+        )
+        return PresentationProviderRequestOutcome(
+            success=run_result.success,
+            initial_provider=run_result.initial_provider,
+            final_provider=run_result.final_provider,
+            result=run_result.value,  # type: ignore[arg-type]
+            error=run_result.error,
+        )
+
     def _run(
         self,
         provider: AIProvider,
@@ -547,18 +642,20 @@ class ProviderRequestExecutor:
         fallback_enabled: bool,
         capability_filter: Callable[[AIProvider], bool] | None = None,
     ) -> _RunResult:
-        """Shared retry/fallback control flow for `execute()`/`execute_image()`/`execute_speech()`/`execute_video()`.
+        """Shared retry/fallback control flow for `execute()`/`execute_image()`/`execute_speech()`/`execute_video()`/`execute_presentation()`.
 
         This is the single, non-duplicated implementation of EP-069's
         fallback/retry semantics (`EP083_DESIGN.md` Section 8.2, Owner
         Decision 1; `EP084_DESIGN.md` Section 13; `EP085_DESIGN.md`
-        Section 7) -- `execute()` passes `capability_filter=None` (no
-        filtering, its pre-EP-083 behavior exactly);
-        `execute_image()`/`execute_speech()`/`execute_video()` each
-        pass their own capability check. Every log line and every
-        piece of `_FALLBACK_ELIGIBLE_ERRORS` classification logic
-        here is identical to what `execute()` alone contained before
-        the EP-083 refactor, and is unchanged again by EP-084/EP-085.
+        Section 7; `EP086_DESIGN.md` Section 7) -- `execute()` passes
+        `capability_filter=None` (no filtering, its pre-EP-083
+        behavior exactly);
+        `execute_image()`/`execute_speech()`/`execute_video()`/
+        `execute_presentation()` each pass their own capability check.
+        Every log line and every piece of `_FALLBACK_ELIGIBLE_ERRORS`
+        classification logic here is identical to what `execute()`
+        alone contained before the EP-083 refactor, and is unchanged
+        again by EP-084/EP-085/EP-086.
 
         Args:
             provider: The provider to attempt first.
@@ -567,7 +664,9 @@ class ProviderRequestExecutor:
                 `ProviderError`. `.ask()`-wrapping for `execute()`,
                 `.generate_image()`-wrapping for `execute_image()`,
                 `.generate_speech()`-wrapping for `execute_speech()`,
-                `.generate_video()`-wrapping for `execute_video()`.
+                `.generate_video()`-wrapping for `execute_video()`,
+                `.generate_presentation()`-wrapping for
+                `execute_presentation()`.
             fallback_enabled: Whether a fallback-eligible failure may
                 be retried against another candidate.
             capability_filter: If not None, every fallback candidate

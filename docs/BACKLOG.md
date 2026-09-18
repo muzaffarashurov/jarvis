@@ -10,35 +10,39 @@ Status: Active
 
 ## Next Engineering Package
 
-**None yet defined beyond EP-069's own remaining scope.** EP-069.1
-(Automatic AI Provider Fallback on Request Failure), EP-069.2
-(Configured AI Provider Fallback Ordering), EP-069.3 (Cost-Aware
-AI Provider Selection), EP-069.4 (Unified Capability Abstraction), and
-EP-069.5 (Capability Discovery Engine)
-completed the first five, independently-scoped
-sub-packages of the EP-069 ("AI Provider & Tool Registry") planning
-identifier -- see the Long-Term Roadmap section below, whose EP-069
-bullet is unchanged in wording but whose first five slices are now
-implemented. EP-069's remaining scope (LLM function/tool calling,
-External Capability Security/Supply-Chain
-Trust, Capability Lifecycle Management, and expanded fallback
-eligibility) remains unscoped and planning-only;
-each requires its own future, independent STEP 1 before
-implementation, per this repository's Engineering Package Policy.
-Separately, **EP-082 (Text Generation Provider Integration) and
-EP-083 (Image Generation Provider Integration), the first two slices
-of Phase C (AI Content Platform), are now also COMPLETE** -- see the
-EP-082 and EP-083 entries below and the "AI Content Platform" section
-further down. **EP-092 (Personal Data Collection Framework), the
-first slice of Phase E (Personal Intelligence / Energy / Weather), is
-now also COMPLETE** -- see the EP-092 entry below and the "Personal
-Intelligence / Energy / Weather" section further down. No EP-070 or
-Phase 11 exists anywhere in this repository as of this
-release. Two tracked, non-blocking follow-up items exist from EP-069,
-one tracked, non-blocking follow-up item from EP-082, one tracked,
-non-blocking follow-up item from EP-083, plus three tracked,
-non-blocking follow-up items from EP-092 (see the EP-082, EP-083, and
-EP-092 entries below):
+**None yet defined beyond EP-069's own remaining scope (EP-071–EP-074)
+and Phase E's own remaining scope (EP-095–EP-098).** All seven of
+EP-069's sub-packages -- EP-069.1 (Automatic AI Provider Fallback on
+Request Failure), EP-069.2 (Configured AI Provider Fallback
+Ordering), EP-069.3 (Cost-Aware AI Provider Selection), EP-069.4
+(Unified Capability Abstraction), EP-069.5 (Capability Discovery
+Engine), EP-069.6 (External Capability Security & Supply-Chain
+Trust, advisory assessment slice), and EP-069.7 (Capability Lifecycle
+Management) -- are now **COMPLETE**, and **EP-070 (Policy,
+Permissions & Human Approval Engine) is implemented, tested, and
+audited as a capability policy-decision slice, but is not wired into
+any execution path and enforces nothing** -- see the EP-070,
+EP-069.6, and EP-069.7 entries below and the "Long-Term Roadmap"
+section further down, whose EP-069/EP-070 bullets are updated
+accordingly. EP-069's remaining scope (LLM function/tool calling and
+expanded fallback eligibility) and EP-071–EP-074 remain unscoped and
+planning-only; each requires its own future, independent STEP 1
+before implementation, per this repository's Engineering Package
+Policy. Separately, **all six EPs of Phase C (AI Content Platform) --
+EP-082 (Text Generation), EP-083 (Image Generation), EP-084 (Audio &
+Speech Generation), EP-085 (Video Generation), EP-086 (Presentation
+Generation content), and EP-087 (Content Production Pipeline,
+orchestration-only) -- are now COMPLETE** -- see the EP-082 through
+EP-087 entries below and the "AI Content Platform" section further
+down; Phase C therefore has no remaining planning-only scope of its
+own. **EP-092 (Personal Data Collection Framework), EP-093
+(Electricity & Gas Monitoring), and EP-094 (Solar Generation
+Analytics), the first three slices of Phase E (Personal Intelligence
+/ Energy / Weather), are now also COMPLETE** -- see the EP-092
+through EP-094 entries below and the "Personal Intelligence / Energy
+/ Weather" section further down; EP-095–EP-098 remain planning-only.
+Numerous tracked, non-blocking follow-up items exist from these
+releases (see each EP's own entry below for its specific items):
 
 - From EP-069.2's own STEP 3.1 review (see the EP-069.2 entry below,
   unchanged by this release): `ai.fallback_order` does not yet
@@ -144,6 +148,118 @@ not an EP-083 regression.
 research into Gemini's actual size-parameter API shape, to avoid
 inventing undocumented behavior. This requires no new EP number and
 is not a defect in EP-083's own implementation.
+
+### EP-087 — Content Production Pipeline
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), and STEP 3 (Independent Architecture & Implementation
+Audit) all complete. EP-087 is marked **COMPLETE / STEP 3 PASS WITH
+WARNINGS**. Full design: `docs/architecture/designs/EP087_DESIGN.md`.
+Full audit: `docs/architecture/audits/EP087_STEP3_AUDIT.md`.
+
+EP-087 is the sixth and final slice of Phase C (AI Content Platform):
+an orchestration-only `ContentProductionPipelineService` combining the
+five independent generation services EP-082–EP-086 already built
+(text, image, audio, video, presentation) behind one
+`ContentProductionPipelineRequest` (five optional per-modality fields,
+no batching or repeated-modality path), dispatched in a fixed
+text/image/audio/video/presentation order, with each step's own
+success/failure preserved independently and an unconditional
+`success=True` aggregate result. It imports only the five
+`*GenerationService` classes and their request/result dataclasses --
+confirmed zero import of `ProviderManager`, `ProviderRequestExecutor`,
+`AIProvider`, or `GeminiProvider`, and **no `.pptx`/artifact rendering
+of any kind** -- that remains EP-076's own, separate territory, not
+EP-087's or EP-086's (see "Relationship to EP-086 (and EP-076)" in
+`EP087_DESIGN.md` §3). Bootstrap wiring reuses the five
+already-constructed service instances; no new `CommandRouter`
+namespace was added.
+
+Tests: EP-087 127/0/0 (new suite,
+`tests/EP087/test_content_production_pipeline.py`, 43 test methods).
+**One tracked, non-blocking follow-up item from this release:** the
+"result field stays `None` on failure" invariant is explicitly tested
+only for the image modality; text/audio/video/presentation rely on
+the same, visually-confirmed-identical code pattern but aren't each
+individually asserted for it (LOW, coverage gap only).
+
+### EP-086 — Presentation Generation Integration
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Independent Architecture & Implementation Audit),
+and STEP 3.1 (Findings Resolution) all complete. EP-086 is marked
+**COMPLETE / STEP 3 PASS** (after STEP 3.1). Full design:
+`docs/architecture/designs/EP086_DESIGN.md`. Full audit:
+`docs/architecture/audits/EP086_STEP3_AUDIT.md`.
+
+EP-086 integrates AI-generated presentation *content* (structured
+slide outlines/text, via `PresentationSlide`/
+`PresentationGenerationRequest`/`GeneratedPresentation`) into the same
+provider abstraction and shared execution path EP-082–EP-085
+established, adding `AIProvider.supports_presentation_generation()`/
+`generate_presentation()`, `ProviderRequestExecutor
+.execute_presentation()`, and a new, standalone
+`PresentationGenerationService`. **EP-086 is explicitly, deliberately
+distinct from producing a rendered `.pptx`/`.odp`/PDF artifact file**
+-- that remains EP-076's (Universal Document Intelligence Engine,
+Phase A2) own, separate concern, not built or duplicated here (see
+`EP086_DESIGN.md` §2). The original STEP 3 audit recorded one warning
+(F1); it was resolved in STEP 3.1 via a documentation-only correction,
+with no behavioral, architectural, or security defect ever found.
+
+Tests: EP-086 114/0/0 (new suite,
+`tests/EP086/test_presentation_generation_provider_integration.py`).
+
+### EP-085 — Video Generation Provider Integration
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), and STEP 3 (Independent Architecture Audit & Hardening) all
+complete. EP-085 is marked **COMPLETE / STEP 3 PASS WITH WARNINGS**.
+Full design: `docs/architecture/designs/EP085_DESIGN.md`. Full audit:
+`docs/architecture/audits/EP085_ARCHITECTURE_AUDIT.md`.
+
+EP-085 integrates Gemini's Veo video-generation API into the same
+provider abstraction EP-082–EP-084 established, via a new
+`generate_video()`/bounded-polling path on `GeminiProvider`
+(`video_generation:` config namespace, `poll_interval_seconds`/
+`max_wait_seconds`) and a new `VideoGenerationService`. The audit's
+highest-priority concern, retry-induced duplicate generation, was
+independently investigated and confirmed structurally impossible. One
+genuine MEDIUM-severity robustness gap in poll-failure handling over a
+multi-minute wait window -- found by adversarial reasoning, not by
+STEP 2's own passing tests -- was fixed and regression-tested during
+the audit; one LOW test-coverage gap was also closed. Remaining items
+are informational or pre-existing and unrelated.
+
+Tests: EP-085 97/0/0 (new suite,
+`tests/EP085/test_video_generation_provider_integration.py`), stable
+at 97/97 across repeated runs (deterministic -- no real network
+access, no real wall-clock waiting).
+
+### EP-084 — Audio & Speech Generation Integration
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), and STEP 3 (Independent Architecture Audit & Hardening) all
+complete. EP-084 is marked **COMPLETE / STEP 3 PASS WITH WARNINGS**.
+Full design: `docs/architecture/designs/EP084_DESIGN.md`. Full audit:
+`docs/architecture/audits/EP084_ARCHITECTURE_AUDIT.md`.
+
+EP-084 is the third slice of Phase C: it extends the EP-082/EP-083
+provider abstraction with Gemini text-to-speech (`generate_audio()`)
+and a new, standalone `AudioGenerationService`, following the same
+pattern `ImageGenerationService` established. One genuine
+MEDIUM-severity defect, found through independent testing that STEP
+2's own passing suite had not exercised, was fixed and
+regression-tested during the audit; one LOW documentation-accuracy
+gap was also fixed. Two informational findings were investigated in
+depth against live, current Gemini API behavior and confirmed *not*
+to be defects, including robustness against a real-world MIME-format
+regression that affected another project.
+
+Tests: EP-084 77/0/0 (new suite,
+`tests/EP084/test_audio_generation_provider_integration.py`).
+Regression: `tests/EP083` 60/0/0, `tests/EP082` 69/0/0, `tests/EP069`
+68/0/0 all re-executed and unaffected.
 
 ### EP-092 — Personal Data Collection Framework
 
@@ -270,6 +386,54 @@ the first EP to register a real source):
    record (EP092-AUDIT-003) so EP-093+ authors know they exist without
    reading the implementation directly.
 
+### EP-094 — Solar Generation Analytics
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), and STEP 3 (Independent Architecture Audit) all complete.
+EP-094 is marked **COMPLETE / STEP 3 PASS WITH WARNINGS**. Full
+design: `docs/architecture/designs/EP094_DESIGN.md`. Full audit:
+`docs/architecture/audits/EP094_ARCHITECTURE_AUDIT.md`.
+
+EP-094 is the third slice of Phase E, a pure consumer of EP-092's
+`PersonalDataSource`/`PersonalDataManager`/`PersonalDataService`
+contracts, exactly as EP-093 is: a `SolarCsvSource` mirroring
+`ElectricitySource`/`GasSource` (EP-093) exactly for the
+`solar_generation` category, extending -- not duplicating -- the
+shared `personal_data` CLI namespace and acquisition pattern EP-093
+established, and generalizing `PersonalDataModule`'s constructor to
+support both domain groups (one disclosed, necessary change to
+EP-093-built code). EP-092 was re-verified byte-identical during this
+audit, and EP-093 was independently re-audited to PASS alongside it.
+
+Tests: EP-094 310/0/0 (new suite,
+`tests/EP094/test_solar_generation_analytics.py`). No regression was
+detected in EP-092 (820/0/0, re-verified) or EP-093 (540/0/0,
+re-verified across multiple runs).
+
+### EP-093 — Electricity & Gas Monitoring
+
+STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
+Testing), STEP 3 (Independent Audit), STEP 3.1 (Remediation), and a
+STEP 3 Re-Audit all complete, consolidated into one audit record.
+EP-093 is marked **COMPLETE / PASS** (after remediation). Full
+design: `docs/architecture/designs/EP093_DESIGN.md`. Full audit (with
+the consolidated STEP 3/3.1/re-audit history):
+`docs/architecture/audits/EP093_ARCHITECTURE_AUDIT.md`.
+
+EP-093 is the second slice of Phase E, a pure consumer of EP-092's
+Personal Data Collection Framework contracts: `ElectricityCsvSource`/
+`GasCsvSource` acquisition sources, a shared `personal_data` CLI
+module namespace, and the corresponding `config/config.yaml`/
+`Bootstrap` wiring (`personal_data_electricity_gas.enabled`,
+independent of EP-092's own per-category consent allowlist). EP-092
+was independently re-verified byte-identical at every stage of the
+EP-093 audit cycle.
+
+Tests: EP-093 540/0/0 (new suite,
+`tests/EP093/test_electricity_gas_monitoring.py`; 542/0/0 confirmed
+on an independent re-run). EP-092 regression confirmed clean (820/0/0,
+re-verified).
+
 ### EP-069.5 — Capability Discovery Engine
 
 STEP 1 (Architecture Discovery & Design), STEP 2 (Implementation &
@@ -338,6 +502,113 @@ and unaffected by EP-069.5. See
 
 **No tracked follow-up items from this release.** Both STEP 3 findings
 are informational and closed; neither requires further work.
+
+### EP-070 — Policy, Permissions & Human Approval Engine (Capability Policy-Decision Slice)
+
+STEP 1 (Architecture Discovery & Design) and STEP 3 (Independent
+Audit) both complete. EP-070 is marked **IMPLEMENTED, TESTED, AUDITED
+/ STEP 3 PASS** -- **not COMPLETE in the sense of enforcement**: this
+slice computes a `PolicyLevel` decision only and is not wired into any
+execution path. Full design: `docs/architecture/designs/EP070_DESIGN.md`.
+Full audit: `docs/architecture/audits/EP070_STEP3_AUDIT.md`.
+
+No policy/approval/authorization engine of any kind previously existed
+in this repository, and -- at a deeper level than EP-069.5/.6/.7's own
+STEP 1 findings -- there is still no execution path for `Capability`
+objects to gate at all (`ToolEngine`, the only real invocation
+pipeline in this codebase, has never been connected to the
+`Capability` model). EP-070 therefore adds `src/core/capability_policy/`:
+a `PolicyLevel` enum (`OBSERVE`/`ANALYZE`/`PREPARE`/`EXECUTE`/
+`REQUIRE_APPROVAL` -- `OBSERVE` is a restrictive policy decision,
+never execution authorization), a frozen `PolicyDecision`
+(`capability_id`/`level`/`reasons`), a `PolicyProvider` ABC with one
+deterministic `DefaultPolicyProvider` implementing a fixed,
+first-match-wins six-branch table over EP-069.6's security assessment
+and EP-069.7's lifecycle status, and a thin `PolicyEngine`. **Zero
+enforcement, zero bootstrap/config/CLI wiring, and no modification to
+EP-069.4/.5/.6/.7.** The audit independently re-executed every OD4
+precedence combination, including two not present in STEP 2's own
+test suite, and confirmed the six-branch table is structurally
+first-match-wins (each branch ends in an unconditional `return`).
+Three LOW/INFORMATIONAL findings were recorded, none requiring
+resolution before further work.
+
+Tests: EP-070 83/0/0 (new suite,
+`tests/EP070/test_capability_policy_engine.py`). Full regression: 7476
+passed / 3 failed / 1 skipped, identical in identity and count to the
+pre-EP-070 baseline of 7393/3/1 (per `EP069_7_ARCHITECTURE_AUDIT.md`)
+-- the `+83` delta exactly equals this release's own new test count.
+
+### EP-069.7 — Capability Lifecycle Management
+
+STEP 1 (Architecture Discovery & Design) and STEP 3 (Independent
+Audit) both complete. EP-069.7 is marked **COMPLETE / STEP 3 PASS
+WITH WARNINGS**. Full design:
+`docs/architecture/designs/EP069_7_DESIGN.md`. Full audit:
+`docs/architecture/audits/EP069_7_ARCHITECTURE_AUDIT.md`.
+
+`Capability` (EP-069.4) is an immutable (`frozen=True`) dataclass with
+no history-tracking mechanism, and `CapabilityRegistry` already owns
+mechanical catalog-membership operations
+(`register`/`unregister`). EP-069.7 adds a separate, append-only
+**record of what happened to a capability over time**:
+`src/core/capability_lifecycle/` -- an id-keyed status
+(`ACTIVE`/`DISABLED`/`REVOKED`) plus an ordered audit trail of
+lifecycle events (`REGISTERED`/`UPDATED`/`DISABLED`/`ENABLED`/
+`REVOKED`), tracked independently of `Capability`'s own immutable
+fields. **No dependency on `CapabilityRegistry`, no mutation of any
+`Capability`, no Provider/Engine/Manager framework, and no
+persistence, configuration, or wiring of any kind.** The audit found
+one MEDIUM-adjacent design-document contradiction -- the approved
+STEP 1 text's `enable()` bullet doesn't match its own, necessary,
+final shipped signature (`CapabilityLifecycleEvent | None`, a no-op on
+an already-`ACTIVE` capability returning `None` rather than a
+duplicate event) -- traced to the design document itself, not an
+implementation defect, and resolved by documentation correction rather
+than a code change; a related LOW dead-code observation
+(`_MutableRecord.to_record()` is unreachable) was also recorded.
+Neither required a STEP 3.1 remediation cycle.
+
+Tests: EP-069_7 65/0/0 (new suite,
+`tests/EP069_7/test_capability_lifecycle_registry.py`). Full
+regression: 7393 passed / 3 failed / 1 skipped, identical in identity
+and count to the pre-EP-069.7 baseline of 7328/3/1 (per
+`EP069_6_ARCHITECTURE_AUDIT.md`) -- the `+65` delta exactly equals
+this release's own new test count.
+
+### EP-069.6 — External Capability Security & Supply-Chain Trust (Advisory Assessment Slice)
+
+STEP 1 (Architecture Discovery & Design) and STEP 3 (Independent
+Audit) both complete. EP-069.6 is marked **COMPLETE / STEP 3 PASS,
+ZERO CRITICAL, ZERO HIGH, ZERO MEDIUM**. Full design:
+`docs/architecture/designs/EP069_6_DESIGN.md`. Full audit:
+`docs/architecture/audits/EP069_6_ARCHITECTURE_AUDIT.md`.
+
+This STEP 1 resolved an inherited open structural question from
+`ROADMAP_070_138_REBUILD_PROPOSAL.md` (whether EP-069.6 deserved its
+own top-level EP number) by Owner Decision OD1: **keep the EP-069.6
+number, narrow the content scope to an advisory assessment slice
+only.** EP-069.6 adds `src/core/capability_security/`: a
+`SecurityRiskLevel` (`LOW`/`MEDIUM`/`HIGH`, no `CRITICAL`, no numeric
+score)/`SecurityFinding`/`CapabilitySecurityAssessment` data model
+with **no binding approved/rejected decision field anywhere** (OD2), a
+`CapabilitySecurityProvider` ABC with one deterministic implementation
+performing exactly three approved checks gated on non-`INTERNAL`
+source kind, using the exact approved OD5 six-item keyword list
+(`credential`, `secret`, `network`, `filesystem.write`, `process`,
+`shell`), and a thin `CapabilitySecurityEngine`. **No dependency
+scanning, no sandboxing, no execution, no binding approval/rejection,
+and no bootstrap/config/CLI wiring of any kind** -- it remains
+advisory only and is not currently consulted by EP-070's policy engine
+or any other caller. One LOW/INFORMATIONAL observation was recorded,
+non-blocking.
+
+Tests: EP-069_6 51/0/0 (new suite,
+`tests/EP069_6/test_capability_security_engine.py`). Full regression:
+7328 passed / 3 failed / 1 skipped, identical in identity and count to
+the pre-EP-069.6 baseline of 7277/3/1 (per EP-069.5's own STEP 3
+audit) -- the `+51` delta exactly equals this release's own new
+assertion count.
 
 ### EP-082 — Text Generation Provider Integration
 
@@ -3375,29 +3646,40 @@ Priority may change.
 # Long-Term Roadmap — Future Engineering Packages (EP-069–EP-140)
 
 Status: PLANNING ONLY, with exceptions. Nothing in this section has
-been implemented, designed, or scheduled, **except EP-069's first
-five sub-packages, EP-069.1 (Automatic AI Provider Fallback on
+been implemented, designed, or scheduled, **except all seven of
+EP-069's sub-packages -- EP-069.1 (Automatic AI Provider Fallback on
 Request Failure), EP-069.2 (Configured AI Provider Fallback Ordering),
 EP-069.3 (Cost-Aware AI Provider Selection), EP-069.4 (Unified
-Capability Abstraction), and EP-069.5 (Capability Discovery Engine),
-which are COMPLETE**
--- see the "Next Engineering Package" section above and
+Capability Abstraction), EP-069.5 (Capability Discovery Engine),
+EP-069.6 (External Capability Security & Supply-Chain Trust, advisory
+assessment slice), and EP-069.7 (Capability Lifecycle Management),
+which are COMPLETE** -- see the "Next Engineering Package" section
+above and
 `docs/architecture/designs/EP069_DESIGN.md`/
 `docs/architecture/designs/EP069_2_DESIGN.md`/
 `docs/architecture/designs/EP069_3_DESIGN.md`/
 `docs/architecture/designs/EP069_4_DESIGN.md`/
-`docs/architecture/designs/EP069_5_DESIGN.md`; **EP-082 (Text
-Generation Provider Integration), which is COMPLETE** -- see the
-"Next Engineering Package" section above and
-`docs/architecture/designs/EP082_DESIGN.md`; and **EP-092 (Personal
-Data Collection Framework), which is COMPLETE** -- see the "Next
+`docs/architecture/designs/EP069_5_DESIGN.md`/
+`docs/architecture/designs/EP069_6_DESIGN.md`/
+`docs/architecture/designs/EP069_7_DESIGN.md`; **EP-070 (Policy,
+Permissions & Human Approval Engine), which is implemented, tested,
+and audited as a capability policy-decision slice but is not wired
+into any execution path and enforces nothing** -- see the "Next
 Engineering Package" section above and
-`docs/architecture/designs/EP092_DESIGN.md`. No
+`docs/architecture/designs/EP070_DESIGN.md`; **all six EPs of Phase C
+(AI Content Platform), EP-082 (Text Generation Provider Integration)
+through EP-087 (Content Production Pipeline), which are COMPLETE** --
+see the "Next Engineering Package" section above and each EP's own
+`docs/architecture/designs/EP0XX_DESIGN.md`; and **EP-092 (Personal
+Data Collection Framework), EP-093 (Electricity & Gas Monitoring), and
+EP-094 (Solar Generation Analytics), which are COMPLETE** -- see the
+"Next Engineering Package" section above and each EP's own
+`docs/architecture/designs/EP0XX_DESIGN.md`. No
 other EP number below has an owner, a design document, or a STEP 1
-report yet, and EP-069's own remaining scope (beyond
-EP-069.1/EP-069.2/EP-069.3/EP-069.4/EP-069.5), Phase C's own remaining
-scope (EP-083–EP-087), and Phase E's own remaining scope
-(EP-093–EP-098), are likewise still planning-only -- this
+report yet, and EP-069's own remaining scope (EP-071–EP-074, beyond
+EP-069.1–EP-069.7 and EP-070) and Phase E's own remaining scope
+(EP-095–EP-098) are likewise still planning-only; Phase C has no
+remaining planning-only scope of its own -- this
 section otherwise exists solely to record the long-term direction so
 future work has a stable set of planning identifiers to start from.
 
@@ -3437,17 +3719,23 @@ remote shell.
   independent abstractions for AI providers, models, tools,
   capabilities, fallback providers, provider selection, and cost
   awareness, so Jarvis is never hard-coded to one AI provider.
-  **EP-069.1 (Automatic AI Provider Fallback on Request Failure),
-  EP-069.2 (Configured AI Provider Fallback Ordering), EP-069.3
-  (Cost-Aware AI Provider Selection), EP-069.4 (Unified Capability
-  Abstraction), and EP-069.5 (Capability Discovery Engine) are
-  COMPLETE** -- see the "Next Engineering Package" section above,
+  **All seven of EP-069's sub-packages, EP-069.1 (Automatic AI
+  Provider Fallback on Request Failure), EP-069.2 (Configured AI
+  Provider Fallback Ordering), EP-069.3 (Cost-Aware AI Provider
+  Selection), EP-069.4 (Unified Capability Abstraction), EP-069.5
+  (Capability Discovery Engine), EP-069.6 (External Capability
+  Security & Supply-Chain Trust, advisory assessment slice), and
+  EP-069.7 (Capability Lifecycle Management), are COMPLETE** -- see
+  the "Next Engineering Package" section above,
   `docs/architecture/designs/EP069_DESIGN.md`,
   `docs/architecture/designs/EP069_2_DESIGN.md`,
   `docs/architecture/designs/EP069_3_DESIGN.md`,
-  `docs/architecture/designs/EP069_4_DESIGN.md`, and
-  `docs/architecture/designs/EP069_5_DESIGN.md`. The remaining scope
-  described in this bullet (tools and capabilities)
+  `docs/architecture/designs/EP069_4_DESIGN.md`,
+  `docs/architecture/designs/EP069_5_DESIGN.md`,
+  `docs/architecture/designs/EP069_6_DESIGN.md`, and
+  `docs/architecture/designs/EP069_7_DESIGN.md`. The remaining scope
+  described in this bullet (LLM function/tool calling and expanded
+  fallback eligibility)
   remains unscoped and planning-only;
   each requires its own future, independent STEP 1, per this
   repository's Engineering Package Policy for `EP-XXX.Y` sub-packages.
@@ -3456,10 +3744,7 @@ remote shell.
   GitHub projects/CLI tools, REST APIs, external web services, and
   browser-only services) as an extension of the tool/capability
   registry, rather than as parallel, disconnected infrastructure or
-  one EP per adapter type. The first two of the four, EP-069.4 and
-  EP-069.5, are now
-  COMPLETE; the remaining two (EP-069.6–EP-069.7) are still
-  planning-only:
+  one EP per adapter type. **All four are now COMPLETE:**
   - **EP-069.4 — Unified Capability Abstraction** (HIGH). **COMPLETE**
     -- see the "Next Engineering Package" section above and
     `docs/architecture/designs/EP069_4_DESIGN.md`. A single
@@ -3487,24 +3772,37 @@ remote shell.
     **no Manager and no bootstrap/config/CLI wiring of any kind** --
     the engine is directly constructible and independently usable.
     Registry population and actual Planning/Agent Framework
-    integration remain EP-069.6/.7's and a future EP's own,
-    still-planning-only, scope.
+    integration remain a future EP's own, still-planning-only, scope.
   - **EP-069.6 — External Capability Security & Supply-Chain Trust**
-    (HIGH). Source-provenance checks, dependency/package inspection,
-    permission mapping (filesystem/network/credential/process access),
-    and sandboxing/isolation policy for anything not written by
-    Jarvis itself. Explicitly forbids an unrestricted "download ->
-    pip install -> execute" path for local GitHub projects; every
-    external capability is untrusted until inspected and approved
-    under EP-070's policy engine.
+    (HIGH). **COMPLETE -- an advisory assessment slice only** -- see
+    the "Next Engineering Package" section above and
+    `docs/architecture/designs/EP069_6_DESIGN.md`. Source-provenance
+    checks and permission-substring assessment (`SecurityRiskLevel`/
+    `SecurityFinding`/`CapabilitySecurityAssessment`), with **no
+    binding approved/rejected decision, no dependency/package
+    inspection, no sandboxing/isolation policy, and no wiring of any
+    kind** -- it does not currently forbid or gate anything by
+    itself; the fuller bullet scope (dependency inspection,
+    sandboxing) was an explicit Owner-Decision non-goal for this
+    slice, deferred to a future EP if needed.
   - **EP-069.7 — Capability Lifecycle Management** (MEDIUM).
-    Registration, versioning, enable/disable, update, revocation, and
-    an audit trail for every capability regardless of backend.
+    **COMPLETE** -- see the "Next Engineering Package" section above
+    and `docs/architecture/designs/EP069_7_DESIGN.md`. Registration/
+    update/enable/disable/revocation events and an append-only audit
+    trail (`CapabilityLifecycleRegistry`), tracked independently of
+    `Capability`'s own immutable fields, with **no dependency on
+    `CapabilityRegistry` and no wiring of any kind**.
 - **EP-070 — Policy, Permissions & Human Approval Engine** (HIGH).
   Centralized policy control over sensitive/external actions, with
   graduated levels such as OBSERVE, ANALYZE, PREPARE, EXECUTE, and
   REQUIRE_APPROVAL. **Reused by**: every EP-069.4-.7 capability
   execution path -- external capabilities never bypass this gate.
+  **Implemented, tested, and audited as a capability policy-decision
+  slice** -- see the "Next Engineering Package" section above and
+  `docs/architecture/designs/EP070_DESIGN.md` -- **but this slice
+  computes a `PolicyLevel` only; it is not wired into any execution
+  path and enforces nothing today**, since no execution path for
+  `Capability` objects to gate yet exists in this repository.
 - **EP-071 — Credential & Secret Management** (HIGH). Secure handling
   of API keys, OAuth credentials, passwords, tokens, and service
   credentials, with an explicit requirement that secrets never leak
@@ -3635,12 +3933,30 @@ Level-3 capability; neither is a domain-specific rewrite of Core.
   image generation into the same provider architecture EP-082
   established for text, via a new `execute_image()` on
   `ProviderRequestExecutor` and a new `ImageGenerationService`.
-- **EP-084 — Audio & Speech Generation Integration** (MEDIUM)
-- **EP-085 — Video Generation Provider Integration** (MEDIUM)
-- **EP-086 — Presentation Generation Integration** (MEDIUM)
-- **EP-087 — Content Production Pipeline** (MEDIUM). Combine the
-  above, through the EP-069 provider abstraction, into text/image/
-  audio/video/presentation/combined multimedia output.
+- **EP-084 — Audio & Speech Generation Integration** (MEDIUM).
+  **COMPLETE** -- see the "Next Engineering Package" section above and
+  `docs/architecture/designs/EP084_DESIGN.md`. Extends the EP-082/
+  EP-083 provider abstraction with Gemini text-to-speech
+  (`generate_audio()`) and a new `AudioGenerationService`.
+- **EP-085 — Video Generation Provider Integration** (MEDIUM).
+  **COMPLETE** -- see the "Next Engineering Package" section above and
+  `docs/architecture/designs/EP085_DESIGN.md`. Integrates Gemini's Veo
+  video-generation API via a new bounded-polling `generate_video()`
+  path and a new `VideoGenerationService`.
+- **EP-086 — Presentation Generation Integration** (MEDIUM).
+  **COMPLETE** -- see the "Next Engineering Package" section above and
+  `docs/architecture/designs/EP086_DESIGN.md`. Generates presentation
+  *content* (structured slide outlines/text) via a new
+  `PresentationGenerationService` -- deliberately distinct from
+  rendering a `.pptx`/`.odp`/PDF artifact file, which remains EP-076's
+  own, separate territory.
+- **EP-087 — Content Production Pipeline** (MEDIUM). **COMPLETE** --
+  see the "Next Engineering Package" section above and
+  `docs/architecture/designs/EP087_DESIGN.md`. Orchestration-only
+  `ContentProductionPipelineService` combining EP-082-EP-086's five
+  independent generation services behind one request object, in a
+  fixed dispatch order, with each step's own success/failure preserved
+  independently -- no provider/artifact logic of its own.
 
 ## Social Automation (EP-088–EP-091)
 
@@ -3659,8 +3975,16 @@ Level-3 capability; neither is a domain-specific rewrite of Core.
   `docs/architecture/designs/EP092_DESIGN.md`. Structured, opt-in-
   consent-gated ingestion of permitted personal operational data via
   a dedicated append-only JSONL store, independent of Knowledge Base.
-- **EP-093 — Electricity & Gas Monitoring** (MEDIUM).
-- **EP-094 — Solar Generation Analytics** (MEDIUM).
+- **EP-093 — Electricity & Gas Monitoring** (MEDIUM). **COMPLETE** --
+  see the "Next Engineering Package" section above and
+  `docs/architecture/designs/EP093_DESIGN.md`. `ElectricityCsvSource`/
+  `GasCsvSource` acquisition sources consuming EP-092's framework, plus
+  a shared `personal_data` CLI namespace.
+- **EP-094 — Solar Generation Analytics** (MEDIUM). **COMPLETE** --
+  see the "Next Engineering Package" section above and
+  `docs/architecture/designs/EP094_DESIGN.md`. `SolarCsvSource`
+  extending EP-093's shared CLI namespace and acquisition pattern for
+  the `solar_generation` category.
 - **EP-095 — Energy Visualization & Reporting** (MEDIUM).
 - **EP-096 — Energy Forecast & Anomaly Detection** (MEDIUM).
 - **EP-097 — Weather Intelligence Agent** (MEDIUM).

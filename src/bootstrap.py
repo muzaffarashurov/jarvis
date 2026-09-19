@@ -24,6 +24,14 @@ from src.core.agent.agent_manager import AgentManager
 from src.core.agent.agent_provider import AgentFrameworkError
 from src.core.api.api_router import ApiRouter
 from src.core.api.rest_api_server import RestApiServer, RestApiServerError
+from src.core.capability.capability_registry import CapabilityRegistry
+from src.core.capability_governance.capability_governance_coordinator import (
+    CapabilityGovernanceCoordinator,
+)
+from src.core.capability_governance.command_capability_map import CommandCapabilityMap
+from src.core.capability_lifecycle.capability_lifecycle_registry import CapabilityLifecycleRegistry
+from src.core.capability_policy.capability_policy_engine import PolicyEngine
+from src.core.capability_security.capability_security_engine import CapabilitySecurityEngine
 from src.core.collaboration.collaboration_engine import CollaborationEngine
 from src.core.collaboration.collaboration_manager import CollaborationManager
 from src.core.collaboration.collaboration_provider import CollaborationError
@@ -584,7 +592,61 @@ class Bootstrap:
         Returns:
             A CommandRouter with all built-in command modules registered.
         """
-        router = CommandRouter()
+        # EP-069.8 (Capability Governance Integration): construct the
+        # five collaborators `CapabilityGovernanceCoordinator` needs --
+        # `CapabilityRegistry` (EP-069.4), `CapabilitySecurityEngine`
+        # (EP-069.6), `PolicyEngine` (EP-070), and
+        # `CapabilityLifecycleRegistry` (EP-069.7), each constructed
+        # exactly as their own design docs already show them being
+        # constructed in tests (no argument, `Default*Provider`
+        # collaborators), plus the new `CommandCapabilityMap`
+        # (`src/core/capability_governance/`) -- then inject the
+        # resulting coordinator into `CommandRouter`. This is the only
+        # new construction this method performs for EP-069.8; none of
+        # the four existing engines' own construction is altered from
+        # how their own STEP 2 implementations already expect to be
+        # built.
+        #
+        # `capability_command_map` intentionally starts, and as of
+        # this STEP 2 remains, empty: no production `Capability` is
+        # registered into `capability_registry` either. Per
+        # `docs/architecture/designs/EP069.8_STEP1_1_RESOLUTION.md`
+        # (Section 9 of the calling STEP 2 prompt; `EP069.8_DESIGN.md`
+        # Section 13), inventing capabilities merely to demonstrate
+        # the system is explicitly out of this EP's scope -- an empty
+        # map is a fully valid, safe production state: it means every
+        # dispatched command remains ungoverned, identical to
+        # `CommandRouter`'s behavior before this Engineering Package
+        # existed. A future EP that intends to actually govern a real
+        # command registers both a `Capability` (into
+        # `capability_registry`, below) and a mapping (into
+        # `capability_command_map.register(...)`) here.
+        capability_registry = CapabilityRegistry()
+        capability_security_engine = CapabilitySecurityEngine()
+        capability_policy_engine = PolicyEngine()
+        capability_lifecycle_registry = CapabilityLifecycleRegistry()
+        capability_command_map = CommandCapabilityMap()
+
+        # Startup consistency validation (STEP 1.1 report, Section 4):
+        # every `capability_id` `capability_command_map` references
+        # must already be registered in `capability_registry`. Must
+        # never be caught/suppressed here -- a configured-but-missing
+        # capability is a fail-loudly startup misconfiguration, not a
+        # silently-ungoverned command. Trivially passes today, since
+        # both collaborators above start empty; this call exists so
+        # the check runs automatically the moment either is populated
+        # in a future EP.
+        capability_command_map.validate_against_registry(capability_registry)
+
+        capability_governance_coordinator = CapabilityGovernanceCoordinator(
+            command_capability_map=capability_command_map,
+            capability_registry=capability_registry,
+            security_engine=capability_security_engine,
+            policy_engine=capability_policy_engine,
+            lifecycle_registry=capability_lifecycle_registry,
+        )
+
+        router = CommandRouter(coordinator=capability_governance_coordinator)
 
         registry = ProcessRegistry()
         execution_engine = ExecutionEngine(

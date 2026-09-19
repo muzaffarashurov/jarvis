@@ -7,6 +7,12 @@ from typing import Protocol, runtime_checkable
 
 from loguru import logger
 
+from src.core.capability_governance.capability_governance_coordinator import (
+    CapabilityGovernanceCoordinator,
+    GovernanceDecision,
+    GovernanceOutcome,
+)
+
 
 @dataclass(frozen=True)
 class CommandResult:
@@ -65,11 +71,34 @@ class CommandRouter:
     New modules register themselves via `register()`. This class never
     needs to change to support new command namespaces, keeping it
     open for extension and closed for modification.
+
+    EP-069.8 (Capability Governance Integration): an optional
+    `CapabilityGovernanceCoordinator` may be supplied at construction
+    time. When present, `dispatch()` asks it to authorize every
+    resolved `(module, action)` pair before calling `module.execute()`
+    -- see `dispatch()`'s own docstring for the exact behavior. This
+    class never imports or references `CapabilityRegistry`,
+    `CapabilitySecurityEngine`, `PolicyEngine`, or
+    `CapabilityLifecycleRegistry` directly, and never constructs a
+    coordinator itself -- the coordinator is the only new seam this
+    class depends on, injected by `src/bootstrap.py`
+    (`docs/architecture/designs/EP069.8_STEP1_1_RESOLUTION.md`,
+    Section 1). Omitting the argument (the default) reproduces this
+    class's exact pre-EP-069.8 behavior.
     """
 
-    def __init__(self) -> None:
-        """Initialize an empty CommandRouter with no registered modules."""
+    def __init__(self, coordinator: CapabilityGovernanceCoordinator | None = None) -> None:
+        """Initialize an empty CommandRouter with no registered modules.
+
+        Args:
+            coordinator: Optional EP-069.8 capability-governance
+                coordinator. Defaults to `None`, which preserves this
+                class's exact pre-EP-069.8 `dispatch()` behavior --
+                every existing caller that constructs `CommandRouter()`
+                with no arguments is unaffected.
+        """
         self._modules: dict[str, CommandModule] = {}
+        self._coordinator = coordinator
 
     def register(self, module: CommandModule) -> None:
         """Register a command module under its namespace.
@@ -144,6 +173,18 @@ class CommandRouter:
             quoting (e.g. an unbalanced quote character) is likewise
             returned as an unsuccessful CommandResult rather than
             raising -- see the `except ValueError` block below.
+
+        EP-069.8 governance (only when a coordinator was supplied at
+        construction time): once a module is resolved, the coordinator
+        is asked to authorize `(module_name, action)` before
+        `module.execute()` is called. An unmapped `(module_name,
+        action)` pair -- including every pair when no coordinator is
+        configured at all -- is ungoverned and behaves exactly as
+        before this Engineering Package existed. A mapped pair is
+        authorized only when the resulting policy level is `EXECUTE`;
+        every other outcome (denied, missing capability, internal
+        governance error) returns an unsuccessful CommandResult
+        without ever calling `module.execute()` (fail closed).
         """
         try:
             tokens = self._tokenize(raw_input.strip())
@@ -171,6 +212,14 @@ class CommandRouter:
         action = rest[0].lower() if rest else ""
         arguments = rest[1:]
 
+        if self._coordinator is not None:
+            decision = self._coordinator.authorize_dispatch(module_name, action)
+            if not decision.may_execute:
+                return CommandResult(
+                    success=False,
+                    message=self._governance_denial_message(module_name, action, decision),
+                )
+
         try:
             result = module.execute(action, arguments)
         except Exception as exc:  # noqa: BLE001 - a module must never crash the shell
@@ -184,6 +233,34 @@ class CommandRouter:
             logger.info(f"Command executed: {module_name}")
 
         return result
+
+    @staticmethod
+    def _governance_denial_message(
+        module_name: str, action: str, decision: GovernanceDecision
+    ) -> str:
+        """Build the CommandResult.message for an EP-069.8 governance denial.
+
+        Args:
+            module_name: The dispatched module namespace.
+            action: The dispatched action identifier.
+            decision: The coordinator's `GovernanceDecision`. Must not
+                be `may_execute`-true (callers only reach this for a
+                denial).
+
+        Returns:
+            A short, human-readable message naming the command and the
+            reason it was blocked. Never includes the raw `arguments`
+            list -- only `module_name`/`action`, matching this
+            method's own minimal-disclosure intent (EP-069.8_DESIGN.md
+            Section 12).
+        """
+        label = f"{module_name} {action}".strip()
+        if decision.outcome == GovernanceOutcome.ERROR:
+            return (
+                f"Command '{label}' is blocked: capability governance could not "
+                f"authorize it ({decision.reason})."
+            )
+        return f"Command '{label}' was denied by capability governance ({decision.reason})."
 
     @property
     def module_names(self) -> list[str]:

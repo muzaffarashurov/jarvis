@@ -60,6 +60,16 @@ from src.core.personal_data.sources.solar_source import (
     append_solar_reading,
     import_solar_csv,
 )
+from src.services.personal_data_report_service import (
+    VALID_BUCKETS,
+    VALID_EXPORT_MODES,
+    PersonalDataReportError,
+    aggregate,
+    render_ascii_chart,
+    render_report_text,
+    write_raw_csv,
+    write_report_csv,
+)
 from src.services.personal_data_service import PersonalDataService, PersonalDataStatus
 
 HELP_TEXT: str = (
@@ -69,8 +79,18 @@ HELP_TEXT: str = (
     "personal_data query <category> [start] [end]\n"
     "personal_data record-reading <category> <value> <unit> [timestamp]\n"
     "personal_data import-csv <category> <path>\n"
+    "personal_data report <category> [start] [end] [bucket]\n"
+    "personal_data export <category> <path> [start] [end] [mode]\n"
+    "personal_data chart <category> [start] [end] [bucket]\n"
     "personal_data help"
 )
+
+# EP-095's default bucket size, applied whenever `report`/`chart` omit the
+# optional trailing `[bucket]` argument, and whenever `export`'s `report`
+# mode is used (that action's own CLI contract, EP095_DESIGN.md §7, takes
+# no separate bucket argument, so its report-mode CSV always uses this
+# same default).
+_DEFAULT_BUCKET = "day"
 
 # category -> (source_id, append_reading fn, import_csv fn), so record-reading/
 # import-csv stay generic across category rather than hard-coding per-domain verbs
@@ -129,6 +149,9 @@ class PersonalDataModule:
             "query": self._query,
             "record-reading": self._record_reading,
             "import-csv": self._import_csv,
+            "report": self._report,
+            "export": self._export,
+            "chart": self._chart,
             "help": self._help,
         }
 
@@ -199,6 +222,109 @@ class PersonalDataModule:
         for point in points:
             lines.append(f"{point.timestamp.isoformat()} : {point.value} {point.unit}")
         return CommandResult(success=True, message="\n\n".join(lines))
+
+    def _report(self, arguments: list[str]) -> CommandResult:
+        """Show aggregated totals/averages/min/max for a category, optionally bucketed.
+
+        EP-095 (EP095_DESIGN.md §7). Reuses `_parse_optional_datetime`
+        and `_service.query()` exactly as `_query` does; all
+        aggregation/formatting logic lives in
+        `PersonalDataReportService`.
+        """
+        if not arguments:
+            return CommandResult(
+                success=False,
+                message="Usage: personal_data report <category> [start] [end] [bucket]",
+            )
+        category = arguments[0]
+        start = self._parse_optional_datetime(arguments[1]) if len(arguments) > 1 else None
+        end = self._parse_optional_datetime(arguments[2]) if len(arguments) > 2 else None
+        if start is False or end is False:
+            return CommandResult(
+                success=False, message="start/end must be ISO-8601 dates or datetimes."
+            )
+        bucket = arguments[3].lower() if len(arguments) > 3 else _DEFAULT_BUCKET
+        if bucket not in VALID_BUCKETS:
+            return CommandResult(
+                success=False, message=f"bucket must be one of: {', '.join(VALID_BUCKETS)}."
+            )
+        points = self._service.query(category, start or None, end or None)
+        if not points:
+            return CommandResult(
+                success=True, message=f"personal_data report: {category}\n\n(empty)"
+            )
+        overall, buckets = aggregate(points, bucket)
+        text = render_report_text(category, start or None, end or None, overall, buckets)
+        return CommandResult(success=True, message=text)
+
+    def _export(self, arguments: list[str]) -> CommandResult:
+        """Export a category's points (raw) or bucketed report to CSV.
+
+        EP-095 (EP095_DESIGN.md §7/§13). CSV file I/O and schema
+        formatting live in `PersonalDataReportService`; this handler
+        only parses arguments and translates a `PersonalDataReportError`
+        into a failing `CommandResult`, following `_import_csv`'s
+        existing catch-and-translate pattern.
+        """
+        if len(arguments) < 2:
+            return CommandResult(
+                success=False,
+                message="Usage: personal_data export <category> <path> [start] [end] [mode]",
+            )
+        category, path = arguments[0], arguments[1]
+        start = self._parse_optional_datetime(arguments[2]) if len(arguments) > 2 else None
+        end = self._parse_optional_datetime(arguments[3]) if len(arguments) > 3 else None
+        if start is False or end is False:
+            return CommandResult(
+                success=False, message="start/end must be ISO-8601 dates or datetimes."
+            )
+        mode = arguments[4].lower() if len(arguments) > 4 else "raw"
+        if mode not in VALID_EXPORT_MODES:
+            return CommandResult(
+                success=False, message=f"mode must be one of: {', '.join(VALID_EXPORT_MODES)}."
+            )
+        points = self._service.query(category, start or None, end or None)
+        try:
+            if mode == "raw":
+                row_count = write_raw_csv(points, path)
+            else:
+                _, buckets = aggregate(points, _DEFAULT_BUCKET) if points else (None, [])
+                row_count = write_report_csv(category, buckets, path)
+        except PersonalDataReportError as exc:
+            return CommandResult(success=False, message=str(exc))
+        return CommandResult(success=True, message=f"Exported {row_count} row(s) to '{path}'.")
+
+    def _chart(self, arguments: list[str]) -> CommandResult:
+        """Render a console ASCII bar chart of a category's bucketed values.
+
+        EP-095 (EP095_DESIGN.md §7/§20). No plotting dependency, no
+        image file, no GUI -- pure text, dependency-free.
+        """
+        if not arguments:
+            return CommandResult(
+                success=False,
+                message="Usage: personal_data chart <category> [start] [end] [bucket]",
+            )
+        category = arguments[0]
+        start = self._parse_optional_datetime(arguments[1]) if len(arguments) > 1 else None
+        end = self._parse_optional_datetime(arguments[2]) if len(arguments) > 2 else None
+        if start is False or end is False:
+            return CommandResult(
+                success=False, message="start/end must be ISO-8601 dates or datetimes."
+            )
+        bucket = arguments[3].lower() if len(arguments) > 3 else _DEFAULT_BUCKET
+        if bucket not in VALID_BUCKETS:
+            return CommandResult(
+                success=False, message=f"bucket must be one of: {', '.join(VALID_BUCKETS)}."
+            )
+        points = self._service.query(category, start or None, end or None)
+        if not points:
+            return CommandResult(
+                success=True, message=f"personal_data chart: {category}\n\n(empty)"
+            )
+        _, buckets = aggregate(points, bucket)
+        chart_text = render_ascii_chart(buckets)
+        return CommandResult(success=True, message=f"personal_data chart: {category}\n\n{chart_text}")
 
     def _record_reading(self, arguments: list[str]) -> CommandResult:
         """Record one manually-entered reading for a category."""

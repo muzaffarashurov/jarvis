@@ -88,6 +88,7 @@ import tests.EP087.test_content_production_pipeline
 import tests.EP092.test_personal_data_collection_framework
 import tests.EP093.test_electricity_gas_monitoring
 import tests.EP094.test_solar_generation_analytics
+import tests.EP095.test_energy_visualization_reporting
 import tests.testing.test_registry_multi_suite
 
 class TestModule(CommandModule):
